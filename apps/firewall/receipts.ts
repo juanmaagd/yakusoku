@@ -7,7 +7,7 @@
 // its terminal state, rather than minting a second receiptId.
 
 import type { DecisionReceipt, ReceiptState, ReceiptTimelineEntry, Verdict } from "@yakusoku/shared";
-import { cacheSignOutcome, saveReceipt } from "./store";
+import { cacheSignOutcome, saveReceipt, type PendingApproval } from "./store";
 
 /** Fields describing "what this payment is for", known as soon as the
  * request and (when resolvable) the intent are read — attached to every
@@ -22,7 +22,8 @@ export interface ReceiptContext {
 }
 
 export interface ApprovalInfo {
-  status: "pending" | "approved" | "denied" | "expired" | "error";
+  /** WU13 adds `paused`/`revoked` — see `PendingApprovalStatus` (store.ts). */
+  status: PendingApproval["status"];
   verificationUri?: string;
   userCode?: string;
   expiresAt?: string;

@@ -141,6 +141,41 @@ async function signRequest(body: Record<string, unknown>): Promise<{ status: num
   return { status: res.status, json };
 }
 
+// WU13 — the same fixed header + loopback address the dashboard uses
+// (index.ts's `requireLocalAdmin`); this script talks to its own isolated
+// firewall over localhost, so the loopback check is satisfied for free.
+const ADMIN_HEADERS = { "x-yakusoku-admin": "1" };
+
+interface ControlState {
+  paused: boolean;
+  pausedAt?: string;
+  reason?: string;
+}
+
+async function getControl(): Promise<ControlState> {
+  const res = await fetch(`${FIREWALL_URL}/control`, { headers: ADMIN_HEADERS });
+  return (await res.json()) as ControlState;
+}
+
+async function pauseSigning(reason: string): Promise<ControlState> {
+  const res = await fetch(`${FIREWALL_URL}/control/pause`, {
+    method: "POST",
+    headers: { ...ADMIN_HEADERS, "content-type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+  return (await res.json()) as ControlState;
+}
+
+async function resumeSigning(): Promise<ControlState> {
+  const res = await fetch(`${FIREWALL_URL}/control/resume`, { method: "POST", headers: ADMIN_HEADERS });
+  return (await res.json()) as ControlState;
+}
+
+async function revokeIntentRequest(intentId: string): Promise<{ status: number }> {
+  const res = await fetch(`${FIREWALL_URL}/intents/${intentId}/revoke`, { method: "POST", headers: ADMIN_HEADERS });
+  return { status: res.status };
+}
+
 function tamperedRequirement(decoded: PaymentRequired, patch: Record<string, unknown>): PaymentRequired {
   const clone = structuredClone(decoded) as PaymentRequired & { accepts: Record<string, unknown>[] };
   const first = clone.accepts[0];
@@ -533,6 +568,77 @@ async function runS13(): Promise<void> {
   }
 }
 
+/** S14 — WU13 kill switch: pause -> /sign refuses `paused`, budget
+ * untouched; resume -> a fresh request (same payment, since the paused
+ * refusal is never cached — pipeline.ts) is evaluated normally again.
+ * Always resumes in `finally` so a failure here never leaves the shared
+ * isolated firewall paused for scenarios that run after it. */
+async function runS14(): Promise<void> {
+  const id = "S14";
+  const description = "kill switch: pause blocks /sign, resume restores normal evaluation";
+  const expected = "paused: refuse `paused`, budget untouched; resumed: evaluated normally";
+  try {
+    const intent = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S14", 1, ["gift_card:amazon"]);
+    if (intent.status !== 201) throw new Error(`POST /intents failed: ${intent.status}`);
+    const budgetBefore = await getRemainingBudget(intent.id);
+
+    const paused = await pauseSigning("S14 scenario");
+    if (!paused.paused) throw new Error(`POST /control/pause did not report paused: ${JSON.stringify(paused)}`);
+
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S14", "n/a", []);
+    const { json: whilePaused } = await signRequest({ intentId: intent.id, paymentRequiredHeader: header, resourceUrl, context });
+    const budgetDuringPause = await getRemainingBudget(intent.id);
+    const pausedOk =
+      whilePaused.verdict === "refuse" && /paused/i.test(whilePaused.reason) && budgetDuringPause === budgetBefore;
+
+    const resumed = await resumeSigning();
+    if (resumed.paused) throw new Error(`POST /control/resume did not clear paused: ${JSON.stringify(resumed)}`);
+
+    const { json: afterResume } = await signRequest({ intentId: intent.id, paymentRequiredHeader: header, resourceUrl, context });
+    const expectedAfterResume = HAS_INTERCEPTA_KEY ? "pay" : "ask_human";
+    const resumedOk = afterResume.verdict === expectedAfterResume;
+
+    const pass = pausedOk && resumedOk;
+    record(
+      id,
+      description,
+      expected,
+      `paused=${whilePaused.verdict}(${whilePaused.reason}) resumed=${afterResume.verdict}`,
+      pass,
+      pausedOk ? (resumedOk ? undefined : "resume did not re-evaluate normally") : "pause did not refuse `paused` or released budget",
+    );
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  } finally {
+    // Never leave the shared isolated firewall paused for the scenarios
+    // that run after this one, even if an assertion above threw.
+    await resumeSigning().catch(() => {});
+  }
+}
+
+/** S15 — WU13 revoke: a revoked intent's /sign refuses with reason "intent
+ * revoked", persisted (checkPolicy, pipeline.ts). */
+async function runS15(): Promise<void> {
+  const id = "S15";
+  const description = "revoked intent: /sign refuses";
+  const expected = "refuse (intent revoked)";
+  try {
+    const intent = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S15", 1, ["gift_card:amazon"]);
+    if (intent.status !== 201) throw new Error(`POST /intents failed: ${intent.status}`);
+    const revoke = await revokeIntentRequest(intent.id);
+    if (revoke.status !== 200) throw new Error(`POST /intents/:id/revoke failed: ${revoke.status}`);
+
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S15", "n/a", []);
+    const { json } = await signRequest({ intentId: intent.id, paymentRequiredHeader: header, resourceUrl, context });
+    const pass = json.verdict === "refuse" && /revoked/i.test(json.reason);
+    record(id, description, expected, json.verdict, pass, json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
 // --- Process orchestration ---------------------------------------------------
 
 async function waitForHttp(url: string, timeoutMs = 20_000): Promise<void> {
@@ -612,6 +718,8 @@ async function main(): Promise<void> {
     await runS11();
     await runS12();
     await runS13();
+    await runS14();
+    await runS15();
 
     printTable();
     exitCode = results.every((r) => r.pass) ? 0 : 1;

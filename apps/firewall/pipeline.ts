@@ -36,6 +36,14 @@
 // when Jev/Intercepta ran, their structured detail in `receipt.jev`/
 // `receipt.intercepta` — on every evaluation, `pay` included, via
 // `StageVerdict.detail` rather than string parsing (see jev.ts, intercepta.ts).
+//
+// WU13 additions: a persisted kill switch (store.ts's `control` row) is the
+// very first thing `runSignPipelineInner` checks — before the idempotency
+// cache and before any stage runs — so a paused firewall never reserves
+// budget and never returns `pay`. A revoked intent (`POST
+// /intents/:id/revoke`) refuses through the existing `policy` check below
+// instead of a new stage. Either way, a World ID approval already in flight
+// is re-checked right before it signs (approvals.ts).
 
 import { createHash } from "node:crypto";
 import type { PaymentRequired } from "@x402/core/types";
@@ -56,6 +64,7 @@ import { provenanceStage } from "./provenance";
 import { finalize, type PipelineOutcome, type ReceiptContext } from "./receipts";
 import {
   getCachedSignOutcome,
+  getControlState,
   getIntent,
   getPendingApprovalByPaymentIdentifier,
   recordSpend,
@@ -135,6 +144,10 @@ function checkPolicy(
   requirement: PaymentRequirement,
 ): { ok: true } | { ok: false; reason: string } {
   if (!intent) return { ok: false, reason: "unknown intentId" };
+  // WU13: a revoked intent is a permanent business fact (unlike the kill
+  // switch, there's no "unrevoke") — check it here so the refusal is cached
+  // like any other policy rejection.
+  if (intent.revoked) return { ok: false, reason: "intent revoked" };
   const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
   if (intent.message.expiry <= nowSeconds) return { ok: false, reason: "intent expired" };
   if (requirement.network !== X402_NETWORK) {
@@ -165,6 +178,26 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
     amount: accepts0.amount,
     payTo: accepts0.payTo,
   };
+
+  // WU13 kill switch: checked before the idempotency cache and before any
+  // stage runs, so a paused firewall never reserves budget and never
+  // returns `pay` — not even a cached replay of an already-signed payment.
+  // Never cached (`cache: false`): the exact same request is re-evaluated
+  // fresh once the operator resumes, instead of being frozen as refused
+  // forever under this paymentIdentifier.
+  const controlStart = Date.now();
+  const control = getControlState();
+  if (control.paused) {
+    timeline.push({ stage: "control", outcome: "refuse", reason: "paused", ms: Date.now() - controlStart });
+    return finalize({
+      ...receiptContext,
+      timeline,
+      state: transition("initial", "paused"),
+      verdict: "refuse",
+      reason: control.reason ? `paused: ${control.reason}` : "paused",
+      cache: false,
+    });
+  }
 
   const idempotencyStart = Date.now();
   const cached = getCachedSignOutcome(paymentIdentifier);

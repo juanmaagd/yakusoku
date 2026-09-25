@@ -3,9 +3,10 @@
 // payments on the agent's behalf, and streams live decision events to the
 // dashboard over SSE (root CLAUDE.md, plan-tecnico.md §2, WU9).
 
-import { Hono } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
+import { getConnInfo } from "hono/bun";
 import { z } from "zod";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 import type { PaymentRequired } from "@x402/core/types";
@@ -13,13 +14,16 @@ import type { Hex } from "viem";
 import { signedTaskIntentSchema, transition, X402_NETWORK, type DecisionReceipt } from "@yakusoku/shared";
 import {
   createIntent,
+  getControlState,
   getIntent,
   getPendingApprovalByReceiptId,
   getReceipt,
   listIntents,
   listReceipts,
   remainingBudget,
+  revokeIntent,
   saveReceipt,
+  setControlState,
   type StoredIntent,
 } from "./store";
 import { verifyTaskIntentSignature } from "./signer";
@@ -71,7 +75,27 @@ function serializeIntent(intent: StoredIntent) {
     signer: intent.signer,
     createdAt: intent.createdAt,
     remainingBudget: remainingBudget(intent).toString(),
+    revoked: intent.revoked,
+    revokedAt: intent.revokedAt,
   };
+}
+
+// --- WU13 kill switch / revoke: minimal local-only admin guard -------------
+//
+// These control endpoints have no real authentication tonight (local demo
+// only, per the WU13 scope). This is not a security boundary — it only
+// keeps the local demo box from being poked by another process on the same
+// machine/LAN: the request must come from a loopback TCP peer (checked via
+// Hono's Bun `getConnInfo`, not a spoofable header) AND carry a fixed
+// `x-yakusoku-admin: 1` header that only the dashboard's own fetch calls
+// send. Neither check is cryptographic.
+function requireLocalAdmin(c: Context, next: Next) {
+  const address = getConnInfo(c).remote.address ?? "";
+  const isLoopback = address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1" || address.startsWith("127.");
+  if (!isLoopback || c.req.header("x-yakusoku-admin") !== "1") {
+    return c.json({ error: "forbidden" }, 403);
+  }
+  return next();
 }
 
 // --- POST /intents -----------------------------------------------------------
@@ -113,6 +137,48 @@ app.get("/intents/:id", (c) => {
   const intent = getIntent(c.req.param("id"));
   if (!intent) return c.json({ error: "intent_not_found" }, 404);
   return c.json(serializeIntent(intent));
+});
+
+// --- POST /intents/:id/revoke (WU13) ----------------------------------------
+// Permanent: no "unrevoke". Future `/sign` for this intent refuses through
+// the existing `policy` check (pipeline.ts's `checkPolicy`) with reason
+// "intent revoked"; a World ID approval already in flight for it is
+// re-checked right before signing (approvals.ts) instead of slipping
+// through late.
+
+app.post("/intents/:id/revoke", requireLocalAdmin, (c) => {
+  // The untyped `Context` in `requireLocalAdmin`'s signature widens Hono's
+  // route-param inference here, so `param("id")` types as possibly
+  // undefined even though the route can't match without it.
+  const id = c.req.param("id");
+  const intent = id ? revokeIntent(id) : undefined;
+  if (!intent) return c.json({ error: "intent_not_found" }, 404);
+  const serialized = serializeIntent(intent);
+  publish("intent.revoked", serialized);
+  return c.json(serialized);
+});
+
+// --- Kill switch (WU13) ------------------------------------------------------
+
+app.get("/control", requireLocalAdmin, (c) => c.json(getControlState()));
+
+const pauseRequestSchema = z.object({ reason: z.string().min(1).optional() }).optional();
+
+app.post("/control/pause", requireLocalAdmin, async (c) => {
+  const body = await c.req.json().catch(() => undefined);
+  const parsed = pauseRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_pause_request", issues: parsed.error.issues }, 400);
+  }
+  const control = setControlState(true, parsed.data?.reason);
+  publish("control.changed", control);
+  return c.json(control);
+});
+
+app.post("/control/resume", requireLocalAdmin, (c) => {
+  const control = setControlState(false);
+  publish("control.changed", control);
+  return c.json(control);
 });
 
 // --- POST /sign --------------------------------------------------------------

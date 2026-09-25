@@ -9,7 +9,11 @@
 <body>
   <header>
     <h1>Yakusoku <span class="tagline">— pre-signature firewall for AI agent payments</span></h1>
-    <div id="conn-status" class="status status-connecting">connecting…</div>
+    <div class="header-controls">
+      <span id="pause-badge" class="status status-paused" hidden>PAUSED</span>
+      <button id="pause-toggle" class="pause-toggle" disabled>…</button>
+      <div id="conn-status" class="status status-connecting">connecting…</div>
+    </div>
   </header>
 
   <section id="intents-section">

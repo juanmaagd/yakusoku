@@ -74,6 +74,45 @@ header h1 {
   background: var(--red-bg);
 }
 
+/* WU13 — kill switch controls */
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-paused {
+  color: #ffffff;
+  background: var(--red);
+}
+
+.pause-toggle {
+  font: inherit;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-bg);
+  cursor: pointer;
+}
+
+.pause-toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.pause-toggle.is-paused {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.pause-toggle.is-running {
+  color: var(--green);
+  border-color: var(--green);
+}
+
 #intents-section {
   padding: 12px 20px;
   background: var(--panel-bg);
@@ -102,9 +141,16 @@ header h1 {
   min-width: 220px;
 }
 
+.intent-card.revoked {
+  opacity: 0.6;
+}
+
 .intent-task {
   font-weight: 600;
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .intent-meta {
@@ -113,6 +159,29 @@ header h1 {
   flex-wrap: wrap;
   color: var(--muted);
   font-size: 12px;
+  align-items: center;
+}
+
+.revoke-btn {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--red);
+  color: var(--red);
+  background: var(--red-bg);
+  cursor: pointer;
+}
+
+.revoked-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--grey);
+  background: var(--grey-bg);
+  padding: 2px 8px;
+  border-radius: 10px;
 }
 
 main {

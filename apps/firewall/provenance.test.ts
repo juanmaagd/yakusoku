@@ -45,6 +45,7 @@ function makeIntent(task: string): StoredIntent {
     signer: "0x1111111111111111111111111111111111111111",
     spent: 0n,
     createdAt: new Date().toISOString(),
+    revoked: false,
   };
 }
 

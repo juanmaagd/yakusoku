@@ -19,6 +19,13 @@ export const RECEIPT_STATES = [
   "awaiting_world_id",
   "world_id_denied",
   "world_id_expired",
+  /** WU13 kill switch: `/sign` refused because the firewall is paused
+   * (`POST /control/pause`). Only reachable from `initial` — this is the
+   * very first check `/sign` makes, before the idempotency cache and before
+   * any pipeline stage runs. An approval already in flight when a pause
+   * lands is refused at resolution time under `world_id_denied` instead
+   * (approvals.ts), since that transition already exists. */
+  "paused",
   /** The pre-signature gate cleared but `createPaymentPayload`/signing itself
    * failed (WU9 fix — previously misfiled under `world_id_denied`, since the
    * enum had no dedicated sign-failure state). */
@@ -52,6 +59,7 @@ const RECEIPT_TRANSITIONS: Record<TransitionSource, readonly ReceiptState[]> = {
     "jev_refused",
     "jev_ask_human",
     "awaiting_world_id",
+    "paused",
     "error",
   ],
   // WU11: `error` covers an invalid/unverifiable World ID token or any
@@ -72,6 +80,7 @@ const RECEIPT_TRANSITIONS: Record<TransitionSource, readonly ReceiptState[]> = {
   jev_ask_human: [],
   world_id_denied: [],
   world_id_expired: [],
+  paused: [],
   sign_failed: [],
   settled: [],
   settlement_failed: [],

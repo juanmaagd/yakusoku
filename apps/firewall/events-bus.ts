@@ -13,7 +13,10 @@ export type FirewallEventName =
   // WU11: the World ID human-approval gate (approvals.ts) starting a device
   // flow, and later resolving it (approved/denied/expired/error).
   | "approval.requested"
-  | "approval.resolved";
+  | "approval.resolved"
+  // WU13: the kill switch changing state, and an intent being revoked.
+  | "control.changed"
+  | "intent.revoked";
 
 export interface FirewallEvent {
   id: string;

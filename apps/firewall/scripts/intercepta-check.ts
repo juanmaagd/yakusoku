@@ -45,6 +45,7 @@ function makeIntent(): StoredIntent {
     signer: "0x2222222222222222222222222222222222222222",
     spent: 0n,
     createdAt: new Date().toISOString(),
+    revoked: false,
   };
 }
 

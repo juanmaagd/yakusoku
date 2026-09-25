@@ -29,6 +29,7 @@ import { publish } from "./events-bus";
 import { finalize, type ApprovalInfo, type PipelineOutcome, type ReceiptContext } from "./receipts";
 import { signPayment } from "./signer";
 import {
+  getControlState,
   getIntent,
   getPendingApprovalByReceiptId,
   getReceipt,
@@ -307,6 +308,23 @@ async function settleApproved(approval: PendingApproval): Promise<void> {
   const intent = getIntent(approval.intentId);
   if (!intent) {
     await settleRefused(approval, "error", "intent no longer available when the approval resolved", "error");
+    return;
+  }
+
+  // WU13: re-check the kill switch and intent-revocation status right here,
+  // right before signing — a human can approve minutes after a pause was
+  // hit or the intent got revoked, and neither must slip a payment through
+  // this late. `settleRefused` releases the budget reservation exactly like
+  // every other non-approved outcome; reused `world_id_denied` receipt
+  // state since it's already a valid transition from `awaiting_world_id`.
+  const control = getControlState();
+  if (control.paused) {
+    const reason = control.reason ? `paused: ${control.reason}` : "paused";
+    await settleRefused(approval, "paused", reason, "world_id_denied");
+    return;
+  }
+  if (intent.revoked) {
+    await settleRefused(approval, "revoked", "intent revoked", "world_id_denied");
     return;
   }
 

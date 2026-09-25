@@ -6,15 +6,24 @@
 
 const USDC_DECIMALS = 6;
 
+// WU13 — the dashboard is the only caller expected to send this header;
+// the firewall also requires the request to come from a loopback peer
+// (index.ts's `requireLocalAdmin`). Not real auth, just a minimal local-demo
+// guard on the pause/resume/revoke endpoints.
+const ADMIN_HEADERS = { "x-yakusoku-admin": "1" };
+
 const state = {
   receipts: new Map(), // receiptId -> DecisionReceipt
   intents: new Map(), // intentId -> serialized intent
   approvals: new Map(), // receiptId -> GET /approvals/:id response
   selectedReceiptId: null,
+  control: { paused: false }, // GET /control shape
 };
 
 const els = {
   connStatus: document.getElementById("conn-status"),
+  pauseBadge: document.getElementById("pause-badge"),
+  pauseToggle: document.getElementById("pause-toggle"),
   intentsList: document.getElementById("intents-list"),
   rows: document.getElementById("rows"),
   detailEmpty: document.getElementById("detail-empty"),
@@ -98,25 +107,87 @@ function reasonText(r) {
 
 // --- rendering: header intents ------------------------------------------------
 
+function intentCardHtml(i) {
+  const revokeControl = i.revoked
+    ? `<span class="revoked-badge">REVOKED</span>`
+    : `<button class="revoke-btn" data-revoke-intent-id="${escapeHtml(i.id)}">Revoke</button>`;
+  return `
+      <div class="intent-card${i.revoked ? " revoked" : ""}">
+        <div class="intent-task">${escapeHtml(i.message.task)} ${revokeControl}</div>
+        <div class="intent-meta">
+          <span>budget ${formatUsdc(i.message.budget)}</span>
+          <span>remaining ${formatUsdc(i.remainingBudget)}</span>
+          <span>signer ${shortAddr(i.signer)}</span>
+        </div>
+      </div>`;
+}
+
 function renderIntents() {
   const intents = [...state.intents.values()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   if (intents.length === 0) {
     els.intentsList.innerHTML = `<p class="muted">No signed intents yet.</p>`;
     return;
   }
-  els.intentsList.innerHTML = intents
-    .map(
-      (i) => `
-      <div class="intent-card">
-        <div class="intent-task">${escapeHtml(i.message.task)}</div>
-        <div class="intent-meta">
-          <span>budget ${formatUsdc(i.message.budget)}</span>
-          <span>remaining ${formatUsdc(i.remainingBudget)}</span>
-          <span>signer ${shortAddr(i.signer)}</span>
-        </div>
-      </div>`,
-    )
-    .join("");
+  els.intentsList.innerHTML = intents.map(intentCardHtml).join("");
+  els.intentsList.querySelectorAll("[data-revoke-intent-id]").forEach((btn) => {
+    btn.addEventListener("click", () => revokeIntent(btn.dataset.revokeIntentId));
+  });
+}
+
+// --- rendering + actions: kill switch (WU13) ---------------------------------
+
+function renderControl() {
+  const paused = Boolean(state.control.paused);
+  els.pauseBadge.hidden = !paused;
+  els.pauseToggle.disabled = false;
+  els.pauseToggle.textContent = paused ? "Resume signing" : "Pause signing";
+  els.pauseToggle.classList.toggle("is-paused", paused);
+  els.pauseToggle.classList.toggle("is-running", !paused);
+  els.pauseToggle.title = paused && state.control.reason ? `Paused: ${state.control.reason}` : "";
+}
+
+async function fetchControl() {
+  try {
+    const res = await fetch("/control", { headers: ADMIN_HEADERS });
+    if (!res.ok) return;
+    state.control = await res.json();
+    renderControl();
+  } catch (err) {
+    console.error("failed to load control state", err);
+  }
+}
+
+async function togglePause() {
+  els.pauseToggle.disabled = true;
+  const paused = Boolean(state.control.paused);
+  try {
+    const res = await fetch(paused ? "/control/resume" : "/control/pause", {
+      method: "POST",
+      headers: { ...ADMIN_HEADERS, "content-type": "application/json" },
+      body: paused ? undefined : JSON.stringify({ reason: "paused from the dashboard" }),
+    });
+    if (res.ok) state.control = await res.json();
+  } catch (err) {
+    console.error("failed to toggle pause", err);
+  } finally {
+    renderControl();
+  }
+}
+
+async function revokeIntent(intentId) {
+  if (!intentId) return;
+  try {
+    const res = await fetch(`/intents/${encodeURIComponent(intentId)}/revoke`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+    });
+    if (!res.ok) return;
+    const intent = await res.json();
+    state.intents.set(intent.id, intent);
+    renderIntents();
+  } catch (err) {
+    console.error("failed to revoke intent", err);
+  }
 }
 
 // --- rendering: two-lane timeline --------------------------------------------
@@ -344,6 +415,7 @@ async function loadInitial() {
   renderIntents();
   renderRows();
   renderDetail();
+  await fetchControl();
 }
 
 // --- live updates (SSE) ---------------------------------------------------------
@@ -413,9 +485,22 @@ function connectSSE() {
     const data = JSON.parse(evt.data);
     if (state.selectedReceiptId === data.receiptId) renderDetail();
   });
+
+  eventSource.addEventListener("control.changed", (evt) => {
+    state.control = JSON.parse(evt.data);
+    renderControl();
+  });
+
+  eventSource.addEventListener("intent.revoked", (evt) => {
+    const intent = JSON.parse(evt.data);
+    state.intents.set(intent.id, intent);
+    renderIntents();
+  });
 }
 
 // --- bootstrap -----------------------------------------------------------------
+
+els.pauseToggle.addEventListener("click", togglePause);
 
 loadInitial()
   .catch((err) => console.error("failed to load initial dashboard data", err))

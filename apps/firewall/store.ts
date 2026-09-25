@@ -25,6 +25,22 @@ export interface StoredIntent {
   /** Atomic USDC units already committed by successful `pay` verdicts. */
   spent: bigint;
   createdAt: string;
+  /** WU13 — set by `POST /intents/:id/revoke`. `checkPolicy` (pipeline.ts)
+   * refuses any future `/sign` for a revoked intent, and the World ID
+   * approval resolver (approvals.ts) re-checks this right before signing so
+   * an approval already in flight can't slip a payment through afterward. */
+  revoked: boolean;
+  revokedAt?: string;
+}
+
+/** WU13 kill switch — a single persisted row (store.ts's `control` table).
+ * `GET /control` reflects it verbatim; `/sign` refuses immediately while
+ * `paused` is true (pipeline.ts), before any stage runs and before any
+ * budget is reserved. */
+export interface ControlState {
+  paused: boolean;
+  pausedAt?: string;
+  reason?: string;
 }
 
 export interface CachedSignOutcome {
@@ -57,7 +73,7 @@ export interface PendingApproval {
   requestedAt: string;
   /** epoch ms the gate started at — base for the `world_id` timeline entry's `ms`. */
   gateStartedAtMs: number;
-  status: "pending" | "approved" | "denied" | "expired" | "error";
+  status: PendingApprovalStatus;
   reason?: string;
   paymentSignature?: string;
   /** `JSON.stringify(PaymentRequired)` — resolving the gate re-signs against this exact requirement. */
@@ -65,6 +81,11 @@ export interface PendingApproval {
   createdAt: string;
   updatedAt: string;
 }
+
+/** WU13 adds `paused`/`revoked` — resolved at signing time (approvals.ts's
+ * `resolveApprovalInBackground`) when the kill switch or an intent revoke
+ * lands while a World ID approval was still in flight. */
+export type PendingApprovalStatus = "pending" | "approved" | "denied" | "expired" | "error" | "paused" | "revoked";
 
 // --- Database setup ----------------------------------------------------------
 
@@ -81,7 +102,9 @@ db.exec(`
     signature TEXT NOT NULL,
     signer TEXT NOT NULL,
     spent TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    revoked INTEGER NOT NULL DEFAULT 0,
+    revoked_at TEXT
   );
   CREATE TABLE IF NOT EXISTS receipts (
     receipt_id TEXT PRIMARY KEY,
@@ -101,7 +124,33 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS pending_approvals_payment_identifier ON pending_approvals (payment_identifier);
   CREATE INDEX IF NOT EXISTS pending_approvals_status ON pending_approvals (status);
+  CREATE TABLE IF NOT EXISTS control (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    paused INTEGER NOT NULL DEFAULT 0,
+    paused_at TEXT,
+    reason TEXT
+  );
 `);
+
+// WU13 migration: `intents` may already exist from before the `revoked`
+// columns did (the live dev sqlite file under data/) — `CREATE TABLE IF NOT
+// EXISTS` above is a no-op for those, so add the columns by hand when
+// they're missing. Safe to run on every boot.
+{
+  const existingColumns = new Set(
+    (db.prepare(`PRAGMA table_info(intents)`).all() as { name: string }[]).map((row) => row.name),
+  );
+  if (!existingColumns.has("revoked")) {
+    db.exec(`ALTER TABLE intents ADD COLUMN revoked INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!existingColumns.has("revoked_at")) {
+    db.exec(`ALTER TABLE intents ADD COLUMN revoked_at TEXT`);
+  }
+}
+
+// Exactly one control row, ever — `INSERT OR IGNORE` makes this idempotent
+// across restarts instead of erroring on a re-run.
+db.exec(`INSERT OR IGNORE INTO control (id, paused, paused_at, reason) VALUES (1, 0, NULL, NULL)`);
 
 // --- Statements ----------------------------------------------------------
 
@@ -111,6 +160,7 @@ const insertIntentStmt = db.prepare(
 const getIntentStmt = db.prepare(`SELECT * FROM intents WHERE id = $id`);
 const listIntentsStmt = db.prepare(`SELECT * FROM intents ORDER BY created_at DESC`);
 const updateSpentStmt = db.prepare(`UPDATE intents SET spent = $spent WHERE id = $id`);
+const revokeIntentStmt = db.prepare(`UPDATE intents SET revoked = 1, revoked_at = $revokedAt WHERE id = $id`);
 
 const upsertReceiptStmt = db.prepare(
   `INSERT INTO receipts (receipt_id, created_at, data_json) VALUES ($id, $createdAt, $data)
@@ -139,6 +189,11 @@ const getPendingApprovalByPaymentIdentifierStmt = db.prepare(
 );
 const listPendingApprovalsByStatusStmt = db.prepare(`SELECT data_json FROM pending_approvals WHERE status = $status`);
 
+const getControlStmt = db.prepare(`SELECT paused, paused_at, reason FROM control WHERE id = 1`);
+const setControlStmt = db.prepare(
+  `UPDATE control SET paused = $paused, paused_at = $pausedAt, reason = $reason WHERE id = 1`,
+);
+
 // --- Row <-> domain mapping ----------------------------------------------
 
 interface IntentRow {
@@ -148,6 +203,8 @@ interface IntentRow {
   signer: string;
   spent: string;
   created_at: string;
+  revoked: number;
+  revoked_at: string | null;
 }
 
 function rowToIntent(row: IntentRow): StoredIntent {
@@ -161,6 +218,8 @@ function rowToIntent(row: IntentRow): StoredIntent {
     signer: row.signer as `0x${string}`,
     spent: BigInt(row.spent),
     createdAt: row.created_at,
+    revoked: Boolean(row.revoked),
+    revokedAt: row.revoked_at ?? undefined,
   };
 }
 
@@ -178,6 +237,7 @@ export function createIntent(
     signer,
     spent: 0n,
     createdAt: new Date().toISOString(),
+    revoked: false,
   };
   insertIntentStmt.run({
     $id: intent.id,
@@ -198,6 +258,18 @@ export function getIntent(id: string): StoredIntent | undefined {
 export function listIntents(): StoredIntent[] {
   const rows = listIntentsStmt.all() as IntentRow[];
   return rows.map(rowToIntent);
+}
+
+/** WU13 — `POST /intents/:id/revoke`. Idempotent: revoking an already-revoked
+ * intent just returns its current (unchanged) `revokedAt`. Returns
+ * `undefined` for an unknown id so the route can 404. */
+export function revokeIntent(id: string): StoredIntent | undefined {
+  const existing = getIntent(id);
+  if (!existing) return undefined;
+  if (!existing.revoked) {
+    revokeIntentStmt.run({ $id: id, $revokedAt: new Date().toISOString() });
+  }
+  return getIntent(id);
 }
 
 /** Never negative — a successful spend can't exceed what policy already allowed. */
@@ -279,4 +351,34 @@ export function getPendingApprovalByPaymentIdentifier(paymentIdentifier: string)
 export function listPendingApprovalsByStatus(status: PendingApproval["status"]): PendingApproval[] {
   const rows = listPendingApprovalsByStatusStmt.all({ $status: status }) as { data_json: string }[];
   return rows.map((row) => JSON.parse(row.data_json) as PendingApproval);
+}
+
+// --- Kill switch (WU13) -----------------------------------------------------
+
+interface ControlRow {
+  paused: number;
+  paused_at: string | null;
+  reason: string | null;
+}
+
+export function getControlState(): ControlState {
+  const row = getControlStmt.get() as ControlRow | null;
+  if (!row) return { paused: false };
+  return {
+    paused: Boolean(row.paused),
+    pausedAt: row.paused_at ?? undefined,
+    reason: row.reason ?? undefined,
+  };
+}
+
+/** Persists the kill switch. Pausing stamps `pausedAt`/`reason`; resuming
+ * clears both, so a later pause never inherits a stale reason from a
+ * previous one. */
+export function setControlState(paused: boolean, reason?: string): ControlState {
+  setControlStmt.run({
+    $paused: paused ? 1 : 0,
+    $pausedAt: paused ? new Date().toISOString() : null,
+    $reason: paused ? (reason ?? null) : null,
+  });
+  return getControlState();
 }
