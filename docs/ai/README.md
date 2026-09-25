@@ -32,6 +32,7 @@ The human set the rules the AI had to follow: the repo started empty at kickoff,
 | WU8 | The key case (#9) came out `ask_human` instead of `refuse` because of rule order. | Direct refusal on intent mismatch now runs first (matches the product spec). |
 | WU8 | With the spike thresholds no legitimate purchase could ever auto-pay. | Human chose to follow the product-spec pay gate; re-validated live: no attack pays. |
 | WU11 | An `ask_human` from one layer skipped the later layers, sending the key case to a human instead of refusing it. | Refuse dominance: every layer runs; any refusal wins. Covered by the e2e suite. |
+| WU14 | The verifier's `refused_with_payment` rule (a refused receipt with a settlement anyway) matched any nearby transfer, which could false-positive on an unrelated payment. | Writer added a 10-minute proximity window between the refusal and the transfer before flagging it `CRITICAL`. |
 
 ## Work unit briefs (summaries)
 
@@ -50,6 +51,10 @@ The human set the rules the AI had to follow: the repo started empty at kickoff,
 | WU10 | Minimal two-lane dashboard ("without Yakusoku" vs "with Yakusoku"). | Browser screenshots; live row without reload. |
 | WU11 | World ID for Agents human-approval gate (device flow, JWKS validation, deny/expire). | Real sandbox device authorization; expiry refuses and releases budget. |
 | HARDEN | Refuse dominance, 13-scenario e2e suite, cheap trap SKU, disclosed attack script. | `bun run scenarios` → 13/13 pass. |
+| WU13 | Dashboard/firewall pause-resume kill switch and per-intent revoke, loopback + admin-header guarded. | `bun run scenarios` → 15/15 pass (adds pause/revoke scenarios); pause without the admin header → 403. |
+| WU14 | Independent post-hoc verifier (`apps/verifier`): reads Base Sepolia directly, cross-checks every outgoing USDC transfer against the receipt history, never trusts the firewall's own database. | `bun run verify` against real history → 0 CRITICAL findings. |
+| WU12 | StepUp EIP-712 attestation binding a World ID approval to its exact payment, signed before the payment itself; served at `GET /receipts/:id/attestation`; verifier cross-checks the attestation signature. | `bun test` (7-case field-tampering table + forged-signature cases); `bun run verify` unaffected; live route checked against the running firewall (404 on records with no attestation yet). |
+| WU15 | README rewrite (architecture, sponsor usage with exact Intercepta call sites, setup/testing, honest limitations, sponsor feedback), demo video script, submission checklist against the rules and every track's verbatim requirements, this AI-usage log update. | Every command in the README verified to exist in `package.json`; every referenced file path verified to exist; `bun run typecheck` exit 0 (6 workspaces). |
 
 ## Honesty notes
 
