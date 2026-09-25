@@ -4,7 +4,8 @@
   "type": "module",
   "private": true,
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/express": "^5"
   },
   "dependencies": {
     "@yakusoku/shared": "workspace:*",
@@ -16,6 +17,8 @@
     "viem": "^2.56.9"
   },
   "scripts": {
+    "dev": "bun --env-file=../../../.env.hackathon --watch index.ts",
+    "start": "bun --env-file=../../../.env.hackathon index.ts",
     "typecheck": "tsc --noEmit"
   }
 }

@@ -7,7 +7,8 @@
   ],
   "scripts": {
     "typecheck": "bun run --filter \"@yakusoku/*\" typecheck",
-    "test": "bun test --pass-with-no-tests"
+    "test": "bun test --pass-with-no-tests",
+    "store": "bun run --filter @yakusoku/store dev"
   },
   "devDependencies": {
     "@types/bun": "latest",
