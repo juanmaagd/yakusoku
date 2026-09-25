@@ -16,6 +16,8 @@
         "@x402/core": "2.27.0",
         "@yakusoku/shared": "workspace:*",
         "ai": "^7.0.114",
+        "viem": "^2.56.9",
+        "zod": "^4.6.5",
       },
       "devDependencies": {
         "@types/bun": "latest",

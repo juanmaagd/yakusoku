@@ -10,9 +10,13 @@
     "@yakusoku/shared": "workspace:*",
     "@ai-sdk/gateway": "^4.0.92",
     "@x402/core": "2.27.0",
-    "ai": "^7.0.114"
+    "ai": "^7.0.114",
+    "viem": "^2.56.9",
+    "zod": "^4.6.5"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start": "bun --env-file=../../../.env.hackathon index.ts",
+    "dev-intent": "bun --env-file=../../../.env.hackathon scripts/dev-intent.ts"
   }
 }
