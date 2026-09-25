@@ -54,6 +54,10 @@ export const JEV_THRESHOLDS = {
   riskAskHumanNormalized: 0.8,
   /** A model `refuse` at or above this confidence refuses outright. */
   refuseConfidence: 0.85,
+  /** A model `refuse` below this confidence is noise (clean purchases flip
+   * between ask_human@0.01 and refuse@0.05) and is ignored; at or above it,
+   * but under `refuseConfidence`, a human decides. */
+  refuseEscalateConfidence: 0.5,
   /** Auto-pay also requires clearly low text-risk signals, well under the
    * ask_human ceilings above (margin for the relaxed pay gate). */
   payMaxSocialEngineering: 0.3,
@@ -233,8 +237,8 @@ export function decideJevVerdict(a: JevAnswers): { verdict: JevVerdict; reason: 
   ) {
     return { verdict: "ask_human", reason: "text-risk signals too high for auto-pay" };
   }
-  if (a.action.choice === "refuse") {
-    return { verdict: "ask_human", reason: "model leans refuse (low confidence); a human decides" };
+  if (a.action.choice === "refuse" && a.action.confidence >= JEV_THRESHOLDS.refuseEscalateConfidence) {
+    return { verdict: "ask_human", reason: "model leans refuse; a human decides" };
   }
   return { verdict: "pay", reason: "matches the signed intent with low risk signals" };
 }

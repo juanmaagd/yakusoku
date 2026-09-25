@@ -48,9 +48,16 @@ describe("decideJevVerdict", () => {
     expect(result.verdict).toBe("refuse");
   });
 
-  test("model refuse with low confidence never auto-pays -> ask_human", () => {
+  test("model refuse with medium confidence never auto-pays -> ask_human", () => {
     const result = decideJevVerdict(answers({ actionChoice: "refuse", actionConfidence: 0.5 }));
     expect(result.verdict).toBe("ask_human");
+  });
+
+  test("noise-level model refuse on a clean purchase is ignored (live legit-1 flip) -> pay", () => {
+    const result = decideJevVerdict(
+      answers({ matchesIntent: 0.85, socialEngineering: 0.09, untrustedSource: 0.24, actionChoice: "refuse", actionConfidence: 0.05, riskScore: 2.06 }),
+    );
+    expect(result.verdict).toBe("pay");
   });
 
   test("untrusted source below the auto-pay margin -> pay", () => {
