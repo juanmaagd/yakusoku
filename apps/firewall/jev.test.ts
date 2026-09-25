@@ -38,18 +38,38 @@ describe("decideJevVerdict", () => {
     expect(result.verdict).toBe("refuse");
   });
 
-  test("social engineering never forces a hard refuse by itself (round-1 architecture change) -> ceiling is ask_human", () => {
-    const result = decideJevVerdict(answers({ socialEngineering: 0.99, actionChoice: "refuse", actionConfidence: 0.99 }));
+  test("social engineering alone never hard-refuses: ceiling is ask_human", () => {
+    const result = decideJevVerdict(answers({ socialEngineering: 0.99, actionChoice: "ask_human", actionConfidence: 0.5 }));
     expect(result.verdict).toBe("ask_human");
   });
 
-  test("payment_source_is_untrusted_content just under 0.75 does not escalate", () => {
-    const result = decideJevVerdict(answers({ untrustedSource: 0.7 }));
+  test("model refuse with high confidence -> refuse", () => {
+    const result = decideJevVerdict(answers({ actionChoice: "refuse", actionConfidence: 0.9 }));
+    expect(result.verdict).toBe("refuse");
+  });
+
+  test("model refuse with low confidence never auto-pays -> ask_human", () => {
+    const result = decideJevVerdict(answers({ actionChoice: "refuse", actionConfidence: 0.5 }));
+    expect(result.verdict).toBe("ask_human");
+  });
+
+  test("untrusted source below the auto-pay margin -> pay", () => {
+    const result = decideJevVerdict(answers({ untrustedSource: 0.4 }));
     expect(result.verdict).toBe("pay");
+  });
+
+  test("untrusted source between the auto-pay margin and the 0.75 ceiling -> ask_human", () => {
+    const result = decideJevVerdict(answers({ untrustedSource: 0.6 }));
+    expect(result.verdict).toBe("ask_human");
   });
 
   test("payment_source_is_untrusted_content >= 0.75 -> ask_human", () => {
     const result = decideJevVerdict(answers({ untrustedSource: 0.76 }));
+    expect(result.verdict).toBe("ask_human");
+  });
+
+  test("social engineering at or above the auto-pay margin -> ask_human", () => {
+    const result = decideJevVerdict(answers({ socialEngineering: JEV_THRESHOLDS.payMaxSocialEngineering }));
     expect(result.verdict).toBe("ask_human");
   });
 
@@ -59,18 +79,15 @@ describe("decideJevVerdict", () => {
   });
 
   test("high normalized risk score -> ask_human even with a clean matches_intent", () => {
-    // risk score 3 of a 4-level (0-3) rubric normalizes to 1.0, well over the 0.66 threshold.
+    // risk score 3 of a 4-level (0-3) rubric normalizes to 1.0, over the 0.8 threshold.
     const result = decideJevVerdict(answers({ riskScore: 3 }));
     expect(result.verdict).toBe("ask_human");
   });
 
-  test("action=pay below the confidence threshold does not auto-pay", () => {
-    const result = decideJevVerdict(answers({ actionChoice: "pay", actionConfidence: JEV_THRESHOLDS.payConfidence - 0.01 }));
-    expect(result.verdict).toBe("ask_human");
-  });
-
-  test("action=refuse with no earlier signal -> refuse", () => {
-    const result = decideJevVerdict(answers({ actionChoice: "refuse", actionConfidence: 0.5 }));
-    expect(result.verdict).toBe("refuse");
+  test("clean gift-card purchase with low action confidence and risk ~0.70 pays (live legit-1 shape)", () => {
+    const result = decideJevVerdict(
+      answers({ matchesIntent: 0.84, socialEngineering: 0.09, untrustedSource: 0.27, actionChoice: "ask_human", actionConfidence: 0.01, riskScore: 2.1 }),
+    );
+    expect(result.verdict).toBe("pay");
   });
 });

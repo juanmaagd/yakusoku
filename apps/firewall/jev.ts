@@ -49,11 +49,15 @@ export const JEV_THRESHOLDS = {
   untrustedContentAskHuman: 0.75,
   matchesIntentRefuse: 0.3,
   matchesIntentAskHuman: 0.8,
-  riskAskHumanNormalized: 0.66,
-  /** Flagged in the spike as the most doubtful threshold (D8/L2 both landed
-   * at 0.63-0.80 on otherwise-clean payments) but left unchanged for lack of
-   * enough data to safely lower it — not touched here either. */
-  payConfidence: 0.85,
+  /** Raised from 0.66: clean gift-card purchases score ~0.70 (gift cards are a
+   * classic scam vector), which sent every legit demo purchase to a human. */
+  riskAskHumanNormalized: 0.8,
+  /** A model `refuse` at or above this confidence refuses outright. */
+  refuseConfidence: 0.85,
+  /** Auto-pay also requires clearly low text-risk signals, well under the
+   * ask_human ceilings above (margin for the relaxed pay gate). */
+  payMaxSocialEngineering: 0.3,
+  payMaxUntrustedContent: 0.5,
 } as const;
 
 // --- Questions ---------------------------------------------------------------
@@ -204,6 +208,9 @@ export function decideJevVerdict(a: JevAnswers): { verdict: JevVerdict; reason: 
   if (a.matches_intent.noul < JEV_THRESHOLDS.matchesIntentRefuse) {
     return { verdict: "refuse", reason: "does not match the signed intent" };
   }
+  if (a.action.choice === "refuse" && a.action.confidence >= JEV_THRESHOLDS.refuseConfidence) {
+    return { verdict: "refuse", reason: "model recommends refuse with high confidence" };
+  }
   if (a.looks_like_social_engineering.noul >= JEV_THRESHOLDS.socialEngineeringAskHuman) {
     return { verdict: "ask_human", reason: "possible social engineering in the surrounding page/API text" };
   }
@@ -217,13 +224,19 @@ export function decideJevVerdict(a: JevAnswers): { verdict: JevVerdict; reason: 
   if (riskNormalized >= JEV_THRESHOLDS.riskAskHumanNormalized) {
     return { verdict: "ask_human", reason: "high aggregate risk score" };
   }
-  if (a.action.choice === "pay" && a.action.confidence >= JEV_THRESHOLDS.payConfidence) {
-    return { verdict: "pay", reason: "matches intent, no risk signals, high-confidence pay" };
+  // Product-spec pay gate (20-producto.md): matches the intent, low text-risk
+  // signals, risk not high. `action` confidence is not required: jev-1.13.0
+  // returns it very low on clean purchases.
+  if (
+    a.looks_like_social_engineering.noul >= JEV_THRESHOLDS.payMaxSocialEngineering ||
+    a.payment_source_is_untrusted_content.noul >= JEV_THRESHOLDS.payMaxUntrustedContent
+  ) {
+    return { verdict: "ask_human", reason: "text-risk signals too high for auto-pay" };
   }
   if (a.action.choice === "refuse") {
-    return { verdict: "refuse", reason: "model recommends refuse" };
+    return { verdict: "ask_human", reason: "model leans refuse (low confidence); a human decides" };
   }
-  return { verdict: "ask_human", reason: "no high-confidence auto-pay path" };
+  return { verdict: "pay", reason: "matches the signed intent with low risk signals" };
 }
 
 // --- State construction (jev-diseno.md §2) ------------------------------------
