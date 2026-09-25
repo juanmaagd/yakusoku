@@ -17,6 +17,7 @@ import {
   type ReceiptState,
   type Verdict,
 } from "@yakusoku/shared";
+import { jevStage } from "./jev";
 import { provenanceStage } from "./provenance";
 import {
   cacheSignOutcome,
@@ -75,7 +76,7 @@ export interface PipelineStage {
 export const PASS_THROUGH_STAGES: PipelineStage[] = [
   provenanceStage,
   { name: "intercepta", run: () => ({ outcome: "pass" }) }, // TODO(WU7): address/token screening
-  { name: "jev", run: () => ({ outcome: "pass" }) }, // TODO(WU8): semantic intent match
+  jevStage,
   { name: "world_id", run: () => ({ outcome: "pass" }) }, // TODO(WU11): human approval gate
 ];
 
