@@ -18,6 +18,7 @@
 
 import type { PaymentRequired } from "@x402/core/types";
 import {
+  paymentRequirementSchema,
   transition,
   USDC_DECIMALS,
   type DecisionReceipt,
@@ -28,6 +29,7 @@ import {
 import { publish } from "./events-bus";
 import { finalize, type ApprovalInfo, type PipelineOutcome, type ReceiptContext } from "./receipts";
 import { signPayment } from "./signer";
+import { signStepUpAttestation } from "./step-up";
 import {
   getControlState,
   getIntent,
@@ -38,7 +40,7 @@ import {
   savePendingApproval,
   type PendingApproval,
 } from "./store";
-import { pollUntilResolved, startDeviceAuthorization, validateIdToken } from "./world-id";
+import { ACR_ORB_V3, pollUntilResolved, startDeviceAuthorization, validateIdToken, type FreshApprovalClaims } from "./world-id";
 import type { PipelineStage, StageContext, StageVerdict } from "./pipeline";
 
 function firewallTimeoutSeconds(): number {
@@ -274,8 +276,17 @@ function finalizeResolution(
   if (updated) publish("decision", updated);
 }
 
-/** Denied / expired / pre-signature error: refuse and release the reservation. */
-async function settleRefused(
+/** Denied / expired / pre-signature error: refuse and release the reservation.
+ * WU12: every non-approved terminal status gets `worldId: { approved: false,
+ * status }` and never an attestation — there's nothing to attest, no valid
+ * human approval was used for this decision (plan-tecnico.md §2.4).
+ * Exported (alongside `settleApproved` below) so approvals.test.ts can drive
+ * "the approval resolution path" directly with fabricated claims/outcomes,
+ * instead of mocking `world-id.ts`'s network-calling poll/validate
+ * primitives — those already have their own no-network unit tests
+ * (world-id.test.ts), and `mock.module` replaces a module process-wide for
+ * the rest of the `bun test` run, which would otherwise break them. */
+export async function settleRefused(
   approval: PendingApproval,
   status: Exclude<PendingApproval["status"], "pending" | "approved">,
   reason: string,
@@ -287,7 +298,15 @@ async function settleRefused(
     return;
   }
   const ms = Date.now() - approval.gateStartedAtMs;
-  finalizeResolution(approval, receipt, [{ stage: "world_id", outcome: "refuse", reason, ms }], receiptState, "refuse", reason);
+  finalizeResolution(
+    approval,
+    receipt,
+    [{ stage: "world_id", outcome: "refuse", reason, ms }],
+    receiptState,
+    "refuse",
+    reason,
+    { worldId: { approved: false, status } },
+  );
   recordSpend(approval.intentId, -BigInt(approval.amountAtomic));
 
   approval.status = status;
@@ -296,10 +315,16 @@ async function settleRefused(
   savePendingApproval(approval);
 }
 
-/** Approved + a valid, fresh ID token: sign exactly as the automatic path
- * does (signer.ts, same spendControls). A signing failure here is still
- * fail-closed — refuse and release, never retry silently. */
-async function settleApproved(approval: PendingApproval): Promise<void> {
+/**
+ * Approved + a valid, fresh ID token: first sign a StepUp attestation
+ * binding this exact human approval to this exact payment (WU12 — before
+ * the payment itself, per world-id-implementacion.md §C), then sign exactly
+ * as the automatic path does (signer.ts, same spendControls). A failure at
+ * either step is still fail-closed — refuse and release, never retry
+ * silently, never sign a payment without also attesting the approval that
+ * authorized it.
+ */
+export async function settleApproved(approval: PendingApproval, claims: FreshApprovalClaims): Promise<void> {
   const receipt = getReceipt(approval.receiptId);
   if (!receipt) {
     console.error(`[world-id] settleApproved: receipt ${approval.receiptId} missing`);
@@ -330,8 +355,39 @@ async function settleApproved(approval: PendingApproval): Promise<void> {
 
   const worldMs = Date.now() - approval.gateStartedAtMs;
   const signStart = Date.now();
+  // Set once the StepUp attestation itself is signed — kept in this outer
+  // scope so a later payment-signing failure can still attach it to the
+  // `sign_failed` receipt (the human genuinely approved; only the payment
+  // signature failed).
+  let worldIdDetail: DecisionReceipt["worldId"] | undefined;
   try {
     const paymentRequired = JSON.parse(approval.paymentRequiredJson) as PaymentRequired;
+    const requirement = paymentRequirementSchema.parse(paymentRequired.accepts?.[0] ?? {});
+
+    const attestation = await signStepUpAttestation({
+      receiptId: approval.receiptId,
+      intentId: approval.intentId,
+      paymentIdentifier: approval.paymentIdentifier,
+      payTo: requirement.payTo,
+      amount: requirement.amount,
+      asset: requirement.asset,
+      network: requirement.network,
+      worldIdSub: claims.sub,
+      // The sandbox's discovery document currently only advertises this acr
+      // (world-id.ts) and `validateIdToken` already rejects any other
+      // non-undefined value — an absent claim (lenient case) still attests
+      // under the only acr this deployment recognizes.
+      acr: claims.acr ?? ACR_ORB_V3,
+      authTimeSeconds: claims.authTime,
+    });
+    worldIdDetail = {
+      approved: true,
+      subject: attestation.message.worldIdSubject,
+      acr: attestation.message.acr,
+      authTime: claims.authTime,
+      attestation,
+    };
+
     const { paymentSignatureHeader } = await signPayment({
       paymentRequired,
       maxBudgetAtomic: intent.message.budget,
@@ -348,7 +404,7 @@ async function settleApproved(approval: PendingApproval): Promise<void> {
       "signed",
       "pay",
       "human approved via World ID; all pipeline checks passed",
-      { paymentSignature: paymentSignatureHeader, worldId: { approved: true } },
+      { paymentSignature: paymentSignatureHeader, worldId: worldIdDetail },
     );
     approval.status = "approved";
     approval.paymentSignature = paymentSignatureHeader;
@@ -360,7 +416,7 @@ async function settleApproved(approval: PendingApproval): Promise<void> {
       { stage: "world_id", outcome: "pass", reason: "human approved via World ID", ms: worldMs },
       { stage: "sign", outcome: "refuse", reason, ms: Date.now() - signStart },
     ];
-    finalizeResolution(approval, receipt, timeline, "sign_failed", "refuse", reason);
+    finalizeResolution(approval, receipt, timeline, "sign_failed", "refuse", reason, { worldId: worldIdDetail });
     recordSpend(approval.intentId, -BigInt(approval.amountAtomic));
     approval.status = "error";
     approval.reason = reason;
@@ -401,7 +457,7 @@ export async function resolveApprovalInBackground(receiptId: string): Promise<vo
         await settleRefused(approval, "error", `invalid World ID token: ${validation.reason}`, "error");
         return;
       }
-      await settleApproved(approval);
+      await settleApproved(approval, validation.claims);
       return;
     }
     case "denied":

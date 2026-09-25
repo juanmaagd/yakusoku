@@ -334,6 +334,13 @@ main {
   color: var(--muted);
 }
 
+/* WU12: StepUp attestation present on the World ID detail block. */
+.attested {
+  color: var(--green);
+  font-weight: 600;
+  margin: 4px 0;
+}
+
 .kv {
   margin: 0;
   display: grid;

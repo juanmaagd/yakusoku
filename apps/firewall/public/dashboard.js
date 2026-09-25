@@ -312,10 +312,19 @@ function worldIdHtml(r) {
   }
 
   const label = r.state === "world_id_denied" ? "Denied" : r.state === "world_id_expired" ? "Expired" : r.worldId?.approved ? "Approved" : "—";
+  const attestation = r.worldId?.attestation;
+  // WU12: a signed StepUp EIP-712 attestation — portable, independently
+  // verifiable proof this exact payment was human-approved (not just the
+  // firewall's own say-so). Absent on denied/expired/pre-WU12 receipts.
+  const attestationHtml = attestation
+    ? `<p class="attested">Human approval attested ✓ (signer ${shortAddr(attestation.signer)})</p>
+       <p class="muted"><a href="/receipts/${escapeHtml(r.receiptId)}/attestation" target="_blank" rel="noopener">view attestation JSON</a></p>`
+    : "";
   return `
     <div class="detail-block">
       <h3>World ID approval</h3>
-      <p>${escapeHtml(label)}${r.worldId?.nullifierHash ? ` · nullifier ${shortAddr(r.worldId.nullifierHash)}` : ""}</p>
+      <p>${escapeHtml(label)}</p>
+      ${attestationHtml}
     </div>`;
 }
 

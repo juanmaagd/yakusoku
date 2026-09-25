@@ -21,7 +21,7 @@ import {
 } from "viem";
 import { baseSepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
-import { USDC_DECIMALS, USDC_SEPOLIA_ADDRESS, type DecisionReceipt } from "@yakusoku/shared";
+import { USDC_DECIMALS, USDC_SEPOLIA_ADDRESS, verifyStepUpAttestation, type DecisionReceipt } from "@yakusoku/shared";
 
 const BLOCK_CHUNK = 1000n; // eth_getLogs range limit on the public Base Sepolia RPC
 const RETRY_ATTEMPTS = 3;
@@ -194,6 +194,62 @@ async function verifySettlement(
     return matches ? { status: "confirmed", transfer } : { status: "mismatch", transfer };
   }
   return { status: "not_found" };
+}
+
+// --- StepUp attestation verification (WU12) ------------------------------------
+// For a Confirmed receipt (its settlement hash matched on-chain) that also
+// carries a StepUp attestation (a World ID-approved payment, approvals.ts),
+// independently verify that attestation the same way the on-chain settlement
+// itself is verified: never trust the firewall's own "approved: true" —
+// recompute the EIP-712 signature and cross-check every field that binds it
+// to this exact payment.
+
+async function checkAttestation(receipt: DecisionReceipt, expectedSigner: Address): Promise<Finding> {
+  const attestation = receipt.worldId?.attestation;
+  if (!attestation) {
+    return {
+      severity: "WARNING",
+      category: "attestation_missing",
+      receiptId: receipt.receiptId,
+      detail: "receipt claims a human-approved settlement but carries no StepUp attestation",
+    };
+  }
+
+  const { message } = attestation;
+  const signerMatches = message !== undefined && attestation.signer.toLowerCase() === expectedSigner.toLowerCase();
+  const fieldsMatch =
+    message.receiptId === receipt.receiptId &&
+    message.paymentIdentifier === receipt.paymentIdentifier &&
+    receipt.payTo !== undefined &&
+    message.payTo.toLowerCase() === receipt.payTo.toLowerCase() &&
+    receipt.amount !== undefined &&
+    BigInt(message.amount) === BigInt(receipt.amount);
+
+  let signatureValid = false;
+  try {
+    signatureValid = await verifyStepUpAttestation(attestation);
+  } catch {
+    signatureValid = false; // malformed attestation — never treat as valid
+  }
+
+  if (signerMatches && fieldsMatch && signatureValid) {
+    return {
+      severity: "INFO",
+      category: "attestation_valid",
+      receiptId: receipt.receiptId,
+      payTo: receipt.payTo,
+      amount: receipt.amount,
+      detail: `StepUp attestation signed by ${attestation.signer} matches payTo/amount/paymentIdentifier and verifies against the domain/types`,
+    };
+  }
+  return {
+    severity: "CRITICAL",
+    category: "attestation_invalid",
+    receiptId: receipt.receiptId,
+    payTo: receipt.payTo,
+    amount: receipt.amount,
+    detail: `StepUp attestation failed verification (signerMatches=${signerMatches}, fieldsMatch=${fieldsMatch}, signatureValid=${signatureValid})`,
+  };
 }
 
 // --- firewall reads ------------------------------------------------------------
@@ -410,6 +466,12 @@ async function main(): Promise<void> {
         amount: r.amount,
         detail: "on-chain transfer matches the receipt's payTo and amount",
       });
+      // WU12: only Confirmed receipts that carry a StepUp attestation get
+      // checked — most receipts have none (auto-pay, never went through
+      // World ID), and that's not itself a finding.
+      if (r.worldId?.attestation) {
+        settlementFindings.push(await checkAttestation(r, wallet));
+      }
     } else if (check.status === "mismatch") {
       settlementFindings.push({
         severity: "CRITICAL",

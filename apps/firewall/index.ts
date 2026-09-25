@@ -264,6 +264,19 @@ app.get("/receipts/:id", (c) => {
   return c.json(receipt);
 });
 
+// --- GET /receipts/:id/attestation (WU12) -------------------------------
+// Serves the StepUp EIP-712 attestation on its own, so a third party can
+// fetch (and independently `verifyStepUpAttestation`) just the evidence,
+// without pulling the whole receipt. 404 when this receipt never went
+// through a valid World ID approval (no attestation exists to serve).
+
+app.get("/receipts/:id/attestation", (c) => {
+  const receipt = getReceipt(c.req.param("id"));
+  const attestation = receipt?.worldId?.attestation;
+  if (!attestation) return c.json({ error: "attestation_not_found" }, 404);
+  return c.json(attestation);
+});
+
 // --- POST /receipts/:id/settlement ------------------------------------------
 
 const settlementRequestSchema = z.object({

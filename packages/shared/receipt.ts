@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { stepUpAttestationSchema } from "./step-up";
 import { verdictSchema } from "./verdict";
 
 /**
@@ -166,11 +167,28 @@ export const decisionReceiptSchema = z.object({
     })
     .optional(),
   jev: jevJudgmentSchema.optional(),
+  /**
+   * World ID human-approval gate result (WU11), extended in WU12 with a
+   * StepUp EIP-712 attestation. All new fields are optional so a receipt
+   * persisted before WU12 (bare `{ approved: true }`, no attestation) still
+   * parses — `saveReceipt`/`getReceipt` (store.ts) round-trip every receipt
+   * through this schema, so tightening it would break reading old rows.
+   * `approved: true` receipts carry `subject`/`acr`/`authTime`/`attestation`
+   * (set together in `settleApproved`, apps/firewall/approvals.ts);
+   * `approved: false` receipts carry `status` (the terminal
+   * `PendingApproval["status"]` — denied/expired/error/paused/revoked) and
+   * never an attestation (nothing to attest — no valid approval was used).
+   */
   worldId: z
     .object({
       approved: z.boolean(),
-      nullifierHash: z.string().optional(),
-      stepUpAttestation: z.string().optional(),
+      /** `keccak256` of the World ID `sub` claim — same value as
+       * `attestation.message.worldIdSubject`, never the raw claim. */
+      subject: z.string().optional(),
+      acr: z.string().optional(),
+      authTime: z.number().optional(),
+      attestation: stepUpAttestationSchema.optional(),
+      status: z.string().optional(),
     })
     .optional(),
   txHash: z.string().optional(),
