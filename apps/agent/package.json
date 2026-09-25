@@ -1,17 +1,18 @@
 {
-  "name": "agent",
+  "name": "@yakusoku/agent",
   "module": "index.ts",
   "type": "module",
   "private": true,
   "devDependencies": {
     "@types/bun": "latest"
   },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
   "dependencies": {
+    "@yakusoku/shared": "workspace:*",
     "@ai-sdk/gateway": "^4.0.92",
     "@x402/core": "2.27.0",
     "ai": "^7.0.114"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
   }
 }

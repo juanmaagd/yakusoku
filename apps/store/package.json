@@ -1,20 +1,21 @@
 {
-  "name": "store",
+  "name": "@yakusoku/store",
   "module": "index.ts",
   "type": "module",
   "private": true,
   "devDependencies": {
     "@types/bun": "latest"
   },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
   "dependencies": {
+    "@yakusoku/shared": "workspace:*",
     "@x402/core": "2.27.0",
     "@x402/evm": "2.27.0",
     "@x402/express": "2.27.0",
     "@x402/extensions": "2.27.0",
     "express": "^5.2.1",
     "viem": "^2.56.9"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
   }
 }

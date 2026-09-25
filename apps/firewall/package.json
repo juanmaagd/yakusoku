@@ -1,15 +1,13 @@
 {
-  "name": "firewall",
+  "name": "@yakusoku/firewall",
   "module": "index.ts",
   "type": "module",
   "private": true,
   "devDependencies": {
     "@types/bun": "latest"
   },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
   "dependencies": {
+    "@yakusoku/shared": "workspace:*",
     "@typesafe-ai/sdk": "0.6.0",
     "@x402/core": "2.27.0",
     "@x402/evm": "2.27.0",
@@ -17,5 +15,8 @@
     "hono": "^4.13.9",
     "jose": "^6.2.12",
     "viem": "^2.56.9"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
   }
 }

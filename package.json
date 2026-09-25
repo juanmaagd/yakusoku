@@ -1,5 +1,16 @@
 {
   "name": "yakusoku",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"]
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "bun run --filter \"@yakusoku/*\" typecheck",
+    "test": "bun test --pass-with-no-tests"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  }
 }
