@@ -38,6 +38,26 @@ app.onError((err, c) => {
   return c.json({ error: "internal_error", message: err instanceof Error ? err.message : String(err) }, 500);
 });
 
+// --- GET /dashboard (WU10) --------------------------------------------------
+// Minimal plain HTML/CSS/JS dashboard, same-origin as the API (no CORS
+// needed). Served straight off disk with Bun.file — no build step.
+
+const PUBLIC_DIR = new URL("./public/", import.meta.url);
+
+const DASHBOARD_ASSETS: Record<string, { file: string; contentType: string }> = {
+  "/dashboard": { file: "dashboard.html", contentType: "text/html; charset=utf-8" },
+  "/dashboard.css": { file: "dashboard.css", contentType: "text/css; charset=utf-8" },
+  "/dashboard.js": { file: "dashboard.js", contentType: "application/javascript; charset=utf-8" },
+};
+
+for (const [route, asset] of Object.entries(DASHBOARD_ASSETS)) {
+  app.get(route, async (c) => {
+    const file = Bun.file(new URL(asset.file, PUBLIC_DIR));
+    if (!(await file.exists())) return c.text("not found", 404);
+    return new Response(file, { headers: { "Content-Type": asset.contentType } });
+  });
+}
+
 function serializeIntent(intent: StoredIntent) {
   return {
     id: intent.id,
@@ -250,4 +270,9 @@ resumePendingApprovalsOnBoot();
 
 console.log(`Yakusoku firewall listening on :${PORT}`);
 
-export default { port: PORT, fetch: app.fetch };
+// WU10 fix: Bun's default HTTP idleTimeout is 10s, shorter than the SSE
+// heartbeat above (15s) — every /events connection was silently killed by
+// Bun before its first heartbeat could keep it alive, so the dashboard's
+// EventSource looped connect -> ~10s alive -> reconnect forever instead of
+// staying live. Raise it well past SSE_HEARTBEAT_MS.
+export default { port: PORT, fetch: app.fetch, idleTimeout: 60 };
