@@ -10,6 +10,27 @@
 // while pending, and resolves the receipt in the background. `refuse` still
 // stops immediately, unchanged since WU6-WU8.
 //
+// HARDEN fix (refuse dominance): WU11 originally made the FIRST `ask_human`
+// from any stage stop the loop and jump straight to the World ID gate, so
+// later (more expensive) stages never ran. That silently defeated the
+// pipeline's own ordering guarantee whenever an earlier stage escalated for
+// an operational reason (e.g. Intercepta escalating every payment because
+// INTERCEPTA_API_KEY isn't set yet): Jev never got to evaluate the payment,
+// so KEY CASE #9 (casos-de-ataque.md — clean address, in budget, wrong item)
+// would have gone to a human instead of being refused outright. The rule is
+// now:
+//   - `refuse` from ANY stage stops immediately and wins — refuse is final.
+//   - `ask_human` from a stage is recorded (reason + timeline entry, plus its
+//     jev/intercepta detail as always) but evaluation CONTINUES through the
+//     remaining stages, so a later stage's `refuse` still overrides an
+//     earlier stage's `ask_human`.
+//   - Once every stage has run: any `refuse` already returned above; else if
+//     any stage asked for a human, the combined reasons go to the World ID
+//     gate; else the payment signs automatically.
+// See `evaluateStages` below — pure stage-iteration logic, exported so
+// pipeline.test.ts can unit-test the ordering with stubbed stages and no
+// network calls.
+//
 // WU9 additions: every finalized receipt carries a per-stage `timeline`
 // (idempotency, policy, provenance, intercepta, jev, world_id, sign) and,
 // when Jev/Intercepta ran, their structured detail in `receipt.jev`/
@@ -72,9 +93,10 @@ export interface PipelineStage {
 }
 
 /**
- * Ordered stages. `ask_human` from any of these routes into the World ID
- * gate (approvals.ts) instead of ending the request; `refuse` still stops
- * immediately:
+ * Ordered stages. `ask_human` from any of these is recorded and evaluation
+ * continues through the rest (see the HARDEN note above); once every stage
+ * has run, an accumulated `ask_human` routes into the World ID gate
+ * (approvals.ts). `refuse` from any stage still stops immediately and wins:
  * - WU6 provenance  -> deterministic recipient-traceability check (provenance.ts)
  * - WU7 Intercepta  -> address/token screening (intercepta.ts)
  * - WU8 Jev         -> semantic intent-match judgment (jev.ts)
@@ -232,17 +254,37 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
   }
 }
 
-async function runStagesAndSign(
-  receiptContext: ReceiptContext,
-  timeline: ReceiptTimelineEntry[],
-  stageCtx: StageContext,
-  callbacks: { markSigned: () => void; markPending: () => void },
-): Promise<PipelineOutcome> {
+/** One run of `evaluateStages` through the stage list — pure stage-iteration
+ * logic (no signing, no World ID gate, no receipt persistence), so it's
+ * directly unit-testable with stubbed `PipelineStage`s and no network calls
+ * (pipeline.test.ts). */
+export interface StageEvaluation {
+  /** Timeline entries for every stage that ran, in order. */
+  timeline: ReceiptTimelineEntry[];
+  jevDetail?: DecisionReceipt["jev"];
+  interceptaDetail?: DecisionReceipt["intercepta"];
+  outcome:
+    | { kind: "refuse"; stageName: string; state: ReceiptState; reason: string }
+    | { kind: "ask_human"; reason: string }
+    | { kind: "clear" };
+}
+
+/**
+ * Runs `stages` in order. A `refuse` stops immediately and wins outright. An
+ * `ask_human` is recorded (its reason, and its jev/intercepta detail as
+ * always) but does NOT stop evaluation — later stages still run, so a later
+ * `refuse` can still override an earlier `ask_human` (the HARDEN fix — see
+ * the file-header comment). Once every stage has run: `kind: "ask_human"`
+ * with every escalation's reason joined, or `kind: "clear"` if nothing
+ * escalated or refused.
+ */
+export async function evaluateStages(stages: readonly PipelineStage[], stageCtx: StageContext): Promise<StageEvaluation> {
+  const timeline: ReceiptTimelineEntry[] = [];
   let jevDetail: DecisionReceipt["jev"];
   let interceptaDetail: DecisionReceipt["intercepta"];
-  let askHuman: { reason: string } | undefined;
+  const askHumanReasons: string[] = [];
 
-  for (const stage of PIPELINE_STAGES) {
+  for (const stage of stages) {
     const stageStart = Date.now();
     const result = await stage.run(stageCtx);
     const ms = Date.now() - stageStart;
@@ -251,35 +293,62 @@ async function runStagesAndSign(
 
     if (result.outcome === "refuse") {
       timeline.push({ stage: stage.name, outcome: "refuse", reason: result.reason, ms });
-      return finalize({
-        ...receiptContext,
+      return {
         timeline,
-        jev: jevDetail,
-        intercepta: interceptaDetail,
-        state: transition("initial", result.state),
-        verdict: "refuse",
-        reason: `${stage.name}: ${result.reason}`,
-        cache: true,
-      });
+        jevDetail,
+        interceptaDetail,
+        outcome: { kind: "refuse", stageName: stage.name, state: result.state, reason: result.reason },
+      };
     }
     if (result.outcome === "ask_human") {
-      // Stop running later (more expensive) stages — this escalation already
-      // needs a human; nothing downstream changes that. See PIPELINE_STAGES.
+      // Record the escalation but KEEP evaluating later (more expensive)
+      // stages — an earlier stage's operational escalation (e.g. Intercepta
+      // with no API key) must never shadow a later stage's own refuse (e.g.
+      // Jev catching KEY CASE #9). See the file-header HARDEN note.
       timeline.push({ stage: stage.name, outcome: "ask_human", reason: result.reason, ms });
-      askHuman = { reason: `${stage.name}: ${result.reason}` };
-      break;
+      askHumanReasons.push(`${stage.name}: ${result.reason}`);
+      continue;
     }
     timeline.push({ stage: stage.name, outcome: "pass", ms });
   }
 
-  if (askHuman) {
+  if (askHumanReasons.length > 0) {
+    return { timeline, jevDetail, interceptaDetail, outcome: { kind: "ask_human", reason: askHumanReasons.join("; ") } };
+  }
+  return { timeline, jevDetail, interceptaDetail, outcome: { kind: "clear" } };
+}
+
+async function runStagesAndSign(
+  receiptContext: ReceiptContext,
+  timeline: ReceiptTimelineEntry[],
+  stageCtx: StageContext,
+  callbacks: { markSigned: () => void; markPending: () => void },
+): Promise<PipelineOutcome> {
+  const evaluation = await evaluateStages(PIPELINE_STAGES, stageCtx);
+  timeline.push(...evaluation.timeline);
+  const { jevDetail, interceptaDetail } = evaluation;
+
+  if (evaluation.outcome.kind === "refuse") {
+    return finalize({
+      ...receiptContext,
+      timeline,
+      jev: jevDetail,
+      intercepta: interceptaDetail,
+      state: transition("initial", evaluation.outcome.state),
+      verdict: "refuse",
+      reason: `${evaluation.outcome.stageName}: ${evaluation.outcome.reason}`,
+      cache: true,
+    });
+  }
+
+  if (evaluation.outcome.kind === "ask_human") {
     return startApprovalGate({
       receiptContext,
       timeline,
       stageCtx,
       jevDetail,
       interceptaDetail,
-      triggerReason: askHuman.reason,
+      triggerReason: evaluation.outcome.reason,
       markPending: callbacks.markPending,
     });
   }
