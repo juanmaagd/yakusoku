@@ -14,6 +14,7 @@ import { signedTaskIntentSchema, transition, X402_NETWORK, type DecisionReceipt 
 import {
   createIntent,
   getIntent,
+  getPendingApprovalByReceiptId,
   getReceipt,
   listIntents,
   listReceipts,
@@ -23,6 +24,7 @@ import {
 } from "./store";
 import { verifyTaskIntentSignature } from "./signer";
 import { computePaymentIdentifier, runSignPipeline } from "./pipeline";
+import { approvalStatusResponse, resumePendingApprovalsOnBoot } from "./approvals";
 import { publish, subscribe } from "./events-bus";
 
 const PORT = Number(process.env.PORT) || 4001;
@@ -216,6 +218,14 @@ app.post("/receipts/:id/settlement", async (c) => {
   return c.json(updated);
 });
 
+// --- GET /approvals/:receiptId (WU11) -----------------------------------------
+
+app.get("/approvals/:receiptId", (c) => {
+  const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
+  if (!approval) return c.json({ error: "approval_not_found" }, 404);
+  return c.json(approvalStatusResponse(approval));
+});
+
 // --- GET /events (SSE) --------------------------------------------------------
 
 app.get("/events", (c) =>
@@ -232,6 +242,11 @@ app.get("/events", (c) =>
     }
   }),
 );
+
+// Resume any World ID approval left pending by a previous process (crash or
+// `--watch` restart) — approvals.ts fails closed (expires + releases budget)
+// for any row whose deadline already passed while the firewall was down.
+resumePendingApprovalsOnBoot();
 
 console.log(`Yakusoku firewall listening on :${PORT}`);
 

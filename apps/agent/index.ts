@@ -32,11 +32,69 @@ interface SeenContent {
   text: string;
 }
 
+interface ApprovalInfo {
+  status: "pending" | "approved" | "denied" | "expired" | "error";
+  verificationUri?: string;
+  userCode?: string;
+  expiresAt?: string;
+}
+
 interface SignResponse {
   verdict: "pay" | "refuse" | "ask_human";
   reason: string;
   receiptId: string;
   paymentSignature?: string;
+  /** Present when `ask_human` means "a World ID device flow just started" —
+   * WU11, apps/firewall/approvals.ts. */
+  approval?: ApprovalInfo;
+}
+
+interface ApprovalStatusResponse {
+  status: "pending" | "approved" | "denied" | "expired" | "error";
+  verificationUri?: string;
+  userCode?: string;
+  expiresAt?: string;
+  verdict: "pay" | "refuse" | "ask_human";
+  reason: string;
+  paymentSignature?: string;
+}
+
+const APPROVAL_POLL_INTERVAL_MS = 3_000;
+/** Upper bound on how long the agent itself waits — independent of the
+ * firewall's own `WORLD_ID_APPROVAL_TIMEOUT_S`; whichever is shorter wins in
+ * practice, since the firewall marks the approval `expired` on its own. */
+const APPROVAL_POLL_TIMEOUT_MS = 6 * 60_000;
+
+/** Polls `GET /approvals/:receiptId` until it leaves `pending`, printing a
+ * human-readable prompt once so whoever is running the demo can approve from
+ * their phone. Never assumes approval — a timeout here is reported as an
+ * ordinary `ask_human` timeout, not a purchase. */
+async function waitForWorldIdApproval(receiptId: string, approval: ApprovalInfo): Promise<ApprovalStatusResponse> {
+  console.log("\n=== World ID approval required ===");
+  console.log(`  Open: ${approval.verificationUri ?? "(no verification URL returned)"}`);
+  if (approval.userCode) console.log(`  Code: ${approval.userCode}`);
+  console.log("  Approve this payment in the World App on your phone.");
+  if (approval.expiresAt) console.log(`  Expires: ${approval.expiresAt}`);
+  console.log("===================================\n");
+
+  const deadline = Date.now() + APPROVAL_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, APPROVAL_POLL_INTERVAL_MS));
+    const res = await fetch(`${FIREWALL_URL}/approvals/${receiptId}`);
+    if (!res.ok) {
+      console.log(`[tool:buy] approval poll failed: HTTP ${res.status}`);
+      continue;
+    }
+    const status = (await res.json()) as ApprovalStatusResponse;
+    if (status.status === "pending") {
+      console.log("[tool:buy] still waiting on World ID approval...");
+      continue;
+    }
+    console.log(`[tool:buy] World ID approval resolved: ${status.status} (${status.reason})`);
+    return status;
+  }
+  console.log("[tool:buy] gave up waiting for World ID approval (agent-side timeout)");
+  return { status: "expired", verdict: "refuse", reason: "agent gave up waiting for World ID approval" };
 }
 
 interface BuyResult {
@@ -154,19 +212,35 @@ function buildTools(intentId: string, userRequest: string) {
         `[tool:buy] firewall verdict=${signResult.verdict} reason="${signResult.reason}" receiptId=${signResult.receiptId}`,
       );
 
-      if (signResult.verdict !== "pay" || !signResult.paymentSignature) {
-        if (signResult.verdict === "pay") {
+      // `ask_human` with a `pending` approval means a World ID device flow
+      // just started (WU11) — wait for the human, then treat the outcome as
+      // if the firewall had answered synchronously. Any other `ask_human`
+      // (no `approval`, e.g. the gate itself failed to start) falls straight
+      // to the fail-closed return below, same as before WU11.
+      let verdict = signResult.verdict;
+      let reason = signResult.reason;
+      const receiptId = signResult.receiptId;
+      let paymentSignature = signResult.paymentSignature;
+      if (verdict === "ask_human" && signResult.approval?.status === "pending") {
+        const resolved = await waitForWorldIdApproval(receiptId, signResult.approval);
+        verdict = resolved.verdict;
+        reason = resolved.reason;
+        paymentSignature = resolved.paymentSignature;
+      }
+
+      if (verdict !== "pay" || !paymentSignature) {
+        if (verdict === "pay") {
           // Should not happen (pipeline.ts always pairs verdict "pay" with a
           // signature) — fail-closed rather than assume a signature exists.
           return { status: "error", reason: "firewall verdict was pay but returned no signature" };
         }
         // Fail-closed by construction: never retry around a refuse/ask_human verdict.
-        return { status: signResult.verdict, reason: signResult.reason, receiptId: signResult.receiptId };
+        return { status: verdict, reason, receiptId };
       }
 
       console.log("[tool:buy] retrying store with PAYMENT-SIGNATURE");
       const settleResponse = await fetch(resourceUrl, {
-        headers: { "PAYMENT-SIGNATURE": signResult.paymentSignature },
+        headers: { "PAYMENT-SIGNATURE": paymentSignature },
       });
       if (settleResponse.status !== 200) {
         const bodyText = await settleResponse.text().catch(() => "");
@@ -174,7 +248,7 @@ function buildTools(intentId: string, userRequest: string) {
         return {
           status: "error",
           reason: `store settlement retry returned ${settleResponse.status}`,
-          receiptId: signResult.receiptId,
+          receiptId: receiptId,
         };
       }
       const giftCard = await settleResponse.json();
@@ -191,7 +265,7 @@ function buildTools(intentId: string, userRequest: string) {
         // (and the dashboard's SSE feed, WU9) carries the tx hash. Never
         // fails the purchase — the gift card already settled onchain.
         try {
-          const settlementRes = await fetch(`${FIREWALL_URL}/receipts/${signResult.receiptId}/settlement`, {
+          const settlementRes = await fetch(`${FIREWALL_URL}/receipts/${receiptId}/settlement`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ txHash }),
@@ -205,7 +279,7 @@ function buildTools(intentId: string, userRequest: string) {
       }
       console.log("[tool:buy] gift card:", giftCard);
 
-      return { status: "purchased", giftCard, receiptId: signResult.receiptId, txHash, explorerUrl };
+      return { status: "purchased", giftCard, receiptId: receiptId, txHash, explorerUrl };
     },
   });
 

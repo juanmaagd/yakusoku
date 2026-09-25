@@ -1,9 +1,14 @@
 // The core decision pipeline (plan-tecnico.md §2.3):
 //   idempotency -> policy -> provenance -> Intercepta -> Jev -> World ID -> sign
 // Every branch is fail-closed (plan-tecnico.md §2.4): any doubt or error
-// produces `refuse`/`ask_human`, never `pay`. World ID is still a
-// pass-through stub — see PASS_THROUGH_STAGES below for the plug-in point
-// WU11 replaces it at.
+// produces `refuse`/`ask_human`, never `pay`.
+//
+// WU11 change: `ask_human` from provenance/Intercepta/Jev — or a payment
+// above `HUMAN_APPROVAL_OVER_USDC` (the real `world_id` stage below) — no
+// longer ends the request. It routes into the World ID approval gate
+// (approvals.ts), which starts a device flow, keeps the budget reserved
+// while pending, and resolves the receipt in the background. `refuse` still
+// stops immediately, unchanged since WU6-WU8.
 //
 // WU9 additions: every finalized receipt carries a per-stage `timeline`
 // (idempotency, policy, provenance, intercepta, jev, world_id, sign) and,
@@ -22,20 +27,22 @@ import {
   type PaymentRequirement,
   type ReceiptState,
   type ReceiptTimelineEntry,
-  type Verdict,
 } from "@yakusoku/shared";
+import { pendingApprovalOutcome, startApprovalGate, worldIdThresholdStage } from "./approvals";
 import { interceptaStage } from "./intercepta";
 import { jevStage } from "./jev";
 import { provenanceStage } from "./provenance";
+import { finalize, type PipelineOutcome, type ReceiptContext } from "./receipts";
 import {
-  cacheSignOutcome,
   getCachedSignOutcome,
   getIntent,
+  getPendingApprovalByPaymentIdentifier,
   recordSpend,
-  saveReceipt,
   type StoredIntent,
 } from "./store";
 import { signPayment } from "./signer";
+
+export type { PipelineOutcome } from "./receipts";
 
 export interface SignRequest {
   intentId: string;
@@ -43,13 +50,6 @@ export interface SignRequest {
   resourceUrl: string;
   /** Free-form context the agent supplies for later layers (provenance/Jev). */
   context?: Record<string, unknown>;
-}
-
-export interface PipelineOutcome {
-  verdict: Verdict;
-  reason: string;
-  receiptId: string;
-  paymentSignature?: string;
 }
 
 // --- Pipeline stage plug-in point (WU6-WU11) --------------------------------
@@ -72,21 +72,16 @@ export interface PipelineStage {
 }
 
 /**
- * Ordered stages. Each pass-through stub still resolves `{ outcome: "pass" }`
- * for now; a real implementation swaps the `run` function in place (same
- * `PipelineStage` shape, same position in the array) without touching
- * `runSignPipeline` below:
- * - WU6 provenance -> real (deterministic recipient-traceability check, see provenance.ts)
- * - WU7 Intercepta -> real (address/token screening, see intercepta.ts)
- * - WU8 Jev        -> real (see jev.ts)
- * - WU11 World ID  -> `"world_id_denied"` / `"world_id_expired"` (real async human-approval wait)
+ * Ordered stages. `ask_human` from any of these routes into the World ID
+ * gate (approvals.ts) instead of ending the request; `refuse` still stops
+ * immediately:
+ * - WU6 provenance  -> deterministic recipient-traceability check (provenance.ts)
+ * - WU7 Intercepta  -> address/token screening (intercepta.ts)
+ * - WU8 Jev         -> semantic intent-match judgment (jev.ts)
+ * - WU11 world_id    -> real amount-threshold check (approvals.ts); the actual
+ *   human-approval wait happens after this loop, not as a stage itself.
  */
-export const PASS_THROUGH_STAGES: PipelineStage[] = [
-  provenanceStage,
-  interceptaStage,
-  jevStage,
-  { name: "world_id", run: () => ({ outcome: "pass" }) }, // TODO(WU11): human approval gate
-];
+export const PIPELINE_STAGES: PipelineStage[] = [provenanceStage, interceptaStage, jevStage, worldIdThresholdStage];
 
 // --- Idempotency -------------------------------------------------------------
 
@@ -134,85 +129,6 @@ function checkPolicy(
   return { ok: true };
 }
 
-// --- Receipts --------------------------------------------------------------
-
-/** Fields describing "what this payment is for", known as soon as the
- * request and (when resolvable) the intent are read — attached to every
- * receipt this pipeline run produces, however it ends. */
-interface ReceiptContext {
-  paymentIdentifier: string;
-  intentId: string;
-  task?: string;
-  resourceUrl: string;
-  amount?: string;
-  payTo?: string;
-}
-
-function buildReceipt(input: {
-  paymentIdentifier: string;
-  intentId: string;
-  task?: string;
-  resourceUrl: string;
-  amount?: string;
-  payTo?: string;
-  timeline: ReceiptTimelineEntry[];
-  jev?: DecisionReceipt["jev"];
-  intercepta?: DecisionReceipt["intercepta"];
-  state: ReceiptState;
-  verdict: Verdict;
-  reason: string;
-}): DecisionReceipt {
-  return {
-    receiptId: `receipt_${crypto.randomUUID()}`,
-    paymentIdentifier: input.paymentIdentifier,
-    intentId: input.intentId,
-    createdAt: new Date().toISOString(),
-    state: input.state,
-    verdict: input.verdict,
-    reasons: [input.reason],
-    task: input.task,
-    resourceUrl: input.resourceUrl,
-    amount: input.amount,
-    payTo: input.payTo,
-    timeline: input.timeline,
-    jev: input.jev,
-    intercepta: input.intercepta,
-  };
-}
-
-function finalize(input: {
-  paymentIdentifier: string;
-  intentId: string;
-  task?: string;
-  resourceUrl: string;
-  amount?: string;
-  payTo?: string;
-  timeline: ReceiptTimelineEntry[];
-  jev?: DecisionReceipt["jev"];
-  intercepta?: DecisionReceipt["intercepta"];
-  state: ReceiptState;
-  verdict: Verdict;
-  reason: string;
-  paymentSignature?: string;
-  cache: boolean;
-}): PipelineOutcome {
-  const receipt = buildReceipt(input);
-  saveReceipt(receipt);
-  if (input.cache) {
-    cacheSignOutcome(input.paymentIdentifier, {
-      verdict: input.verdict,
-      reason: input.reason,
-      paymentSignature: input.paymentSignature,
-    });
-  }
-  return {
-    verdict: input.verdict,
-    reason: input.reason,
-    receiptId: receipt.receiptId,
-    paymentSignature: input.paymentSignature,
-  };
-}
-
 // --- Orchestration -----------------------------------------------------------
 
 async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string): Promise<PipelineOutcome> {
@@ -241,6 +157,15 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
       paymentSignature: cached.paymentSignature,
       cache: false, // already cached under this id
     });
+  }
+
+  // WU11: a repeat `/sign` for the same payment while a World ID device flow
+  // is still pending returns that same pending approval — no second device
+  // flow, no second budget reservation (approvals.ts's own idempotency
+  // cache write only happens once the gate reaches a terminal outcome).
+  const pendingApproval = getPendingApprovalByPaymentIdentifier(paymentIdentifier);
+  if (pendingApproval?.status === "pending") {
+    return pendingApprovalOutcome(pendingApproval);
   }
 
   const requirementResult = paymentRequirementSchema.safeParse(accepts0);
@@ -285,17 +210,25 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
 
   // Reserve the amount in the same tick as the policy check (no await in
   // between) so concurrent /sign calls cannot overspend the intent. Released
-  // in `finally` unless the payment ends up signed.
+  // in `finally` unless the payment ends up signed OR a World ID approval is
+  // left pending (the gate keeps the reservation open and releases it itself
+  // once it resolves — approvals.ts).
   const intentId = (intent as StoredIntent).id;
   const amount = BigInt(requirement.amount);
   recordSpend(intentId, amount);
   let signed = false;
+  let pending = false;
   try {
-    return await runStagesAndSign(receiptContext, timeline, stageCtx, () => {
-      signed = true;
+    return await runStagesAndSign(receiptContext, timeline, stageCtx, {
+      markSigned: () => {
+        signed = true;
+      },
+      markPending: () => {
+        pending = true;
+      },
     });
   } finally {
-    if (!signed) recordSpend(intentId, -amount);
+    if (!signed && !pending) recordSpend(intentId, -amount);
   }
 }
 
@@ -303,36 +236,55 @@ async function runStagesAndSign(
   receiptContext: ReceiptContext,
   timeline: ReceiptTimelineEntry[],
   stageCtx: StageContext,
-  markSigned: () => void,
+  callbacks: { markSigned: () => void; markPending: () => void },
 ): Promise<PipelineOutcome> {
   let jevDetail: DecisionReceipt["jev"];
   let interceptaDetail: DecisionReceipt["intercepta"];
-  for (const stage of PASS_THROUGH_STAGES) {
+  let askHuman: { reason: string } | undefined;
+
+  for (const stage of PIPELINE_STAGES) {
     const stageStart = Date.now();
     const result = await stage.run(stageCtx);
     const ms = Date.now() - stageStart;
     if (result.detail?.jev) jevDetail = result.detail.jev as DecisionReceipt["jev"];
     if (result.detail?.intercepta) interceptaDetail = result.detail.intercepta as DecisionReceipt["intercepta"];
 
-    if (result.outcome !== "pass") {
-      timeline.push({ stage: stage.name, outcome: result.outcome, reason: result.reason, ms });
+    if (result.outcome === "refuse") {
+      timeline.push({ stage: stage.name, outcome: "refuse", reason: result.reason, ms });
       return finalize({
         ...receiptContext,
         timeline,
         jev: jevDetail,
         intercepta: interceptaDetail,
         state: transition("initial", result.state),
-        verdict: result.outcome,
+        verdict: "refuse",
         reason: `${stage.name}: ${result.reason}`,
         cache: true,
       });
     }
+    if (result.outcome === "ask_human") {
+      // Stop running later (more expensive) stages — this escalation already
+      // needs a human; nothing downstream changes that. See PIPELINE_STAGES.
+      timeline.push({ stage: stage.name, outcome: "ask_human", reason: result.reason, ms });
+      askHuman = { reason: `${stage.name}: ${result.reason}` };
+      break;
+    }
     timeline.push({ stage: stage.name, outcome: "pass", ms });
   }
 
-  // Every check passed — enter the pre-signature gate. WU11 replaces the
-  // world_id pass-through stage above with a real wait; until then the gate
-  // resolves immediately once signing succeeds.
+  if (askHuman) {
+    return startApprovalGate({
+      receiptContext,
+      timeline,
+      stageCtx,
+      jevDetail,
+      interceptaDetail,
+      triggerReason: askHuman.reason,
+      markPending: callbacks.markPending,
+    });
+  }
+
+  // Every check passed automatically — sign immediately (no human wait).
   const preSignState = transition("initial", "awaiting_world_id");
   const signStart = Date.now();
   try {
@@ -341,7 +293,7 @@ async function runStagesAndSign(
       maxBudgetAtomic: stageCtx.intent.message.budget,
       paymentIdentifier: receiptContext.paymentIdentifier,
     });
-    markSigned();
+    callbacks.markSigned();
     timeline.push({ stage: "sign", outcome: "pass", ms: Date.now() - signStart });
     return finalize({
       ...receiptContext,

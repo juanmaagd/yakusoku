@@ -9,7 +9,11 @@ export type FirewallEventName =
   | "sign.requested"
   | "stage.completed"
   | "decision"
-  | "settlement.reported";
+  | "settlement.reported"
+  // WU11: the World ID human-approval gate (approvals.ts) starting a device
+  // flow, and later resolving it (approved/denied/expired/error).
+  | "approval.requested"
+  | "approval.resolved";
 
 export interface FirewallEvent {
   id: string;

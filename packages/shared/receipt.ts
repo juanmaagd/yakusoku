@@ -54,7 +54,10 @@ const RECEIPT_TRANSITIONS: Record<TransitionSource, readonly ReceiptState[]> = {
     "awaiting_world_id",
     "error",
   ],
-  awaiting_world_id: ["world_id_denied", "world_id_expired", "signed", "sign_failed"],
+  // WU11: `error` covers an invalid/unverifiable World ID token or any
+  // unexpected failure while resolving the gate (fail-closed — same
+  // `error` state the top-level pipeline uses for unforeseen failures).
+  awaiting_world_id: ["world_id_denied", "world_id_expired", "signed", "sign_failed", "error"],
   signed: ["settled", "settlement_failed"],
   // Every other state is terminal for this MVP's receipt lifecycle. A state
   // reached by manual review (e.g. `POST /approvals/:receiptId` resolving

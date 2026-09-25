@@ -23,6 +23,7 @@
     "start": "bun --env-file=../../../.env.hackathon index.ts",
     "roundtrip": "bun --env-file=../../../.env.hackathon scripts/roundtrip.ts",
     "jev-cases": "bun --env-file=../../../.env.hackathon scripts/jev-cases.ts",
-    "intercepta-check": "bun --env-file=../../../.env.hackathon scripts/intercepta-check.ts"
+    "intercepta-check": "bun --env-file=../../../.env.hackathon scripts/intercepta-check.ts",
+    "world-id-check": "bun --env-file=../../../.env.hackathon scripts/world-id-check.ts"
   }
 }

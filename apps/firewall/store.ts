@@ -33,9 +33,42 @@ export interface CachedSignOutcome {
   paymentSignature?: string;
 }
 
+/**
+ * A World ID approval gate in flight (WU11, approvals.ts). Persisted so a
+ * `--watch` restart can resume polling instead of losing the pending human
+ * approval — `deviceCode`/`intervalSeconds`/`expiresAt` are everything the
+ * RFC 8628 device flow needs to resume, and `paymentRequiredJson` is
+ * everything `signPayment` needs to actually sign once approved.
+ */
+export interface PendingApproval {
+  receiptId: string;
+  paymentIdentifier: string;
+  intentId: string;
+  /** Reserved amount, atomic units — precise release on a non-`approved` outcome. */
+  amountAtomic: string;
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  intervalSeconds: number;
+  /** ISO — min(World's own `expires_in`, `WORLD_ID_APPROVAL_TIMEOUT_S`) from creation. */
+  expiresAt: string;
+  /** ISO — when the device flow was requested; the ID token's `auth_time` must be at/after this. */
+  requestedAt: string;
+  /** epoch ms the gate started at — base for the `world_id` timeline entry's `ms`. */
+  gateStartedAtMs: number;
+  status: "pending" | "approved" | "denied" | "expired" | "error";
+  reason?: string;
+  paymentSignature?: string;
+  /** `JSON.stringify(PaymentRequired)` — resolving the gate re-signs against this exact requirement. */
+  paymentRequiredJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // --- Database setup ----------------------------------------------------------
 
-const DATA_DIR = join(import.meta.dir, "data");
+const DATA_DIR = process.env.FIREWALL_DATA_DIR ?? join(import.meta.dir, "data");
 mkdirSync(DATA_DIR, { recursive: true });
 
 const db = new Database(join(DATA_DIR, "firewall.sqlite"));
@@ -60,6 +93,14 @@ db.exec(`
     payment_identifier TEXT PRIMARY KEY,
     data_json TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS pending_approvals (
+    receipt_id TEXT PRIMARY KEY,
+    payment_identifier TEXT NOT NULL,
+    status TEXT NOT NULL,
+    data_json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS pending_approvals_payment_identifier ON pending_approvals (payment_identifier);
+  CREATE INDEX IF NOT EXISTS pending_approvals_status ON pending_approvals (status);
 `);
 
 // --- Statements ----------------------------------------------------------
@@ -83,6 +124,20 @@ const setCachedOutcomeStmt = db.prepare(
   `INSERT INTO idempotency_cache (payment_identifier, data_json) VALUES ($id, $data)
    ON CONFLICT(payment_identifier) DO UPDATE SET data_json = excluded.data_json`,
 );
+
+const upsertPendingApprovalStmt = db.prepare(
+  `INSERT INTO pending_approvals (receipt_id, payment_identifier, status, data_json)
+   VALUES ($receiptId, $paymentIdentifier, $status, $data)
+   ON CONFLICT(receipt_id) DO UPDATE SET status = excluded.status, data_json = excluded.data_json`,
+);
+const getPendingApprovalByReceiptIdStmt = db.prepare(`SELECT data_json FROM pending_approvals WHERE receipt_id = $id`);
+// Most recent row for a payment identifier — in practice at most one pending
+// approval ever exists per identifier (the gate is only entered once), but
+// ORDER BY guards against a hypothetical stale duplicate.
+const getPendingApprovalByPaymentIdentifierStmt = db.prepare(
+  `SELECT data_json FROM pending_approvals WHERE payment_identifier = $paymentIdentifier ORDER BY rowid DESC LIMIT 1`,
+);
+const listPendingApprovalsByStatusStmt = db.prepare(`SELECT data_json FROM pending_approvals WHERE status = $status`);
 
 // --- Row <-> domain mapping ----------------------------------------------
 
@@ -195,4 +250,33 @@ export function getCachedSignOutcome(paymentIdentifier: string): CachedSignOutco
 
 export function cacheSignOutcome(paymentIdentifier: string, outcome: CachedSignOutcome): void {
   setCachedOutcomeStmt.run({ $id: paymentIdentifier, $data: JSON.stringify(outcome) });
+}
+
+// --- Pending World ID approvals (WU11) --------------------------------------
+
+export function savePendingApproval(approval: PendingApproval): void {
+  upsertPendingApprovalStmt.run({
+    $receiptId: approval.receiptId,
+    $paymentIdentifier: approval.paymentIdentifier,
+    $status: approval.status,
+    $data: JSON.stringify(approval),
+  });
+}
+
+export function getPendingApprovalByReceiptId(receiptId: string): PendingApproval | undefined {
+  const row = getPendingApprovalByReceiptIdStmt.get({ $id: receiptId }) as { data_json: string } | null;
+  return row ? (JSON.parse(row.data_json) as PendingApproval) : undefined;
+}
+
+export function getPendingApprovalByPaymentIdentifier(paymentIdentifier: string): PendingApproval | undefined {
+  const row = getPendingApprovalByPaymentIdentifierStmt.get({ $paymentIdentifier: paymentIdentifier }) as
+    | { data_json: string }
+    | null;
+  return row ? (JSON.parse(row.data_json) as PendingApproval) : undefined;
+}
+
+/** Every approval still awaiting a human, for resuming on boot (approvals.ts). */
+export function listPendingApprovalsByStatus(status: PendingApproval["status"]): PendingApproval[] {
+  const rows = listPendingApprovalsByStatusStmt.all({ $status: status }) as { data_json: string }[];
+  return rows.map((row) => JSON.parse(row.data_json) as PendingApproval);
 }
