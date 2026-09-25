@@ -19,7 +19,8 @@
     "reset-data": "bun run --filter @yakusoku/firewall reset-data",
     "agent": "bun run --filter @yakusoku/agent start",
     "dev-intent": "bun run --filter @yakusoku/agent dev-intent",
-    "attack": "bun run --filter @yakusoku/agent attack"
+    "attack": "bun run --filter @yakusoku/agent attack",
+    "verify": "bun run --filter @yakusoku/verifier verify"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -1,0 +1,17 @@
+{
+  "name": "@yakusoku/verifier",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "@yakusoku/shared": "workspace:*",
+    "viem": "^2.56.9"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "verify": "bun --env-file=../../../.env.hackathon index.ts"
+  }
+}

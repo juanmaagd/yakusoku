@@ -56,6 +56,16 @@
         "@types/express": "^5",
       },
     },
+    "apps/verifier": {
+      "name": "@yakusoku/verifier",
+      "dependencies": {
+        "@yakusoku/shared": "workspace:*",
+        "viem": "^2.56.9",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+    },
     "apps/web": {
       "name": "@yakusoku/web",
       "dependencies": {
@@ -298,6 +308,8 @@
     "@yakusoku/shared": ["@yakusoku/shared@workspace:packages/shared"],
 
     "@yakusoku/store": ["@yakusoku/store@workspace:apps/store"],
+
+    "@yakusoku/verifier": ["@yakusoku/verifier@workspace:apps/verifier"],
 
     "@yakusoku/web": ["@yakusoku/web@workspace:apps/web"],
 
