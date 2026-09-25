@@ -7,16 +7,20 @@
     "@types/bun": "latest"
   },
   "dependencies": {
-    "@yakusoku/shared": "workspace:*",
     "@typesafe-ai/sdk": "0.6.0",
     "@x402/core": "2.27.0",
     "@x402/evm": "2.27.0",
     "@x402/extensions": "2.27.0",
+    "@yakusoku/shared": "workspace:*",
     "hono": "^4.13.9",
     "jose": "^6.2.12",
-    "viem": "^2.56.9"
+    "viem": "^2.56.9",
+    "zod": "^4.6.5"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev": "bun --env-file=../../../.env.hackathon --watch index.ts",
+    "start": "bun --env-file=../../../.env.hackathon index.ts",
+    "roundtrip": "bun --env-file=../../../.env.hackathon scripts/roundtrip.ts"
   }
 }

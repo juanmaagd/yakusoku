@@ -8,7 +8,9 @@
   "scripts": {
     "typecheck": "bun run --filter \"@yakusoku/*\" typecheck",
     "test": "bun test --pass-with-no-tests",
-    "store": "bun run --filter @yakusoku/store dev"
+    "store": "bun run --filter @yakusoku/store dev",
+    "firewall": "bun run --filter @yakusoku/firewall dev",
+    "roundtrip": "bun run --filter @yakusoku/firewall roundtrip"
   },
   "devDependencies": {
     "@types/bun": "latest",
