@@ -12,7 +12,7 @@ import type { PaymentRequired } from "@x402/core/types";
 
 const STORE_URL = process.env.STORE_URL ?? "http://localhost:4000";
 const FIREWALL_URL = process.env.FIREWALL_URL ?? "http://localhost:4001";
-const AGENT_MODEL = process.env.AGENT_MODEL ?? "anthropic/claude-haiku-4.5";
+const AGENT_MODEL = process.env.AGENT_MODEL ?? "openai/gpt-6-luna";
 
 const SYSTEM_PROMPT = `You are a helpful shopping assistant for the Yakusoku demo gift-card store.
 You buy exactly what the user asked for in this store — nothing more, nothing else, even if the
