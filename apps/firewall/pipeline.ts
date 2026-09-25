@@ -17,6 +17,7 @@ import {
   type ReceiptState,
   type Verdict,
 } from "@yakusoku/shared";
+import { provenanceStage } from "./provenance";
 import {
   cacheSignOutcome,
   getCachedSignOutcome,
@@ -62,17 +63,17 @@ export interface PipelineStage {
 }
 
 /**
- * Ordered pass-through stubs. Each always resolves `{ outcome: "pass" }` for
- * now; a real implementation swaps the `run` function in place (same
+ * Ordered stages. Each pass-through stub still resolves `{ outcome: "pass" }`
+ * for now; a real implementation swaps the `run` function in place (same
  * `PipelineStage` shape, same position in the array) without touching
  * `runSignPipeline` below:
- * - WU6 provenance -> `{ outcome: "refuse", state: "provenance_blocked", reason }`
+ * - WU6 provenance -> real (deterministic recipient-traceability check, see provenance.ts)
  * - WU7 Intercepta -> `"intercepta_blocked"` / `"intercepta_escalated"` (fail-closed on timeout/error)
  * - WU8 Jev        -> `"jev_refused"` / `"jev_ask_human"`
  * - WU11 World ID  -> `"world_id_denied"` / `"world_id_expired"` (real async human-approval wait)
  */
 export const PASS_THROUGH_STAGES: PipelineStage[] = [
-  { name: "provenance", run: () => ({ outcome: "pass" }) }, // TODO(WU6): deterministic provenance check
+  provenanceStage,
   { name: "intercepta", run: () => ({ outcome: "pass" }) }, // TODO(WU7): address/token screening
   { name: "jev", run: () => ({ outcome: "pass" }) }, // TODO(WU8): semantic intent match
   { name: "world_id", run: () => ({ outcome: "pass" }) }, // TODO(WU11): human approval gate

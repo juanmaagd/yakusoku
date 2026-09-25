@@ -77,6 +77,13 @@ async function main(): Promise<void> {
   const intent = intentJson as IntentResponse;
   console.log(`intent ${intent.id}, remainingBudget=${intent.remainingBudget}`);
 
+  // Same shape the WU4 agent sends; provenance (WU6) fails closed without it.
+  const SIGN_CONTEXT = {
+    userRequest: "Buy me a $1 Amazon gift card (rehearsal)",
+    justification: "The user asked for this exact gift card.",
+    untrustedContent: [],
+  };
+
   console.log("\n=== 2. Fetch the rehearsal gift card (expect 402) ===");
   const rehearsalUrl = `${STORE_URL}/giftcard/amazon-1-rehearsal`;
   const rehearsalHeader = await fetch402(rehearsalUrl);
@@ -87,6 +94,7 @@ async function main(): Promise<void> {
     intentId: intent.id,
     paymentRequiredHeader: rehearsalHeader,
     resourceUrl: rehearsalUrl,
+    context: SIGN_CONTEXT,
   });
   console.log(signStatus, signJson);
   const sign = signJson as SignResponse;
@@ -115,6 +123,7 @@ async function main(): Promise<void> {
     intentId: intent.id,
     paymentRequiredHeader: amazon25Header,
     resourceUrl: amazon25Url,
+    context: SIGN_CONTEXT,
   });
   console.log(refuseStatus, refuseJson);
   const refuse = refuseJson as SignResponse;
@@ -127,6 +136,7 @@ async function main(): Promise<void> {
     intentId: intent.id,
     paymentRequiredHeader: rehearsalHeader,
     resourceUrl: rehearsalUrl,
+    context: SIGN_CONTEXT,
   });
   console.log(repeatStatus, repeatJson);
   const repeat = repeatJson as SignResponse;
