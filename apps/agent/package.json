@@ -17,6 +17,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "start": "bun --env-file=../../../.env.hackathon index.ts",
-    "dev-intent": "bun --env-file=../../../.env.hackathon scripts/dev-intent.ts"
+    "dev-intent": "bun --env-file=../../../.env.hackathon scripts/dev-intent.ts",
+    "attack": "bun --env-file=../../../.env.hackathon scripts/attack.ts"
   }
 }

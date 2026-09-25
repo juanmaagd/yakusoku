@@ -18,7 +18,8 @@
     "scenarios": "bun run --filter @yakusoku/firewall scenarios",
     "reset-data": "bun run --filter @yakusoku/firewall reset-data",
     "agent": "bun run --filter @yakusoku/agent start",
-    "dev-intent": "bun run --filter @yakusoku/agent dev-intent"
+    "dev-intent": "bun run --filter @yakusoku/agent dev-intent",
+    "attack": "bun run --filter @yakusoku/agent attack"
   },
   "devDependencies": {
     "@types/bun": "latest",

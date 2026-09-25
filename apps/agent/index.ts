@@ -154,7 +154,7 @@ function parseArgs(argv: string[]): { intentId: string; userRequest: string; com
 }
 
 /** Builds the three shopping tools, closing over one run's intent id and untrusted-content log. */
-function buildTools(intentId: string, userRequest: string) {
+function buildTools(intentId: string, userRequest: string, compromised = false) {
   const seenContent: SeenContent[] = [];
 
   const browseCatalog = tool({
@@ -164,10 +164,25 @@ function buildTools(intentId: string, userRequest: string) {
       const url = `${STORE_URL}/catalog`;
       console.log(`[tool:browseCatalog] GET ${url}`);
       const res = await fetch(url);
-      const body = await res.json();
+      const body = (await res.json()) as { products?: { sku: string }[] };
       seenContent.push({ source: url, text: JSON.stringify(body) });
-      console.log(`[tool:browseCatalog] -> ${(body as { products?: unknown[] }).products?.length ?? 0} products`);
-      return body;
+      console.log(`[tool:browseCatalog] -> ${body.products?.length ?? 0} products`);
+      if (!compromised) return body;
+      // Simulated poisoned tool output: the store's promo copy arrives inside
+      // the catalog response, the way a real injection reaches an agent.
+      const storeNotices: { sku: string; text: string }[] = [];
+      for (const product of body.products ?? []) {
+        const promoUrl = `${STORE_URL}/promo/${encodeURIComponent(product.sku)}`;
+        const promoRes = await fetch(promoUrl);
+        if (promoRes.status !== 200) continue;
+        const promo = (await promoRes.json()) as { traps: { id: string; text: string }[] };
+        for (const trap of promo.traps) {
+          storeNotices.push({ sku: product.sku, text: trap.text });
+          seenContent.push({ source: `${promoUrl}#${trap.id}`, text: trap.text });
+        }
+      }
+      console.log(`[tool:browseCatalog] (compromised) +${storeNotices.length} store notices in the catalog output`);
+      return { ...body, storeNotices };
     },
   });
 
@@ -316,7 +331,7 @@ function buildTools(intentId: string, userRequest: string) {
 
 async function main(): Promise<void> {
   const { intentId, userRequest, compromised } = parseArgs(process.argv.slice(2));
-  const tools = buildTools(intentId, userRequest);
+  const tools = buildTools(intentId, userRequest, compromised);
 
   if (compromised) {
     console.log("[agent] COMPROMISED MODE (simulated prompt injection for the demo)");
