@@ -407,19 +407,37 @@ function buildJevInputFromStageContext(ctx: StageContext): JevInput {
   };
 }
 
+/**
+ * Structured judgment for `DecisionReceipt.jev`, built whenever Jev actually
+ * answered — `pay` included, not just blocks (WU9: no more packing
+ * probabilities into the reason string, see `StageVerdict.detail`).
+ */
+function buildJevDetail(judgment: JevJudgment): Record<string, unknown> | undefined {
+  if (!judgment.probabilities) return undefined;
+  return {
+    jev: {
+      matchesIntent: judgment.probabilities.matchesIntent,
+      looksLikeSocialEngineering: judgment.probabilities.looksLikeSocialEngineering,
+      paymentSourceIsUntrustedContent: judgment.probabilities.paymentSourceIsUntrustedContent,
+      actionChoice: judgment.probabilities.actionChoice,
+      actionConfidence: judgment.probabilities.actionConfidence,
+      riskScore: judgment.probabilities.riskScore,
+      riskConfidence: judgment.probabilities.riskConfidence,
+      riskNormalized: judgment.probabilities.riskNormalized,
+      verdict: judgment.verdict,
+      model: judgment.model,
+      latencyMs: judgment.latencyMs,
+    },
+  };
+}
+
 export const jevStage: PipelineStage = {
   name: "jev",
   async run(ctx: StageContext): Promise<StageVerdict> {
     const judgment = await judgeIntent(buildJevInputFromStageContext(ctx));
-    if (judgment.verdict === "pay") return { outcome: "pass" };
+    const detail = buildJevDetail(judgment);
+    if (judgment.verdict === "pay") return { outcome: "pass", detail };
     const state: ReceiptState = judgment.verdict === "refuse" ? "jev_refused" : "jev_ask_human";
-    // Probabilities travel in the reason string (StageVerdict has no
-    // structured field) so they reach DecisionReceipt.reasons for the
-    // dashboard without touching packages/shared — see WU8 report.
-    return {
-      outcome: judgment.verdict,
-      state,
-      reason: `${judgment.reason} [${formatJevProbabilities(judgment.probabilities)}]`,
-    };
+    return { outcome: judgment.verdict, state, reason: judgment.reason, detail };
   },
 };

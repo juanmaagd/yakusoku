@@ -187,6 +187,21 @@ function buildTools(intentId: string, userRequest: string) {
         txHash = settlement.transaction;
         explorerUrl = `https://sepolia.basescan.org/tx/${txHash}`;
         console.log(`[tool:buy] settled tx=${txHash} ${explorerUrl}`);
+        // Best-effort: tell the firewall about the settlement so its receipt
+        // (and the dashboard's SSE feed, WU9) carries the tx hash. Never
+        // fails the purchase — the gift card already settled onchain.
+        try {
+          const settlementRes = await fetch(`${FIREWALL_URL}/receipts/${signResult.receiptId}/settlement`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ txHash }),
+          });
+          if (!settlementRes.ok) {
+            console.log(`[tool:buy] settlement report failed: ${settlementRes.status}`);
+          }
+        } catch (err) {
+          console.log(`[tool:buy] settlement report error: ${String(err)}`);
+        }
       }
       console.log("[tool:buy] gift card:", giftCard);
 

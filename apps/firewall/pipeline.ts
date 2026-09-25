@@ -1,9 +1,15 @@
 // The core decision pipeline (plan-tecnico.md §2.3):
 //   idempotency -> policy -> provenance -> Intercepta -> Jev -> World ID -> sign
 // Every branch is fail-closed (plan-tecnico.md §2.4): any doubt or error
-// produces `refuse`/`ask_human`, never `pay`. Provenance/Intercepta/Jev/World
-// ID are pass-through stubs for WU3 — see PASS_THROUGH_STAGES below for the
-// plug-in point WU6-WU11 replace them at.
+// produces `refuse`/`ask_human`, never `pay`. Intercepta/World ID are
+// pass-through stubs — see PASS_THROUGH_STAGES below for the plug-in point
+// WU7/WU11 replace them at.
+//
+// WU9 additions: every finalized receipt carries a per-stage `timeline`
+// (idempotency, policy, provenance, intercepta, jev, world_id, sign) and,
+// when Jev ran, its structured probabilities in `receipt.jev` — on every
+// evaluation, `pay` included, via `StageVerdict.detail` rather than string
+// parsing (see jev.ts).
 
 import { createHash } from "node:crypto";
 import type { PaymentRequired } from "@x402/core/types";
@@ -15,6 +21,7 @@ import {
   type DecisionReceipt,
   type PaymentRequirement,
   type ReceiptState,
+  type ReceiptTimelineEntry,
   type Verdict,
 } from "@yakusoku/shared";
 import { jevStage } from "./jev";
@@ -55,8 +62,8 @@ export interface StageContext {
 }
 
 export type StageVerdict =
-  | { outcome: "pass" }
-  | { outcome: "refuse" | "ask_human"; state: ReceiptState; reason: string };
+  | { outcome: "pass"; detail?: Record<string, unknown> }
+  | { outcome: "refuse" | "ask_human"; state: ReceiptState; reason: string; detail?: Record<string, unknown> };
 
 export interface PipelineStage {
   name: string;
@@ -70,7 +77,7 @@ export interface PipelineStage {
  * `runSignPipeline` below:
  * - WU6 provenance -> real (deterministic recipient-traceability check, see provenance.ts)
  * - WU7 Intercepta -> `"intercepta_blocked"` / `"intercepta_escalated"` (fail-closed on timeout/error)
- * - WU8 Jev        -> `"jev_refused"` / `"jev_ask_human"`
+ * - WU8 Jev        -> real (see jev.ts)
  * - WU11 World ID  -> `"world_id_denied"` / `"world_id_expired"` (real async human-approval wait)
  */
 export const PASS_THROUGH_STAGES: PipelineStage[] = [
@@ -128,9 +135,27 @@ function checkPolicy(
 
 // --- Receipts --------------------------------------------------------------
 
+/** Fields describing "what this payment is for", known as soon as the
+ * request and (when resolvable) the intent are read — attached to every
+ * receipt this pipeline run produces, however it ends. */
+interface ReceiptContext {
+  paymentIdentifier: string;
+  intentId: string;
+  task?: string;
+  resourceUrl: string;
+  amount?: string;
+  payTo?: string;
+}
+
 function buildReceipt(input: {
   paymentIdentifier: string;
   intentId: string;
+  task?: string;
+  resourceUrl: string;
+  amount?: string;
+  payTo?: string;
+  timeline: ReceiptTimelineEntry[];
+  jev?: DecisionReceipt["jev"];
   state: ReceiptState;
   verdict: Verdict;
   reason: string;
@@ -143,12 +168,24 @@ function buildReceipt(input: {
     state: input.state,
     verdict: input.verdict,
     reasons: [input.reason],
+    task: input.task,
+    resourceUrl: input.resourceUrl,
+    amount: input.amount,
+    payTo: input.payTo,
+    timeline: input.timeline,
+    jev: input.jev,
   };
 }
 
 function finalize(input: {
   paymentIdentifier: string;
   intentId: string;
+  task?: string;
+  resourceUrl: string;
+  amount?: string;
+  payTo?: string;
+  timeline: ReceiptTimelineEntry[];
+  jev?: DecisionReceipt["jev"];
   state: ReceiptState;
   verdict: Verdict;
   reason: string;
@@ -175,11 +212,25 @@ function finalize(input: {
 // --- Orchestration -----------------------------------------------------------
 
 async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string): Promise<PipelineOutcome> {
+  const timeline: ReceiptTimelineEntry[] = [];
+  const intent = getIntent(req.intentId);
+  const accepts0 = (req.paymentRequired.accepts?.[0] ?? {}) as Partial<PaymentRequirement>;
+  const receiptContext: ReceiptContext = {
+    paymentIdentifier,
+    intentId: req.intentId,
+    task: intent?.message.task,
+    resourceUrl: req.resourceUrl,
+    amount: accepts0.amount,
+    payTo: accepts0.payTo,
+  };
+
+  const idempotencyStart = Date.now();
   const cached = getCachedSignOutcome(paymentIdentifier);
+  timeline.push({ stage: "idempotency", outcome: cached ? "hit" : "pass", ms: Date.now() - idempotencyStart });
   if (cached) {
     return finalize({
-      paymentIdentifier,
-      intentId: req.intentId,
+      ...receiptContext,
+      timeline,
       state: transition("initial", "idempotent_hit"),
       verdict: cached.verdict,
       reason: `idempotent replay of a previously processed payment (${cached.reason})`,
@@ -188,12 +239,11 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
     });
   }
 
-  const accepts0 = req.paymentRequired.accepts?.[0];
   const requirementResult = paymentRequirementSchema.safeParse(accepts0);
   if (!requirementResult.success) {
     return finalize({
-      paymentIdentifier,
-      intentId: req.intentId,
+      ...receiptContext,
+      timeline,
       state: transition("initial", "policy_rejected"),
       verdict: "refuse",
       reason: `malformed payment requirement: ${requirementResult.error.message}`,
@@ -202,12 +252,18 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
   }
   const requirement = requirementResult.data;
 
-  const intent = getIntent(req.intentId);
+  const policyStart = Date.now();
   const policyResult = checkPolicy(intent, requirement);
+  timeline.push({
+    stage: "policy",
+    outcome: policyResult.ok ? "pass" : "refuse",
+    reason: policyResult.ok ? undefined : policyResult.reason,
+    ms: Date.now() - policyStart,
+  });
   if (!policyResult.ok) {
     return finalize({
-      paymentIdentifier,
-      intentId: req.intentId,
+      ...receiptContext,
+      timeline,
       state: transition("initial", "policy_rejected"),
       verdict: "refuse",
       reason: policyResult.reason,
@@ -231,7 +287,7 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
   recordSpend(intentId, amount);
   let signed = false;
   try {
-    return await runStagesAndSign(req, paymentIdentifier, stageCtx, () => {
+    return await runStagesAndSign(receiptContext, timeline, stageCtx, () => {
       signed = true;
     });
   } finally {
@@ -240,39 +296,50 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
 }
 
 async function runStagesAndSign(
-  req: SignRequest,
-  paymentIdentifier: string,
+  receiptContext: ReceiptContext,
+  timeline: ReceiptTimelineEntry[],
   stageCtx: StageContext,
   markSigned: () => void,
 ): Promise<PipelineOutcome> {
+  let jevDetail: DecisionReceipt["jev"];
   for (const stage of PASS_THROUGH_STAGES) {
+    const stageStart = Date.now();
     const result = await stage.run(stageCtx);
+    const ms = Date.now() - stageStart;
+    if (result.detail?.jev) jevDetail = result.detail.jev as DecisionReceipt["jev"];
+
     if (result.outcome !== "pass") {
+      timeline.push({ stage: stage.name, outcome: result.outcome, reason: result.reason, ms });
       return finalize({
-        paymentIdentifier,
-        intentId: req.intentId,
+        ...receiptContext,
+        timeline,
+        jev: jevDetail,
         state: transition("initial", result.state),
         verdict: result.outcome,
         reason: `${stage.name}: ${result.reason}`,
         cache: true,
       });
     }
+    timeline.push({ stage: stage.name, outcome: "pass", ms });
   }
 
   // Every check passed — enter the pre-signature gate. WU11 replaces the
-  // world_id pass-through stage above with a real wait; for WU3 the gate
+  // world_id pass-through stage above with a real wait; until then the gate
   // resolves immediately once signing succeeds.
   const preSignState = transition("initial", "awaiting_world_id");
+  const signStart = Date.now();
   try {
     const { paymentSignatureHeader } = await signPayment({
-      paymentRequired: req.paymentRequired,
+      paymentRequired: stageCtx.paymentRequired,
       maxBudgetAtomic: stageCtx.intent.message.budget,
-      paymentIdentifier,
+      paymentIdentifier: receiptContext.paymentIdentifier,
     });
     markSigned();
+    timeline.push({ stage: "sign", outcome: "pass", ms: Date.now() - signStart });
     return finalize({
-      paymentIdentifier,
-      intentId: req.intentId,
+      ...receiptContext,
+      timeline,
+      jev: jevDetail,
       state: transition(preSignState, "signed"),
       verdict: "pay",
       reason: "all pipeline checks passed",
@@ -280,15 +347,14 @@ async function runStagesAndSign(
       cache: true,
     });
   } catch (err) {
-    // createPaymentPayload/signing failed -> refuse, never pay (plan-tecnico.md
-    // §2.4). WU1's ReceiptState enum has no dedicated sign-failure state;
-    // `world_id_denied` is the closest fail-closed exit from the pre-signature
-    // gate ("did not clear the last gate before signing").
+    // createPaymentPayload/signing failed -> refuse, never pay (plan-tecnico.md §2.4).
     const reason = `signing failed: ${err instanceof Error ? err.message : String(err)}`;
+    timeline.push({ stage: "sign", outcome: "refuse", reason, ms: Date.now() - signStart });
     return finalize({
-      paymentIdentifier,
-      intentId: req.intentId,
-      state: transition(preSignState, "world_id_denied"),
+      ...receiptContext,
+      timeline,
+      jev: jevDetail,
+      state: transition(preSignState, "sign_failed"),
       verdict: "refuse",
       reason,
       cache: true,
@@ -306,7 +372,9 @@ export async function runSignPipeline(req: SignRequest): Promise<PipelineOutcome
     return finalize({
       paymentIdentifier,
       intentId: req.intentId,
-      state: transition("initial", "policy_rejected"),
+      resourceUrl: req.resourceUrl,
+      timeline: [],
+      state: transition("initial", "error"),
       verdict: "refuse",
       reason,
       cache: false,

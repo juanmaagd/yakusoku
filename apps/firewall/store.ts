@@ -1,8 +1,21 @@
-// In-memory state for the firewall: signed intents, decision receipts, and
+// Persistent state for the firewall: signed intents, decision receipts, and
 // the idempotency cache keyed by the computed x402 payment-identifier
-// (pipeline.ts). A hackathon MVP — no persistence, single process.
+// (pipeline.ts). Backed by `bun:sqlite` (WU9) so a `--watch` restart or crash
+// doesn't lose intents/receipts/spend mid-demo — everything here is a
+// synchronous call, so the atomic budget-reservation window in pipeline.ts
+// (no `await` between the policy check and `recordSpend`) still holds.
 
-import type { DecisionReceipt, TaskIntentMessage, Verdict } from "@yakusoku/shared";
+import { Database } from "bun:sqlite";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import {
+  decisionReceiptSchema,
+  stringifyWithBigint,
+  taskIntentMessageSchema,
+  type DecisionReceipt,
+  type TaskIntentMessage,
+  type Verdict,
+} from "@yakusoku/shared";
 
 export interface StoredIntent {
   id: string;
@@ -20,9 +33,83 @@ export interface CachedSignOutcome {
   paymentSignature?: string;
 }
 
-const intents = new Map<string, StoredIntent>();
-const receipts = new Map<string, DecisionReceipt>();
-const idempotencyCache = new Map<string, CachedSignOutcome>();
+// --- Database setup ----------------------------------------------------------
+
+const DATA_DIR = join(import.meta.dir, "data");
+mkdirSync(DATA_DIR, { recursive: true });
+
+const db = new Database(join(DATA_DIR, "firewall.sqlite"));
+db.exec("PRAGMA journal_mode = WAL;");
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS intents (
+    id TEXT PRIMARY KEY,
+    message_json TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    signer TEXT NOT NULL,
+    spent TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS receipts (
+    receipt_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    data_json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS receipts_created_at ON receipts (created_at);
+  CREATE TABLE IF NOT EXISTS idempotency_cache (
+    payment_identifier TEXT PRIMARY KEY,
+    data_json TEXT NOT NULL
+  );
+`);
+
+// --- Statements ----------------------------------------------------------
+
+const insertIntentStmt = db.prepare(
+  `INSERT INTO intents (id, message_json, signature, signer, spent, created_at) VALUES ($id, $message, $signature, $signer, $spent, $createdAt)`,
+);
+const getIntentStmt = db.prepare(`SELECT * FROM intents WHERE id = $id`);
+const listIntentsStmt = db.prepare(`SELECT * FROM intents ORDER BY created_at DESC`);
+const updateSpentStmt = db.prepare(`UPDATE intents SET spent = $spent WHERE id = $id`);
+
+const upsertReceiptStmt = db.prepare(
+  `INSERT INTO receipts (receipt_id, created_at, data_json) VALUES ($id, $createdAt, $data)
+   ON CONFLICT(receipt_id) DO UPDATE SET data_json = excluded.data_json`,
+);
+const getReceiptStmt = db.prepare(`SELECT data_json FROM receipts WHERE receipt_id = $id`);
+const listReceiptsStmt = db.prepare(`SELECT data_json FROM receipts ORDER BY created_at DESC LIMIT $limit`);
+
+const getCachedOutcomeStmt = db.prepare(`SELECT data_json FROM idempotency_cache WHERE payment_identifier = $id`);
+const setCachedOutcomeStmt = db.prepare(
+  `INSERT INTO idempotency_cache (payment_identifier, data_json) VALUES ($id, $data)
+   ON CONFLICT(payment_identifier) DO UPDATE SET data_json = excluded.data_json`,
+);
+
+// --- Row <-> domain mapping ----------------------------------------------
+
+interface IntentRow {
+  id: string;
+  message_json: string;
+  signature: string;
+  signer: string;
+  spent: string;
+  created_at: string;
+}
+
+function rowToIntent(row: IntentRow): StoredIntent {
+  // `message_json` was written with `stringifyWithBigint` (bigint -> string);
+  // re-parsing through the schema coerces those strings back to bigint.
+  const message = taskIntentMessageSchema.parse(JSON.parse(row.message_json));
+  return {
+    id: row.id,
+    message,
+    signature: row.signature as `0x${string}`,
+    signer: row.signer as `0x${string}`,
+    spent: BigInt(row.spent),
+    createdAt: row.created_at,
+  };
+}
+
+// --- Intents ---------------------------------------------------------------
 
 export function createIntent(
   message: TaskIntentMessage,
@@ -37,12 +124,25 @@ export function createIntent(
     spent: 0n,
     createdAt: new Date().toISOString(),
   };
-  intents.set(intent.id, intent);
+  insertIntentStmt.run({
+    $id: intent.id,
+    $message: stringifyWithBigint(message),
+    $signature: signature,
+    $signer: signer,
+    $spent: "0",
+    $createdAt: intent.createdAt,
+  });
   return intent;
 }
 
 export function getIntent(id: string): StoredIntent | undefined {
-  return intents.get(id);
+  const row = getIntentStmt.get({ $id: id }) as IntentRow | null;
+  return row ? rowToIntent(row) : undefined;
+}
+
+export function listIntents(): StoredIntent[] {
+  const rows = listIntentsStmt.all() as IntentRow[];
+  return rows.map(rowToIntent);
 }
 
 /** Never negative — a successful spend can't exceed what policy already allowed. */
@@ -51,24 +151,48 @@ export function remainingBudget(intent: StoredIntent): bigint {
   return remaining > 0n ? remaining : 0n;
 }
 
+/**
+ * Reserves (positive `amount`) or releases (negative `amount`) spend against
+ * an intent. Synchronous read-modify-write over `bun:sqlite` — safe against
+ * concurrent `/sign` calls only because callers never `await` between reading
+ * the intent for the policy check and calling this (see pipeline.ts), so no
+ * other request's JS can interleave in between.
+ */
 export function recordSpend(intentId: string, amount: bigint): void {
-  const intent = intents.get(intentId);
-  if (!intent) throw new Error(`recordSpend: unknown intentId ${intentId}`);
-  intent.spent += amount;
+  const row = getIntentStmt.get({ $id: intentId }) as IntentRow | null;
+  if (!row) throw new Error(`recordSpend: unknown intentId ${intentId}`);
+  const newSpent = BigInt(row.spent) + amount;
+  updateSpentStmt.run({ $spent: newSpent.toString(), $id: intentId });
 }
 
+// --- Receipts --------------------------------------------------------------
+
 export function saveReceipt(receipt: DecisionReceipt): void {
-  receipts.set(receipt.receiptId, receipt);
+  upsertReceiptStmt.run({
+    $id: receipt.receiptId,
+    $createdAt: receipt.createdAt,
+    $data: JSON.stringify(receipt),
+  });
 }
 
 export function getReceipt(id: string): DecisionReceipt | undefined {
-  return receipts.get(id);
+  const row = getReceiptStmt.get({ $id: id }) as { data_json: string } | null;
+  return row ? decisionReceiptSchema.parse(JSON.parse(row.data_json)) : undefined;
 }
 
+/** Latest-first, for the dashboard's initial load (WU9/WU10). */
+export function listReceipts(limit = 50): DecisionReceipt[] {
+  const rows = listReceiptsStmt.all({ $limit: limit }) as { data_json: string }[];
+  return rows.map((row) => decisionReceiptSchema.parse(JSON.parse(row.data_json)));
+}
+
+// --- Idempotency cache -------------------------------------------------------
+
 export function getCachedSignOutcome(paymentIdentifier: string): CachedSignOutcome | undefined {
-  return idempotencyCache.get(paymentIdentifier);
+  const row = getCachedOutcomeStmt.get({ $id: paymentIdentifier }) as { data_json: string } | null;
+  return row ? (JSON.parse(row.data_json) as CachedSignOutcome) : undefined;
 }
 
 export function cacheSignOutcome(paymentIdentifier: string, outcome: CachedSignOutcome): void {
-  idempotencyCache.set(paymentIdentifier, outcome);
+  setCachedOutcomeStmt.run({ $id: paymentIdentifier, $data: JSON.stringify(outcome) });
 }

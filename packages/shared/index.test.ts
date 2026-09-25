@@ -61,4 +61,9 @@ describe("receipt transition()", () => {
     expect(() => transition("policy_rejected", "signed")).toThrow();
     expect(() => transition("initial", "settled")).toThrow();
   });
+
+  test("allows sign_failed from awaiting_world_id and error from initial (WU9 fix)", () => {
+    expect(transition("awaiting_world_id", "sign_failed")).toBe("sign_failed");
+    expect(transition("initial", "error")).toBe("error");
+  });
 });
