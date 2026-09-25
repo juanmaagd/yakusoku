@@ -1,0 +1,17 @@
+{
+  "name": "agent",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@ai-sdk/gateway": "^4.0.92",
+    "@x402/core": "2.27.0",
+    "ai": "^7.0.114"
+  }
+}

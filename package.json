@@ -1,0 +1,5 @@
+{
+  "name": "yakusoku",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"]
+}
