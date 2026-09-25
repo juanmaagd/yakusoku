@@ -1,16 +1,19 @@
 import { cookieStorage, createConfig, createStorage, http } from 'wagmi'
-import { mainnet, sepolia } from 'wagmi/chains'
+import { baseSepolia } from 'wagmi/chains'
+import { injected } from 'wagmi/connectors'
 
+// Yakusoku only ever signs against Base Sepolia (packages/shared CHAIN_ID),
+// and only via an injected wallet (MetaMask) for the hackathon demo.
 export function getConfig() {
   return createConfig({
-    chains: [mainnet, sepolia],
+    chains: [baseSepolia],
+    connectors: [injected()],
     storage: createStorage({
       storage: cookieStorage,
     }),
     ssr: true,
     transports: {
-      [mainnet.id]: http(),
-      [sepolia.id]: http(),
+      [baseSepolia.id]: http(),
     },
   })
 }

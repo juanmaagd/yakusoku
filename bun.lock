@@ -60,6 +60,7 @@
       "name": "@yakusoku/web",
       "dependencies": {
         "@tanstack/react-query": "latest",
+        "@yakusoku/shared": "workspace:*",
         "next": "latest",
         "react": "latest",
         "react-dom": "latest",
