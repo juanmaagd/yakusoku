@@ -1,15 +1,15 @@
 // The core decision pipeline (plan-tecnico.md §2.3):
 //   idempotency -> policy -> provenance -> Intercepta -> Jev -> World ID -> sign
 // Every branch is fail-closed (plan-tecnico.md §2.4): any doubt or error
-// produces `refuse`/`ask_human`, never `pay`. Intercepta/World ID are
-// pass-through stubs — see PASS_THROUGH_STAGES below for the plug-in point
-// WU7/WU11 replace them at.
+// produces `refuse`/`ask_human`, never `pay`. World ID is still a
+// pass-through stub — see PASS_THROUGH_STAGES below for the plug-in point
+// WU11 replaces it at.
 //
 // WU9 additions: every finalized receipt carries a per-stage `timeline`
 // (idempotency, policy, provenance, intercepta, jev, world_id, sign) and,
-// when Jev ran, its structured probabilities in `receipt.jev` — on every
-// evaluation, `pay` included, via `StageVerdict.detail` rather than string
-// parsing (see jev.ts).
+// when Jev/Intercepta ran, their structured detail in `receipt.jev`/
+// `receipt.intercepta` — on every evaluation, `pay` included, via
+// `StageVerdict.detail` rather than string parsing (see jev.ts, intercepta.ts).
 
 import { createHash } from "node:crypto";
 import type { PaymentRequired } from "@x402/core/types";
@@ -24,6 +24,7 @@ import {
   type ReceiptTimelineEntry,
   type Verdict,
 } from "@yakusoku/shared";
+import { interceptaStage } from "./intercepta";
 import { jevStage } from "./jev";
 import { provenanceStage } from "./provenance";
 import {
@@ -76,13 +77,13 @@ export interface PipelineStage {
  * `PipelineStage` shape, same position in the array) without touching
  * `runSignPipeline` below:
  * - WU6 provenance -> real (deterministic recipient-traceability check, see provenance.ts)
- * - WU7 Intercepta -> `"intercepta_blocked"` / `"intercepta_escalated"` (fail-closed on timeout/error)
+ * - WU7 Intercepta -> real (address/token screening, see intercepta.ts)
  * - WU8 Jev        -> real (see jev.ts)
  * - WU11 World ID  -> `"world_id_denied"` / `"world_id_expired"` (real async human-approval wait)
  */
 export const PASS_THROUGH_STAGES: PipelineStage[] = [
   provenanceStage,
-  { name: "intercepta", run: () => ({ outcome: "pass" }) }, // TODO(WU7): address/token screening
+  interceptaStage,
   jevStage,
   { name: "world_id", run: () => ({ outcome: "pass" }) }, // TODO(WU11): human approval gate
 ];
@@ -156,6 +157,7 @@ function buildReceipt(input: {
   payTo?: string;
   timeline: ReceiptTimelineEntry[];
   jev?: DecisionReceipt["jev"];
+  intercepta?: DecisionReceipt["intercepta"];
   state: ReceiptState;
   verdict: Verdict;
   reason: string;
@@ -174,6 +176,7 @@ function buildReceipt(input: {
     payTo: input.payTo,
     timeline: input.timeline,
     jev: input.jev,
+    intercepta: input.intercepta,
   };
 }
 
@@ -186,6 +189,7 @@ function finalize(input: {
   payTo?: string;
   timeline: ReceiptTimelineEntry[];
   jev?: DecisionReceipt["jev"];
+  intercepta?: DecisionReceipt["intercepta"];
   state: ReceiptState;
   verdict: Verdict;
   reason: string;
@@ -302,11 +306,13 @@ async function runStagesAndSign(
   markSigned: () => void,
 ): Promise<PipelineOutcome> {
   let jevDetail: DecisionReceipt["jev"];
+  let interceptaDetail: DecisionReceipt["intercepta"];
   for (const stage of PASS_THROUGH_STAGES) {
     const stageStart = Date.now();
     const result = await stage.run(stageCtx);
     const ms = Date.now() - stageStart;
     if (result.detail?.jev) jevDetail = result.detail.jev as DecisionReceipt["jev"];
+    if (result.detail?.intercepta) interceptaDetail = result.detail.intercepta as DecisionReceipt["intercepta"];
 
     if (result.outcome !== "pass") {
       timeline.push({ stage: stage.name, outcome: result.outcome, reason: result.reason, ms });
@@ -314,6 +320,7 @@ async function runStagesAndSign(
         ...receiptContext,
         timeline,
         jev: jevDetail,
+        intercepta: interceptaDetail,
         state: transition("initial", result.state),
         verdict: result.outcome,
         reason: `${stage.name}: ${result.reason}`,
@@ -340,6 +347,7 @@ async function runStagesAndSign(
       ...receiptContext,
       timeline,
       jev: jevDetail,
+      intercepta: interceptaDetail,
       state: transition(preSignState, "signed"),
       verdict: "pay",
       reason: "all pipeline checks passed",
@@ -354,6 +362,7 @@ async function runStagesAndSign(
       ...receiptContext,
       timeline,
       jev: jevDetail,
+      intercepta: interceptaDetail,
       state: transition(preSignState, "sign_failed"),
       verdict: "refuse",
       reason,

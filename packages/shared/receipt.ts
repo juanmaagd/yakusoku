@@ -139,10 +139,18 @@ export const decisionReceiptSchema = z.object({
   amount: z.string().optional(),
   payTo: z.string().optional(),
   timeline: z.array(receiptTimelineEntrySchema),
+  /** Structured Intercepta verdict (WU7) — attached on every evaluation this
+   * stage actually ran, `pass` included, mirroring `jev`'s `detail` pattern.
+   * `addressVerdict`/`tokenVerdict` are `"unavailable"`/omitted respectively
+   * on a fail-closed path (missing key, timeout, network error) where no
+   * trustworthy verdict was reached. */
   intercepta: z
     .object({
       addressVerdict: z.string(),
-      tokenVerdict: z.string(),
+      addressScore: z.number().optional(),
+      tokenVerdict: z.string().optional(),
+      cached: z.boolean(),
+      latencyMs: z.number(),
     })
     .optional(),
   jev: jevJudgmentSchema.optional(),

@@ -13,6 +13,7 @@
     "web": "bun run --filter @yakusoku/web dev",
     "roundtrip": "bun run --filter @yakusoku/firewall roundtrip",
     "jev-cases": "bun run --filter @yakusoku/firewall jev-cases",
+    "intercepta-check": "bun run --filter @yakusoku/firewall intercepta-check",
     "agent": "bun run --filter @yakusoku/agent start",
     "dev-intent": "bun run --filter @yakusoku/agent dev-intent"
   },
