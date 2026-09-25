@@ -8,5 +8,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "viem": "^2.56.9",
+    "zod": "^4.6.5"
   }
 }

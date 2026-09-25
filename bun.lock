@@ -72,6 +72,10 @@
     },
     "packages/shared": {
       "name": "@yakusoku/shared",
+      "dependencies": {
+        "viem": "^2.56.9",
+        "zod": "^4.6.5",
+      },
       "devDependencies": {
         "@types/bun": "latest",
       },
