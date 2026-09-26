@@ -100,7 +100,22 @@ export interface CachedSignOutcome {
  */
 export interface PendingApproval {
   receiptId: string;
+  /** WU: purchase ref — the PURCHASE identifier (pipeline.ts's
+   * `computePurchaseIdentifier`): base identifier alone when the request
+   * carried no `purchaseRef`, otherwise a distinct hash of (base identifier,
+   * purchaseRef). This is what a repeat `/sign` for the SAME purchase
+   * replays (`getPendingApprovalByPaymentIdentifier`). */
   paymentIdentifier: string;
+  /** WU: purchase ref — the BASE identifier this purchase's item/promise
+   * hashes to, regardless of `purchaseRef` (pipeline.ts's
+   * `computePaymentIdentifier`) — only ever used to cache a TERMINAL
+   * REFUSAL of this exact item under this exact promise (approvals.ts's
+   * `settleRefused`/`settleApproved`), so it can never be re-rolled by
+   * sending a new `purchaseRef`. Optional so a row persisted before this
+   * field existed still deserializes — every read site falls back to
+   * `paymentIdentifier` itself (byte-for-byte the pre-existing behavior:
+   * base === purchase when there was never a purchaseRef concept at all). */
+  baseIdentifier?: string;
   intentId: string;
   /** Reserved amount, atomic units — precise release on a non-`approved` outcome. */
   amountAtomic: string;

@@ -53,6 +53,36 @@
 // /intents/:id/revoke`) refuses through the existing `policy` check below
 // instead of a new stage. Either way, a World ID approval already in flight
 // is re-checked right before it signs (approvals.ts).
+//
+// WU: purchase ref — repeat-purchase fix (odd/tasks/standing-rules.md T7).
+// `computePaymentIdentifier` below hashes (promise/intentId, scheme, network,
+// amount, asset, payTo, resourceUrl) — the exact SAME hash for two separate
+// requests to buy two identical gift cards under one promise, so the second
+// one used to replay as an idempotent hit of the first (same signature, no
+// second transaction, budget unchanged) instead of running as its own
+// purchase. An agent now MAY attach an opaque `purchaseRef` to `/sign`
+// (`SignRequest.purchaseRef` below, validated by `purchaseRefSchema`,
+// `@yakusoku/shared`) to tell a NEW purchase of the same item apart from a
+// RETRY of the one it already started:
+//   - the pre-existing hash is now called the BASE identifier — unchanged,
+//     still computed the same way, from the same fields, regardless of any
+//     purchaseRef;
+//   - `computePurchaseIdentifier` derives a PURCHASE identifier: the base
+//     identifier itself when no purchaseRef was sent (byte-for-byte the
+//     pre-existing behavior), otherwise a distinct hash of (base identifier,
+//     purchaseRef).
+// Lookup order at the top of `runSignPipelineInner` (below the kill switch):
+// a cached TERMINAL REFUSAL under the BASE identifier wins outright, before
+// anything else runs — a refused or human-denied purchase of that exact item
+// under that promise can never be re-rolled by sending a new purchaseRef.
+// Only once that finds nothing does a cached `pay` outcome or a pending
+// World ID approval under the PURCHASE identifier replay, exactly like the
+// pre-existing single-identifier idempotency check did. A `pay`/`sign_failed`
+// outcome caches under the PURCHASE identifier (`receiptContext.paymentIdentifier`,
+// `finalize`'s default); a refusal explicitly passes `cacheIdentifier:
+// baseIdentifier` so it's the base identifier that gets frozen, not the
+// purchase one — see receipts.ts's `FinalizeInput.cacheIdentifier` and
+// approvals.ts's own `settleRefused`/`settleApproved` writes.
 
 import { createHash } from "node:crypto";
 import type { PaymentRequired } from "@x402/core/types";
@@ -93,6 +123,11 @@ export interface SignRequest {
   resourceUrl: string;
   /** Free-form context the agent supplies for later layers (provenance/Jev). */
   context?: Record<string, unknown>;
+  /** WU: purchase ref — already validated by `purchaseRefSchema`
+   * (`@yakusoku/shared`) at the HTTP layer (index.ts's `signRequestSchema`)
+   * before this ever reaches the pipeline. `undefined` for the pre-existing
+   * behavior — see this file's header comment. */
+  purchaseRef?: string;
 }
 
 // --- Pipeline stage plug-in point (WU6-WU11) --------------------------------
@@ -168,6 +203,23 @@ export function computePaymentIdentifier(intentId: string, accepts0: unknown, re
   return `pay_${hash}`;
 }
 
+/**
+ * WU: purchase ref — derives the PURCHASE identifier from a BASE identifier
+ * (`computePaymentIdentifier` above) and an optional `purchaseRef`. No ref ->
+ * the base identifier itself, unchanged (so every existing caller/behavior
+ * is byte-for-byte identical). A ref -> a distinct deterministic hash of
+ * (base identifier, purchaseRef), same hashing style as
+ * `computePaymentIdentifier` — distinct because it hashes a DIFFERENT input
+ * (the base identifier is itself already part of the digest), never
+ * colliding with the base identifier or with another purchaseRef's hash in
+ * practice.
+ */
+export function computePurchaseIdentifier(baseIdentifier: string, purchaseRef: string | undefined): string {
+  if (!purchaseRef) return baseIdentifier;
+  const hash = createHash("sha256").update([baseIdentifier, "purchaseRef", purchaseRef].join("|")).digest("hex");
+  return `pay_${hash}`;
+}
+
 // --- Policy --------------------------------------------------------------
 
 function checkPolicy(
@@ -214,14 +266,22 @@ function checkPolicy(
 
 // --- Orchestration -----------------------------------------------------------
 
-async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string): Promise<PipelineOutcome> {
+async function runSignPipelineInner(
+  req: SignRequest,
+  baseIdentifier: string,
+  purchaseIdentifier: string,
+): Promise<PipelineOutcome> {
   const timeline: ReceiptTimelineEntry[] = [];
   // P9.2: resolves either a wallet-signed intent or a world_id promise —
   // see promises.ts's `resolveMandate`/`promiseAsMandate`.
   const intent = resolveMandate(req.intentId);
   const accepts0 = (req.paymentRequired.accepts?.[0] ?? {}) as Partial<PaymentRequirement>;
   const receiptContext: ReceiptContext = {
-    paymentIdentifier,
+    // WU: purchase ref — every receipt this request produces displays (and,
+    // by default, caches under — see `finalize`) the PURCHASE identifier,
+    // not the base one; `baseIdentifier` is only threaded separately to the
+    // few call sites below that explicitly cache a REFUSAL under it instead.
+    paymentIdentifier: purchaseIdentifier,
     intentId: req.intentId,
     task: intent?.message.task,
     // Same `typeof` guard jev.ts uses for the same field (jev.ts's
@@ -231,6 +291,7 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
     resourceUrl: req.resourceUrl,
     amount: accepts0.amount,
     payTo: accepts0.payTo,
+    purchaseRef: req.purchaseRef,
   };
 
   // WU13 kill switch: checked before the idempotency cache and before any
@@ -253,13 +314,25 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
     });
   }
 
+  // WU: purchase ref — lookup order, in this exact order:
+  //   1. A cached TERMINAL REFUSAL under the BASE identifier wins outright —
+  //      checked FIRST, before the purchase-identifier cache below, so a
+  //      refused or human-denied purchase of this exact item under this
+  //      exact promise can never be re-rolled by attaching a new
+  //      purchaseRef. (No purchaseRef -> baseIdentifier === purchaseIdentifier,
+  //      so this is exactly the pre-existing single-identifier check.)
+  //   2. Otherwise a cached `pay`/`sign_failed` outcome — or a pending World
+  //      ID approval, just below — under the PURCHASE identifier replays,
+  //      same as the pre-existing idempotency check did.
   const idempotencyStart = Date.now();
-  const storedOutcome = getCachedSignOutcome(paymentIdentifier);
+  const baseOutcome = getCachedSignOutcome(baseIdentifier);
   // Funding refusals are no longer cached (runStagesAndSign); ignore any
   // cached before that change so the request is re-evaluated fresh.
-  const staleFundingRefusal =
-    storedOutcome?.verdict === "refuse" && storedOutcome.reason.startsWith(`${fundingStage.name}:`);
-  const cached = staleFundingRefusal ? undefined : storedOutcome;
+  const isStaleFundingRefusal = (outcome: typeof baseOutcome) =>
+    outcome?.verdict === "refuse" && outcome.reason.startsWith(`${fundingStage.name}:`);
+  const baseRefusal = baseOutcome?.verdict === "refuse" && !isStaleFundingRefusal(baseOutcome) ? baseOutcome : undefined;
+  const purchaseOutcome = baseRefusal ? undefined : getCachedSignOutcome(purchaseIdentifier);
+  const cached = baseRefusal ?? (isStaleFundingRefusal(purchaseOutcome) ? undefined : purchaseOutcome);
   timeline.push({ stage: "idempotency", outcome: cached ? "hit" : "pass", ms: Date.now() - idempotencyStart });
   if (cached) {
     return finalize({
@@ -276,8 +349,11 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
   // WU11: a repeat `/sign` for the same payment while a World ID device flow
   // is still pending returns that same pending approval — no second device
   // flow, no second budget reservation (approvals.ts's own idempotency
-  // cache write only happens once the gate reaches a terminal outcome).
-  const pendingApproval = getPendingApprovalByPaymentIdentifier(paymentIdentifier);
+  // cache write only happens once the gate reaches a terminal outcome). WU:
+  // purchase ref — keyed by the PURCHASE identifier: a DIFFERENT purchaseRef
+  // for the same item is a brand-new purchase, not a replay of this pending
+  // one, so it falls through to run its own pipeline below.
+  const pendingApproval = getPendingApprovalByPaymentIdentifier(purchaseIdentifier);
   if (pendingApproval?.status === "pending") {
     return pendingApprovalOutcome(pendingApproval);
   }
@@ -291,6 +367,7 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
       verdict: "refuse",
       reason: `malformed payment requirement: ${requirementResult.error.message}`,
       cache: true,
+      cacheIdentifier: baseIdentifier,
     });
   }
   const requirement = requirementResult.data;
@@ -311,6 +388,7 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
       verdict: "refuse",
       reason: policyResult.reason,
       cache: true,
+      cacheIdentifier: baseIdentifier,
     });
   }
   // policyResult.ok guarantees `intent` is defined (checkPolicy's first check).
@@ -329,20 +407,29 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
   // reopens this window. Released in `finally` unless the payment ends up
   // signed OR a World ID approval is left pending (the gate keeps the
   // reservation open and releases it itself once it resolves — approvals.ts).
+  // WU: purchase ref — this reservation is per REQUEST (per purchaseRef, or
+  // per call when there is none), same as before: two different purchaseRefs
+  // reaching here each reserve their own amount independently.
   const intentId = (intent as StoredIntent).id;
   const amount = BigInt(requirement.amount);
   recordSpend(intentId, amount);
   let signed = false;
   let pending = false;
   try {
-    return await runStagesAndSign(receiptContext, timeline, stageCtx, {
-      markSigned: () => {
-        signed = true;
+    return await runStagesAndSign(
+      receiptContext,
+      timeline,
+      stageCtx,
+      {
+        markSigned: () => {
+          signed = true;
+        },
+        markPending: () => {
+          pending = true;
+        },
       },
-      markPending: () => {
-        pending = true;
-      },
-    });
+      baseIdentifier,
+    );
   } finally {
     if (!signed && !pending) recordSpend(intentId, -amount);
   }
@@ -417,6 +504,7 @@ async function runStagesAndSign(
   timeline: ReceiptTimelineEntry[],
   stageCtx: StageContext,
   callbacks: { markSigned: () => void; markPending: () => void },
+  baseIdentifier: string,
 ): Promise<PipelineOutcome> {
   const evaluation = await evaluateStages(PIPELINE_STAGES, stageCtx);
   timeline.push(...evaluation.timeline);
@@ -436,6 +524,10 @@ async function runStagesAndSign(
       // the kill switch above: never freeze it as refused forever under this
       // paymentIdentifier; re-evaluate the exact same request fresh next time.
       cache: evaluation.outcome.stageName !== fundingStage.name,
+      // WU: purchase ref — a refusal freezes the BASE identifier, not the
+      // purchase one, so a different purchaseRef for this same item can
+      // never re-roll it (ignored when `cache` is false above).
+      cacheIdentifier: baseIdentifier,
     });
   }
 
@@ -448,6 +540,7 @@ async function runStagesAndSign(
       interceptaDetail,
       triggerReason: evaluation.outcome.reason,
       markPending: callbacks.markPending,
+      baseIdentifier,
     });
   }
 
@@ -503,21 +596,25 @@ async function runStagesAndSign(
       verdict: "refuse",
       reason,
       cache: true,
+      // WU: purchase ref — same reasoning as the refuse branch above.
+      cacheIdentifier: baseIdentifier,
     });
   }
 }
 
 /** Top-level entry point — always fail-closed, always returns a usable receiptId. */
 export async function runSignPipeline(req: SignRequest): Promise<PipelineOutcome> {
-  const paymentIdentifier = computePaymentIdentifier(req.intentId, req.paymentRequired.accepts?.[0], req.resourceUrl);
+  const baseIdentifier = computePaymentIdentifier(req.intentId, req.paymentRequired.accepts?.[0], req.resourceUrl);
+  const purchaseIdentifier = computePurchaseIdentifier(baseIdentifier, req.purchaseRef);
   try {
-    return await runSignPipelineInner(req, paymentIdentifier);
+    return await runSignPipelineInner(req, baseIdentifier, purchaseIdentifier);
   } catch (err) {
     const reason = `unexpected pipeline error: ${err instanceof Error ? err.message : String(err)}`;
     return finalize({
-      paymentIdentifier,
+      paymentIdentifier: purchaseIdentifier,
       intentId: req.intentId,
       resourceUrl: req.resourceUrl,
+      purchaseRef: req.purchaseRef,
       timeline: [],
       state: transition("initial", "error"),
       verdict: "refuse",

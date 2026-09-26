@@ -145,6 +145,13 @@ export interface StartApprovalGateInput {
   jevDetail?: DecisionReceipt["jev"];
   interceptaDetail?: DecisionReceipt["intercepta"];
   triggerReason: string;
+  /** WU: purchase ref — the BASE identifier this purchase's item/promise
+   * hashes to (pipeline.ts's `computePaymentIdentifier`), threaded through so
+   * a refusal reached from inside this gate (an unstartable device flow, or
+   * — via `settleRefused`/`settleApproved` below — a denial, wrong-human, or
+   * post-approval signing failure) caches under it instead of the purchase
+   * identifier (`receiptContext.paymentIdentifier`). */
+  baseIdentifier: string;
   /** Tells the caller (pipeline.ts) to keep the budget reservation open —
    * this is neither "signed" nor "released", a third outcome for the
    * reservation's lifecycle. */
@@ -152,7 +159,7 @@ export interface StartApprovalGateInput {
 }
 
 export async function startApprovalGate(input: StartApprovalGateInput): Promise<PipelineOutcome> {
-  const { receiptContext, timeline, stageCtx, jevDetail, interceptaDetail, triggerReason, markPending } = input;
+  const { receiptContext, timeline, stageCtx, jevDetail, interceptaDetail, triggerReason, baseIdentifier, markPending } = input;
   const receiptId = `receipt_${crypto.randomUUID()}`;
   const createdAt = new Date().toISOString();
   const gateStartedAtMs = Date.now();
@@ -176,6 +183,8 @@ export async function startApprovalGate(input: StartApprovalGateInput): Promise<
       verdict: "refuse",
       reason,
       cache: true,
+      // WU: purchase ref — freeze the BASE identifier, not the purchase one.
+      cacheIdentifier: baseIdentifier,
     });
   }
 
@@ -207,6 +216,11 @@ export async function startApprovalGate(input: StartApprovalGateInput): Promise<
   const pending: PendingApproval = {
     receiptId,
     paymentIdentifier: receiptContext.paymentIdentifier,
+    // WU: purchase ref — carried so `settleRefused`/`settleApproved` below
+    // can cache a terminal refusal under the BASE identifier once this gate
+    // resolves, without recomputing it (they only have `approval`/`receipt`,
+    // not the original request's `resourceUrl`/`accepts[0]`).
+    baseIdentifier,
     intentId: stageCtx.intent.id,
     amountAtomic: stageCtx.requirement.amount,
     deviceCode: device.deviceCode,
@@ -260,6 +274,12 @@ function finalizeResolution(
     payer?: string;
     payerKind?: DecisionReceipt["payerKind"];
     cache?: boolean;
+    /** WU: purchase ref — where `cache` writes to when true; omit to keep
+     * caching under `receipt.paymentIdentifier` (the purchase identifier,
+     * the right default for a `pay` outcome). A refuse outcome passes the
+     * BASE identifier here instead — see `settleRefused`/`settleApproved`'s
+     * own callers below. */
+    cacheIdentifier?: string;
   } = {},
 ): void {
   finalize({
@@ -272,6 +292,10 @@ function finalizeResolution(
     resourceUrl: receipt.resourceUrl ?? "",
     amount: receipt.amount,
     payTo: receipt.payTo,
+    // WU: purchase ref — carried from the interim receipt this update
+    // replaces (`finalize` overwrites the whole row, never merges), so it
+    // isn't silently dropped once the gate resolves.
+    purchaseRef: receipt.purchaseRef,
     timeline: [...receipt.timeline, ...extraTimeline],
     jev: receipt.jev,
     intercepta: receipt.intercepta,
@@ -280,6 +304,7 @@ function finalizeResolution(
     verdict,
     reason,
     paymentSignature: opts.paymentSignature,
+    cacheIdentifier: opts.cacheIdentifier,
     payer: opts.payer,
     payerKind: opts.payerKind,
     cache: opts.cache ?? true,
@@ -324,7 +349,17 @@ export async function settleRefused(
     // payment. A lapse with no answer, a pause, or an error is not: never
     // freeze the same promise + item as refused, re-evaluate (and ask the
     // human again) on the next attempt.
-    { worldId: { approved: false, status }, cache: !TRANSIENT_REFUSALS.has(status) },
+    // WU: purchase ref — cached (when at all) under the BASE identifier, so
+    // a cached denial of THIS item under THIS promise can never be re-rolled
+    // by sending a new purchaseRef. `approval.baseIdentifier` is `undefined`
+    // only for a `PendingApproval` row persisted before this field existed
+    // (or a test fixture that omits it) — falls back to `paymentIdentifier`
+    // itself, byte-for-byte the pre-existing single-identifier behavior.
+    {
+      worldId: { approved: false, status },
+      cache: !TRANSIENT_REFUSALS.has(status),
+      cacheIdentifier: approval.baseIdentifier ?? approval.paymentIdentifier,
+    },
   );
   recordSpend(approval.intentId, -BigInt(approval.amountAtomic));
 
@@ -493,7 +528,11 @@ export async function settleApproved(approval: PendingApproval, claims: FreshApp
       { stage: "world_id", outcome: "pass", reason: "human approved via World ID", ms: worldMs },
       { stage: "sign", outcome: "refuse", reason, ms: Date.now() - signStart },
     ];
-    finalizeResolution(approval, receipt, timeline, "sign_failed", "refuse", reason, { worldId: worldIdDetail });
+    // WU: purchase ref — same base-identifier caching as `settleRefused`.
+    finalizeResolution(approval, receipt, timeline, "sign_failed", "refuse", reason, {
+      worldId: worldIdDetail,
+      cacheIdentifier: approval.baseIdentifier ?? approval.paymentIdentifier,
+    });
     recordSpend(approval.intentId, -BigInt(approval.amountAtomic));
     approval.status = "error";
     approval.reason = reason;

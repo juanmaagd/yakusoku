@@ -23,7 +23,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
-import type { TaskIntentMessage } from "@yakusoku/shared";
+import { USDC_SEPOLIA_ADDRESS, X402_NETWORK, type TaskIntentMessage } from "@yakusoku/shared";
 
 // store.ts opens a bun:sqlite file under FIREWALL_DATA_DIR and signer.ts
 // reads FIREWALL_PRIVATE_KEY, both at module-load time — same isolated-temp-
@@ -109,5 +109,63 @@ describe("GET /approvals/:receiptId — no existence leak across mandates (P9)",
   test("no credential at all -> 401, before any existence check ever runs", async () => {
     const res = await fetch(`${BASE_URL}/approvals/receipt_p9_does_not_exist`);
     expect(res.status).toBe(401);
+  });
+});
+
+// --- WU: purchase ref — /sign request validation (odd/tasks/standing-rules.md T7) --
+//
+// `POST /sign`'s own `signRequestSchema` (this file) validates `purchaseRef`
+// before ever reaching `runSignPipeline` — a malformed one never reaches the
+// pipeline at all. The "valid purchaseRef" case below deliberately requests
+// an over-budget amount so the request refuses at `checkPolicy`, strictly
+// before the `merchant` stage's real self-fetch of `resourceUrl` — this
+// worktree must never make that fetch hit `localhost:4000`/`4001` for real
+// (those ports belong to the main checkout's live dev servers).
+
+function makeSignBody(purchaseRef: unknown, amount = "1000000") {
+  return {
+    paymentRequired: {
+      x402Version: 2,
+      accepts: [
+        {
+          scheme: "exact",
+          network: X402_NETWORK,
+          amount,
+          asset: USDC_SEPOLIA_ADDRESS,
+          payTo: "0x1111111111111111111111111111111111111111",
+        },
+      ],
+    },
+    resourceUrl: "http://localhost:4000/giftcard/amazon-1-purchase-ref-index-test",
+    purchaseRef,
+  };
+}
+
+describe("POST /sign — purchaseRef validation (WU: purchase ref)", () => {
+  test("a malformed purchaseRef -> 400 invalid_sign_request, never reaches the pipeline", async () => {
+    const { agentKey } = createIntent(makeTaskIntent("dd"), `0x${"aa".repeat(65)}`, "0x4444444444444444444444444444444444444444");
+    const res = await fetch(`${BASE_URL}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${agentKey}` },
+      body: JSON.stringify(makeSignBody("not a valid ref!")),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe("invalid_sign_request");
+  });
+
+  test("a well-formed purchaseRef passes validation and reaches the pipeline (refuses at policy, not 400)", async () => {
+    const { agentKey } = createIntent(makeTaskIntent("ee"), `0x${"aa".repeat(65)}`, "0x5555555555555555555555555555555555555555");
+    const res = await fetch(`${BASE_URL}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${agentKey}` },
+      // $50 > the $5 budget makeTaskIntent grants -> policy_rejected, well
+      // before the merchant stage's own self-fetch would ever run.
+      body: JSON.stringify(makeSignBody("valid-ref-1", "50000000")),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { verdict?: string; reason?: string };
+    expect(body.verdict).toBe("refuse");
+    expect(body.reason).toContain("exceeds remaining budget");
   });
 });

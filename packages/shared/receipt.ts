@@ -3,6 +3,21 @@ import { stepUpAttestationSchema } from "./step-up";
 import { verdictSchema } from "./verdict";
 
 /**
+ * WU: purchase ref — an optional per-purchase reference an agent attaches to
+ * `/sign` (apps/firewall/index.ts's `signRequestSchema`) so a repeat purchase
+ * of the SAME item under the SAME promise (two $1 gift cards, say) can be
+ * told apart from a retry of the SAME purchase. The MCP `pay_x402` tool
+ * (apps/mcp/tools.ts) reuses this exact schema so both layers agree on the
+ * one shape. Deliberately narrow (alnum/underscore/hyphen, 1-64 chars): this
+ * value only ever feeds a hash (pipeline.ts's `computePurchaseIdentifier`),
+ * never a URL, a file path, or anything else where a wider alphabet could
+ * matter.
+ */
+export const purchaseRefSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{1,64}$/, "purchaseRef must match ^[A-Za-z0-9_-]{1,64}$");
+
+/**
  * DecisionReceipt state machine — named states inspired by ClearIntent's
  * pattern (plan-tecnico.md §2.2). Every branch of the pipeline
  * (idempotency → policy → provenance → Intercepta → Jev → World ID → sign,
@@ -231,5 +246,12 @@ export const decisionReceiptSchema = z.object({
    */
   payer: z.string().optional(),
   payerKind: z.enum(["smart_account", "firewall"]).optional(),
+  /**
+   * WU: purchase ref — the caller's own `purchaseRef` for this exact
+   * purchase, echoed back for audit (see `purchaseRefSchema` above).
+   * `undefined` when the caller sent none (the pre-existing, unchanged
+   * behavior) or for a receipt persisted before this field existed.
+   */
+  purchaseRef: purchaseRefSchema.optional(),
 });
 export type DecisionReceipt = z.infer<typeof decisionReceiptSchema>;

@@ -10,16 +10,20 @@ import type { StoredIntent } from "./store";
 // pipeline.ts transitively imports store.ts (opens a bun:sqlite file under
 // FIREWALL_DATA_DIR at module-load time) and signer.ts (reads
 // FIREWALL_PRIVATE_KEY at module-load time to build the firewall's signing
-// account). This suite only exercises `evaluateStages` — pure stage-iteration
-// logic, no signing or persistence involved — so point both at an isolated
+// account). This suite mostly exercises `evaluateStages` — pure
+// stage-iteration logic, no signing or persistence involved — plus (the
+// "purchaseRef" describe blocks below) the network-free TOP of
+// `runSignPipeline` (kill switch / idempotency / pending-approval / policy),
+// which never reaches a real pipeline stage — so point both at an isolated
 // temp dir / throwaway key before importing, rather than opening the shared
 // dev sqlite file (apps/firewall/data/, live while the dev server runs) or
 // requiring a real key when `bun test` runs without `--env-file` (the root
-// `test` script). Neither value is ever used to sign or persist anything in
-// this file.
+// `test` script). Neither value is ever used to sign or persist anything for
+// real in this file.
 process.env.FIREWALL_DATA_DIR = mkdtempSync(join(tmpdir(), "yakusoku-pipeline-test-"));
 process.env.FIREWALL_PRIVATE_KEY ??= `0x${"11".repeat(32)}`;
-const { evaluateStages } = await import("./pipeline");
+const { computePaymentIdentifier, computePurchaseIdentifier, evaluateStages, runSignPipeline } = await import("./pipeline");
+const { createIntent, getCachedSignOutcome, getIntent, savePendingApproval } = await import("./store");
 
 // Pure ordering tests for the HARDEN "refuse dominance" fix — stubbed stages
 // only, no network. The rule under test: `refuse` from any stage stops
@@ -179,5 +183,155 @@ describe("evaluateStages", () => {
     const result = await evaluateStages([], makeCtx());
     expect(result.outcome).toEqual({ kind: "clear" });
     expect(result.timeline).toEqual([]);
+  });
+});
+
+// --- WU: purchase ref — repeat-purchase fix (odd/tasks/standing-rules.md T7) -
+//
+// These tests only ever exercise the TOP of `runSignPipeline` — the kill
+// switch, the idempotency/base-refusal lookup, the pending-approval lookup,
+// and `checkPolicy` — deliberately never reaching a real `PIPELINE_STAGES`
+// stage. `merchant` (the very first real stage) does a genuine `fetch()` of
+// `resourceUrl`, which this worktree must never do against a bare
+// `localhost:4000`/`4001` — those ports belong to the main checkout's live
+// dev servers (see this task's own instructions) — so every fixture below is
+// shaped to refuse at `checkPolicy` (an over-budget amount) or short-circuit
+// at the pending-approval check, both strictly BEFORE any stage would run.
+// "Pay"-outcome coverage (two purchaseRefs settling as two independently
+// signed payments, two independent budget reservations) lives in
+// approvals.test.ts, which already has the established no-network pattern
+// for driving the sign path directly (`settleApproved`, no
+// `PIPELINE_STAGES` either).
+
+function randomNonce(): `0x${string}` {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return `0x${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}` as `0x${string}`;
+}
+
+function makeWalletIntent(budgetAtomic: bigint) {
+  return createIntent(
+    {
+      task: "Buy a $1 Amazon gift card",
+      budget: budgetAtomic,
+      categories: ["gift_card:amazon"],
+      expiry: BigInt(Math.floor(Date.now() / 1000) + 3600),
+      nonce: randomNonce(),
+    },
+    `0x${"aa".repeat(65)}`,
+    "0x3333333333333333333333333333333333333333",
+  );
+}
+
+function makePaymentRequired(amount: string): PaymentRequired {
+  return {
+    x402Version: 2,
+    accepts: [
+      {
+        scheme: "exact",
+        network: X402_NETWORK,
+        amount,
+        asset: USDC_SEPOLIA_ADDRESS,
+        payTo: "0xbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
+        maxTimeoutSeconds: 60,
+        extra: { name: "USDC", version: "2" },
+      },
+    ],
+  } as unknown as PaymentRequired;
+}
+
+describe("computePurchaseIdentifier", () => {
+  test("no purchaseRef -> identical to the base identifier (current behavior, byte-for-byte)", () => {
+    const base = computePaymentIdentifier(
+      "intent_x",
+      { scheme: "exact", network: X402_NETWORK, amount: "1", asset: USDC_SEPOLIA_ADDRESS, payTo: "0xabc" },
+      "http://x/y",
+    );
+    expect(computePurchaseIdentifier(base, undefined)).toBe(base);
+  });
+
+  test("a purchaseRef produces a distinct, deterministic identifier per ref", () => {
+    const base = "pay_deadbeef";
+    const first = computePurchaseIdentifier(base, "first");
+    const firstAgain = computePurchaseIdentifier(base, "first");
+    const second = computePurchaseIdentifier(base, "second");
+
+    expect(first).toBe(firstAgain); // deterministic — same (base, ref) -> same identifier
+    expect(first).not.toBe(base); // distinct from the base identifier
+    expect(first).not.toBe(second); // distinct per purchaseRef
+  });
+});
+
+describe("runSignPipeline — purchaseRef base/purchase identifier routing (network-free)", () => {
+  test("a refusal under purchaseRef A is replayed for purchaseRef B — cached on the BASE identifier, not either purchase identifier", async () => {
+    const { intent } = makeWalletIntent(1_000_000n); // $1 budget
+    const paymentRequired = makePaymentRequired("5000000"); // $5 > budget -> policy_rejected, before any stage runs
+    const resourceUrl = "http://localhost:4000/giftcard/amazon-5-purchase-ref-test";
+
+    const first = await runSignPipeline({ intentId: intent.id, paymentRequired, resourceUrl, purchaseRef: "ref-a" });
+    expect(first.verdict).toBe("refuse");
+    expect(first.reason).toContain("exceeds remaining budget");
+
+    const baseIdentifier = computePaymentIdentifier(intent.id, paymentRequired.accepts?.[0], resourceUrl);
+    const purchaseIdentifierA = computePurchaseIdentifier(baseIdentifier, "ref-a");
+    const purchaseIdentifierB = computePurchaseIdentifier(baseIdentifier, "ref-b");
+    expect(purchaseIdentifierA).not.toBe(purchaseIdentifierB);
+    // Cached under the BASE identifier — a DIFFERENT purchaseRef's lookup
+    // finds it too (that's exactly what the assertion below proves).
+    expect(getCachedSignOutcome(baseIdentifier)?.verdict).toBe("refuse");
+
+    const second = await runSignPipeline({ intentId: intent.id, paymentRequired, resourceUrl, purchaseRef: "ref-b" });
+    expect(second.verdict).toBe("refuse");
+    expect(second.reason).toContain("idempotent replay of a previously processed payment");
+  });
+
+  test("no purchaseRef -> identical to current (pre-feature) behavior: a policy refusal caches and replays under one single identifier", async () => {
+    const { intent } = makeWalletIntent(1_000_000n);
+    const paymentRequired = makePaymentRequired("5000000");
+    const resourceUrl = "http://localhost:4000/giftcard/amazon-5-no-ref-test";
+
+    const first = await runSignPipeline({ intentId: intent.id, paymentRequired, resourceUrl });
+    expect(first.verdict).toBe("refuse");
+    const baseIdentifier = computePaymentIdentifier(intent.id, paymentRequired.accepts?.[0], resourceUrl);
+    expect(getCachedSignOutcome(baseIdentifier)?.verdict).toBe("refuse");
+
+    const second = await runSignPipeline({ intentId: intent.id, paymentRequired, resourceUrl });
+    expect(second.verdict).toBe("refuse");
+    expect(second.reason).toContain("idempotent replay of a previously processed payment");
+  });
+
+  test("the same purchaseRef replays a pending World ID approval instead of starting a second one — no new budget reservation", async () => {
+    const { intent } = makeWalletIntent(5_000_000n);
+    const paymentRequired = makePaymentRequired("1000000");
+    const resourceUrl = "http://localhost:4000/giftcard/amazon-1-pending-ref-test";
+    const baseIdentifier = computePaymentIdentifier(intent.id, paymentRequired.accepts?.[0], resourceUrl);
+    const purchaseIdentifier = computePurchaseIdentifier(baseIdentifier, "ref-pending");
+
+    savePendingApproval({
+      receiptId: "receipt_pipeline_test_pending",
+      paymentIdentifier: purchaseIdentifier,
+      baseIdentifier,
+      intentId: intent.id,
+      amountAtomic: "1000000",
+      deviceCode: "device-pipeline-test-pending",
+      userCode: "USER-1",
+      verificationUri: "https://sandbox.auth.world.org/device",
+      intervalSeconds: 5,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      requestedAt: new Date().toISOString(),
+      gateStartedAtMs: Date.now(),
+      status: "pending",
+      reason: "test setup",
+      paymentRequiredJson: JSON.stringify(paymentRequired),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const spentBefore = getIntent(intent.id)?.spent;
+    const result = await runSignPipeline({ intentId: intent.id, paymentRequired, resourceUrl, purchaseRef: "ref-pending" });
+    expect(result.verdict).toBe("ask_human");
+    expect(result.receiptId).toBe("receipt_pipeline_test_pending");
+    // The pending-approval short-circuit returns before `checkPolicy`/
+    // `recordSpend` ever runs — a replay never reserves budget a second time.
+    expect(getIntent(intent.id)?.spent).toBe(spentBefore);
   });
 });

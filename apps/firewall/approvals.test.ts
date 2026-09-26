@@ -38,8 +38,10 @@ const {
   createPromise,
   findOrCreateAccountBySubjectHash,
   getCachedSignOutcome,
+  getIntent,
   getPromise,
   getReceipt,
+  recordSpend,
   savePendingApproval,
   savePromise,
   setAccountDeployment,
@@ -64,13 +66,20 @@ function makeTaskIntent(): TaskIntentMessage {
 
 /** Seeds an intent + an `awaiting_world_id` receipt + a `pending`
  * PendingApproval row — the exact state `startApprovalGate` leaves behind
- * right before the gate resolves (`settleApproved`/`settleRefused` below). */
-function seedPendingApproval() {
-  const { intent } = createIntent(makeTaskIntent(), `0x${"aa".repeat(65)}`, "0x1111111111111111111111111111111111111111");
-  const paymentIdentifier = `pay_test_${crypto.randomUUID()}`;
+ * right before the gate resolves (`settleApproved`/`settleRefused` below).
+ * WU: purchase ref — `overrides.paymentIdentifier`/`overrides.baseIdentifier`
+ * let a caller simulate a purchaseRef-bearing request (a purchase identifier
+ * distinct from its base); every pre-existing call site omits them, so this
+ * is unchanged for them (`baseIdentifier` stays `undefined`, exactly like a
+ * `PendingApproval` row persisted before that field existed). */
+function seedPendingApproval(overrides: { paymentIdentifier?: string; baseIdentifier?: string; intentId?: string } = {}) {
+  const intentId =
+    overrides.intentId ??
+    createIntent(makeTaskIntent(), `0x${"aa".repeat(65)}`, "0x1111111111111111111111111111111111111111").intent.id;
+  const paymentIdentifier = overrides.paymentIdentifier ?? `pay_test_${crypto.randomUUID()}`;
   const { receiptId } = finalize({
     paymentIdentifier,
-    intentId: intent.id,
+    intentId,
     resourceUrl: "http://localhost:4000/giftcard/amazon-1",
     amount: AMOUNT,
     payTo: PAY_TO,
@@ -83,7 +92,8 @@ function seedPendingApproval() {
   const approval = {
     receiptId,
     paymentIdentifier,
-    intentId: intent.id,
+    baseIdentifier: overrides.baseIdentifier,
+    intentId,
     amountAtomic: AMOUNT,
     deviceCode: "device-1",
     userCode: "USER-1",
@@ -175,6 +185,116 @@ describe("settleRefused — only a human \"no\" is cached for the payment", () =
       expect(getCachedSignOutcome(approval.paymentIdentifier)).toBeUndefined();
     });
   }
+});
+
+// --- WU: purchase ref — base identifier caches a refusal/denial, purchase
+// identifier caches a pay (odd/tasks/standing-rules.md T7) -----------------
+//
+// `paymentIdentifier` above is the pre-existing single identifier — with no
+// purchaseRef, base and purchase are the same value, so every test above is
+// unaffected. These tests simulate a purchaseRef-bearing request by seeding
+// a `baseIdentifier` distinct from `paymentIdentifier` (exactly what
+// pipeline.ts's `computePurchaseIdentifier` would derive for two different
+// purchaseRefs of the same item), then drive `settleApproved`/`settleRefused`
+// directly — no PIPELINE_STAGES, no network, same discipline every other
+// test in this file already uses.
+
+describe("purchaseRef — a refusal/denial caches on the BASE identifier, never the purchase one", () => {
+  test("settleRefused (a human denial) caches under baseIdentifier, not under paymentIdentifier", async () => {
+    const baseIdentifier = `pay_test_base_${crypto.randomUUID()}`;
+    const { approval } = seedPendingApproval({ baseIdentifier, paymentIdentifier: `${baseIdentifier}_ref_a` });
+    expect(approval.paymentIdentifier).not.toBe(baseIdentifier);
+
+    await settleRefused(approval, "denied", "human denied the World ID approval request", "world_id_denied");
+
+    expect(getCachedSignOutcome(baseIdentifier)?.verdict).toBe("refuse");
+    expect(getCachedSignOutcome(approval.paymentIdentifier)).toBeUndefined();
+  });
+
+  test("a DIFFERENT purchaseRef (purchase identifier) of the same item finds that same base-cached denial", async () => {
+    const baseIdentifier = `pay_test_base_${crypto.randomUUID()}`;
+    const { approval: approvalA } = seedPendingApproval({ baseIdentifier, paymentIdentifier: `${baseIdentifier}_ref_a` });
+    await settleRefused(approvalA, "denied", "human denied the World ID approval request", "world_id_denied");
+
+    // pipeline.ts's own top-of-pipeline lookup (pipeline.test.ts covers the
+    // full runSignPipeline path) checks the BASE identifier first, before
+    // ref B's own purchase identifier — asserted here at the store level:
+    // the exact same base identifier a ref-B request would look up already
+    // carries the refusal ref A's settlement wrote.
+    const purchaseIdentifierB = `${baseIdentifier}_ref_b`;
+    expect(purchaseIdentifierB).not.toBe(approvalA.paymentIdentifier);
+    expect(getCachedSignOutcome(baseIdentifier)?.verdict).toBe("refuse");
+    expect(getCachedSignOutcome(purchaseIdentifierB)).toBeUndefined(); // never itself cached
+  });
+
+  test("a PendingApproval row with no baseIdentifier (pre-existing behavior) falls back to caching under paymentIdentifier itself", async () => {
+    const { approval } = seedPendingApproval(); // no overrides -> baseIdentifier undefined, same as every pre-existing test
+    await settleRefused(approval, "denied", "human denied the World ID approval request", "world_id_denied");
+    expect(getCachedSignOutcome(approval.paymentIdentifier)?.verdict).toBe("refuse");
+  });
+});
+
+describe("purchaseRef — a pay caches on the PURCHASE identifier; two purchaseRefs of one item settle independently", () => {
+  test("settleApproved caches under paymentIdentifier (the purchase identifier), never under the shared baseIdentifier", async () => {
+    const baseIdentifier = `pay_test_base_${crypto.randomUUID()}`;
+    const { approval } = seedPendingApproval({ baseIdentifier, paymentIdentifier: `${baseIdentifier}_ref_a` });
+
+    await settleApproved(approval, { sub: "world-id-subject-purchase-ref-a", acr: "dev", authTime: Math.floor(Date.now() / 1000) });
+
+    expect(getCachedSignOutcome(approval.paymentIdentifier)?.verdict).toBe("pay");
+    expect(getCachedSignOutcome(baseIdentifier)).toBeUndefined();
+  });
+
+  test("two purchaseRefs of the SAME item settle as two independent pay outcomes with distinct signatures and independent budget reservations", async () => {
+    const intentId = createIntent(
+      makeTaskIntent(),
+      `0x${"aa".repeat(65)}`,
+      "0x5555555555555555555555555555555555555555",
+    ).intent.id;
+    const baseIdentifier = `pay_test_base_${crypto.randomUUID()}`;
+    const { approval: approvalA, receiptId: receiptIdA } = seedPendingApproval({
+      intentId,
+      baseIdentifier,
+      paymentIdentifier: `${baseIdentifier}_ref_a`,
+    });
+    const { approval: approvalB, receiptId: receiptIdB } = seedPendingApproval({
+      intentId,
+      baseIdentifier,
+      paymentIdentifier: `${baseIdentifier}_ref_b`,
+    });
+
+    // Simulates pipeline.ts's own reservation (recordSpend right before
+    // running the stages, pipeline.ts's `runSignPipelineInner`) — two
+    // separate purchases of the SAME item each reserve their own amount.
+    recordSpend(intentId, BigInt(AMOUNT));
+    recordSpend(intentId, BigInt(AMOUNT));
+
+    await settleApproved(approvalA, { sub: "world-id-subject-purchase-ref", acr: "dev", authTime: Math.floor(Date.now() / 1000) });
+    await settleApproved(approvalB, { sub: "world-id-subject-purchase-ref", acr: "dev", authTime: Math.floor(Date.now() / 1000) });
+
+    const receiptA = getReceipt(receiptIdA);
+    const receiptB = getReceipt(receiptIdB);
+    expect(receiptA?.verdict).toBe("pay");
+    expect(receiptB?.verdict).toBe("pay");
+
+    // The receipt itself doesn't carry the payment signature (DecisionReceipt
+    // has no such field) — it lives in the idempotency cache, keyed by each
+    // purchase's own identifier (`CachedSignOutcome.paymentSignature`).
+    const signatureA = getCachedSignOutcome(approvalA.paymentIdentifier)?.paymentSignature;
+    const signatureB = getCachedSignOutcome(approvalB.paymentIdentifier)?.paymentSignature;
+    expect(signatureA).toBeDefined();
+    expect(signatureB).toBeDefined();
+    // Two distinct EIP-3009 nonces (signer.ts's real, local, non-network
+    // signing) -> two distinct signatures, so these settle as two separate
+    // on-chain transactions instead of one idempotent replay.
+    expect(signatureA).not.toBe(signatureB);
+    // Neither pay outcome leaks into the shared BASE identifier's cache.
+    expect(getCachedSignOutcome(baseIdentifier)).toBeUndefined();
+
+    // Both reservations persist independently — never merged/collapsed into
+    // a single one (settleApproved never releases spend on success).
+    expect(getIntent(intentId)?.spent).toBe(2n * BigInt(AMOUNT));
+  });
 });
 
 describe("settleRefused — never attaches an attestation (WU12)", () => {

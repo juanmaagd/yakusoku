@@ -11,7 +11,14 @@ import { z } from "zod";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 import type { PaymentRequired } from "@x402/core/types";
 import type { Hex } from "viem";
-import { signedTaskIntentSchema, transition, USDC_DECIMALS, X402_NETWORK, type DecisionReceipt } from "@yakusoku/shared";
+import {
+  purchaseRefSchema,
+  signedTaskIntentSchema,
+  transition,
+  USDC_DECIMALS,
+  X402_NETWORK,
+  type DecisionReceipt,
+} from "@yakusoku/shared";
 import {
   createIntent,
   createNonce,
@@ -46,7 +53,7 @@ import {
 import { extractBearerToken } from "./auth";
 import { verifyTaskIntentSignature } from "./signer";
 import { verifySiweSignIn } from "./siwe";
-import { computePaymentIdentifier, runSignPipeline } from "./pipeline";
+import { computePaymentIdentifier, computePurchaseIdentifier, runSignPipeline } from "./pipeline";
 import { approvalStatusResponse, resumePendingApprovalsOnBoot } from "./approvals";
 import { devApproveConnect, pollConnect, resumeConnectRequestsOnBoot, startConnect } from "./accounts";
 import {
@@ -798,6 +805,10 @@ const signRequestSchema = z
     resourceUrl: z.string().min(1),
     /** Free-form context for later pipeline layers (provenance/Jev, WU6/WU8). */
     context: z.record(z.string(), z.unknown()).optional(),
+    /** WU: purchase ref — tells a NEW purchase of the same item apart from a
+     * RETRY of the same purchase (pipeline.ts's file-header comment). Absent
+     * -> pre-existing behavior, unchanged. */
+    purchaseRef: purchaseRefSchema.optional(),
   })
   .refine((v) => v.paymentRequiredHeader !== undefined || v.paymentRequired !== undefined, {
     message: "either paymentRequiredHeader or paymentRequired is required",
@@ -816,7 +827,7 @@ app.post("/sign", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "invalid_sign_request", issues: parsed.error.issues }, 400);
   }
-  const { paymentRequiredHeader, resourceUrl, context } = parsed.data;
+  const { paymentRequiredHeader, resourceUrl, context, purchaseRef } = parsed.data;
 
   const auth = authenticateMandateCredential(c, parsed.data.intentId);
   if (!auth.ok) return c.json(auth.body, auth.status);
@@ -842,16 +853,20 @@ app.post("/sign", async (c) => {
     );
   }
 
+  // WU: purchase ref — this event's `paymentIdentifier` mirrors what the
+  // receipt itself will display (the PURCHASE identifier), computed the
+  // exact same way `runSignPipeline` does.
+  const baseIdentifierForEvent = computePaymentIdentifier(intentId, paymentRequired.accepts?.[0], resourceUrl);
   publish("sign.requested", {
     intentId,
     resourceUrl,
-    paymentIdentifier: computePaymentIdentifier(intentId, paymentRequired.accepts?.[0], resourceUrl),
+    paymentIdentifier: computePurchaseIdentifier(baseIdentifierForEvent, purchaseRef),
   });
 
   // runSignPipeline is itself fail-closed end-to-end; this catch is a last
   // resort net so a bug here still never surfaces a `pay` verdict.
   try {
-    const outcome = await runSignPipeline({ intentId, paymentRequired, resourceUrl, context });
+    const outcome = await runSignPipeline({ intentId, paymentRequired, resourceUrl, context, purchaseRef });
     // The pipeline already persisted the receipt; re-read it for its full
     // timeline so the dashboard gets one `stage.completed` event per stage
     // followed by the final `decision`, not just the terse HTTP response.

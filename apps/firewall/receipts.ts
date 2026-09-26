@@ -21,6 +21,11 @@ export interface ReceiptContext {
   resourceUrl: string;
   amount?: string;
   payTo?: string;
+  /** WU: purchase ref — the caller's own reference for this exact purchase,
+   * carried onto every receipt this request produces (see
+   * `packages/shared/receipt.ts`'s `purchaseRefSchema`). `undefined` when
+   * the caller sent none. */
+  purchaseRef?: string;
 }
 
 export interface ApprovalInfo {
@@ -49,6 +54,7 @@ export interface FinalizeInput {
   resourceUrl: string;
   amount?: string;
   payTo?: string;
+  purchaseRef?: string;
   timeline: ReceiptTimelineEntry[];
   jev?: DecisionReceipt["jev"];
   intercepta?: DecisionReceipt["intercepta"];
@@ -62,6 +68,15 @@ export interface FinalizeInput {
   payer?: string;
   payerKind?: DecisionReceipt["payerKind"];
   cache: boolean;
+  /** WU: purchase ref — where `cache` writes to when true. `undefined`
+   * defaults to `paymentIdentifier` itself (every pre-existing call site,
+   * and every `pay`/`sign_failed`-immediate outcome under a purchaseRef,
+   * which is meant to be replayed only for that exact purchase). A refusal
+   * cached under a purchaseRef instead sets this to the BASE identifier
+   * (pipeline.ts/approvals.ts) — a refused or human-denied purchase of that
+   * exact item under that promise can never be re-rolled with a new
+   * purchaseRef. Ignored when `cache` is false. */
+  cacheIdentifier?: string;
   /** Reuse an existing receiptId/createdAt instead of minting a new one — set
    * by the World ID gate when it resolves a receipt it already returned to
    * the caller in `awaiting_world_id`. */
@@ -83,6 +98,7 @@ export function buildReceipt(input: FinalizeInput): DecisionReceipt {
     resourceUrl: input.resourceUrl,
     amount: input.amount,
     payTo: input.payTo,
+    purchaseRef: input.purchaseRef,
     timeline: input.timeline,
     jev: input.jev,
     intercepta: input.intercepta,
@@ -96,7 +112,7 @@ export function finalize(input: FinalizeInput): PipelineOutcome {
   const receipt = buildReceipt(input);
   saveReceipt(receipt);
   if (input.cache) {
-    cacheSignOutcome(input.paymentIdentifier, {
+    cacheSignOutcome(input.cacheIdentifier ?? input.paymentIdentifier, {
       verdict: input.verdict,
       reason: input.reason,
       paymentSignature: input.paymentSignature,
