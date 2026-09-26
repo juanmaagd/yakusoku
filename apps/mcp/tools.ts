@@ -22,6 +22,7 @@ import {
   assertHttpUrl,
   FETCH_TIMEOUT_MS,
   MAX_BODY_BYTES,
+  noCredentialMessage,
   parseMaybeJson,
   pollWithTimeout,
   readCapped,
@@ -51,8 +52,24 @@ function fetchResource(httpMode: boolean, url: string, init: RequestInit): Promi
 /** Keyed by receiptId (globally unique, minted by the firewall) so
  * `check_approval` can retry the original resource once a pending World ID
  * gate resolves — receiptId is unique regardless of which session started
- * the payment, so this map is process-wide rather than per-session. */
-const pendingPayments = new Map<string, { url: string }>();
+ * the payment, so this map is process-wide rather than per-session.
+ *
+ * T8 fix B (odd/tasks/dokploy-deploy.md) — `owner` records the exact
+ * credential (agent key) that started this payment via `pay_x402`, so
+ * `check_approval` can refuse a caller whose own session credential doesn't
+ * match, instead of letting any session that learns a receiptId complete
+ * (and read the result of) another session's purchase. */
+const pendingPayments = new Map<string, { url: string; owner: string }>();
+
+/** Same wording for "never tracked here at all" and "tracked, but owned by a
+ * different credential" — a caller must never be able to tell those two
+ * cases apart (T8 fix B: never leak whether the receipt exists). */
+export function noPendingPurchaseMessage(receiptId: string): string {
+  return (
+    `no pending purchase found for receipt ${receiptId} on this session — check_approval only works for a ` +
+    "receiptId your own pay_x402 call returned, in this same session"
+  );
+}
 
 function ok(data: unknown): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
@@ -351,7 +368,7 @@ async function handleSignVerdict(
     return completePayment(httpMode, firewallUrl, agentKey, resourceUrl, sign.paymentSignature, sign.receiptId);
   }
   if (sign.verdict === "ask_human") {
-    pendingPayments.set(sign.receiptId, { url: resourceUrl });
+    pendingPayments.set(sign.receiptId, { url: resourceUrl, owner: agentKey });
     return {
       status: "needs_human_approval",
       verificationUri: sign.approval?.verificationUri,
@@ -414,7 +431,7 @@ async function pollConnectOnce(firewallUrl: string, pending: PendingConnect): Pr
  * `check_connection` (resuming this session's existing one) — both wait the
  * same ≤~30s budget, at the firewall's own recommended poll interval, before
  * telling the agent to check back later. */
-async function waitForConnectOutcome(session: SessionState, firewallUrl: string): Promise<CallToolResult> {
+async function waitForConnectOutcome(session: SessionState, firewallUrl: string, httpMode: boolean): Promise<CallToolResult> {
   const pending = session.pendingConnect;
   if (!pending) return fail("no pending connection — call connect first");
 
@@ -442,7 +459,12 @@ async function waitForConnectOutcome(session: SessionState, firewallUrl: string)
       );
     }
     session.setAgentKey(result.accountKey);
-    await saveStoredCredential(firewallUrl, { agentKey: result.accountKey, kind: "account", connectedAt: new Date().toISOString() });
+    // T8 fix A — never persist an HTTP session's credential to the shared
+    // file (see index.ts's file-header comment on `handleMcpRequest`); a
+    // stdio process still wants it remembered across restarts.
+    if (!httpMode) {
+      await saveStoredCredential(firewallUrl, { agentKey: result.accountKey, kind: "account", connectedAt: new Date().toISOString() });
+    }
     const { setupUrl, nextStep } = await maybeSetupHint(firewallUrl, result.accountKey);
     return ok({
       status: "connected",
@@ -507,7 +529,7 @@ async function pollFirstPromiseOnce(firewallUrl: string, pending: PendingFirstPr
  * all, so it stores the delivered account key exactly like `connect` does,
  * then applies the same P11.3a setup-link hint as a freshly connected
  * account. */
-async function waitForFirstPromiseOutcome(session: SessionState, firewallUrl: string): Promise<CallToolResult> {
+async function waitForFirstPromiseOutcome(session: SessionState, firewallUrl: string, httpMode: boolean): Promise<CallToolResult> {
   const pending = session.pendingFirstPromise;
   if (!pending) return fail("no pending first-time promise request — call request_promise again");
 
@@ -535,7 +557,10 @@ async function waitForFirstPromiseOutcome(session: SessionState, firewallUrl: st
       );
     }
     session.setAgentKey(result.accountKey);
-    await saveStoredCredential(firewallUrl, { agentKey: result.accountKey, kind: "account", connectedAt: new Date().toISOString() });
+    // T8 fix A — see waitForConnectOutcome's own comment above.
+    if (!httpMode) {
+      await saveStoredCredential(firewallUrl, { agentKey: result.accountKey, kind: "account", connectedAt: new Date().toISOString() });
+    }
     const { setupUrl, nextStep } = await maybeSetupHint(firewallUrl, result.accountKey);
     return ok({
       status: "active",
@@ -613,7 +638,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
           `Approve connecting this AI agent to your Omamorisan account in World App. Code: ${body.userCode}.`,
           body.verificationUriComplete ?? body.verificationUri,
         );
-        return await waitForConnectOutcome(session, config.firewallUrl);
+        return await waitForConnectOutcome(session, config.firewallUrl, config.httpMode);
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
@@ -634,7 +659,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         if (session.hasAgentKey()) {
           return ok({ status: "already_connected", message: "Already connected — call get_mandate to see what's authorized." });
         }
-        return await waitForConnectOutcome(session, config.firewallUrl);
+        return await waitForConnectOutcome(session, config.firewallUrl, config.httpMode);
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
@@ -692,7 +717,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
           }
           session.pendingFirstPromise = body;
           sendUrlElicitationBestEffort(server, `${body.summary} Code: ${body.userCode}.`, body.verificationUriComplete ?? body.verificationUri);
-          return await waitForFirstPromiseOutcome(session, config.firewallUrl);
+          return await waitForFirstPromiseOutcome(session, config.firewallUrl, config.httpMode);
         }
 
         const accountKey = session.getAgentKey();
@@ -725,7 +750,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         // session has no account key yet, so it can only be checked through
         // the pending first-promise state `request_promise` left behind.
         if (session.pendingFirstPromise && session.pendingFirstPromise.promiseId === promiseId) {
-          return await waitForFirstPromiseOutcome(session, config.firewallUrl);
+          return await waitForFirstPromiseOutcome(session, config.firewallUrl, config.httpMode);
         }
         if (!session.hasAgentKey() || credentialKind(session.getAgentKey()) !== "account") {
           return fail("check_promise needs a connected World ID account — call connect first.");
@@ -802,7 +827,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     async () => {
       try {
         if (!session.hasAgentKey()) {
-          return fail("no credential yet — call connect to link this agent to a human's account via World ID.");
+          return fail(noCredentialMessage(config.httpMode));
         }
         const agentKey = session.getAgentKey();
         if (credentialKind(agentKey) === "account") {
@@ -867,7 +892,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
       try {
         assertHttpUrl(url);
         if (!session.hasAgentKey()) {
-          return fail("no credential yet — call connect to link this agent to a human's account via World ID.");
+          return fail(noCredentialMessage(config.httpMode));
         }
         const agentKey = session.getAgentKey();
         const kind = credentialKind(agentKey);
@@ -948,6 +973,18 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     async ({ receiptId }) => {
       try {
         const agentKey = session.getAgentKey();
+
+        // T8 fix B — check ownership BEFORE ever asking the firewall, so a
+        // foreign receiptId never reaches a network call whose own status
+        // code (e.g. the firewall's 403 "forbidden" vs 404 "approval_not_found")
+        // could otherwise leak whether it exists. A receiptId this process
+        // has never tracked at all falls through to the firewall call below
+        // exactly as before.
+        const trackedElsewhere = pendingPayments.get(receiptId);
+        if (trackedElsewhere && trackedElsewhere.owner !== agentKey) {
+          return fail(noPendingPurchaseMessage(receiptId));
+        }
+
         const res = await fetch(`${config.firewallUrl}/approvals/${receiptId}`, {
           headers: { authorization: `Bearer ${agentKey}` },
         });
@@ -965,12 +1002,12 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         }
 
         if (body.status === "approved" && body.paymentSignature) {
+          // Re-read rather than reuse `trackedElsewhere`: same map, but this
+          // makes it explicit that ownership was already confirmed above (or
+          // there was never a record at all, handled identically below).
           const pending = pendingPayments.get(receiptId);
           if (!pending) {
-            return fail(
-              `approval ${receiptId} resolved as approved, but this server has no pending purchase recorded for ` +
-                "it (pay_x402 must have started it in this same process).",
-            );
+            return fail(noPendingPurchaseMessage(receiptId));
           }
           const result = await completePayment(config.httpMode, config.firewallUrl, agentKey, pending.url, body.paymentSignature, receiptId);
           pendingPayments.delete(receiptId);

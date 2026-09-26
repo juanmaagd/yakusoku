@@ -86,15 +86,17 @@ Names and where to get them — **never paste actual values into this file or a 
 
 ## How teammates connect their MCP client
 
-**Option A — hosted HTTP MCP (the shared server, simplest to configure):**
+**Option A — hosted HTTP MCP (the shared server, recommended):**
 
-Point the client at `https://<mcp-domain>/mcp` (Streamable HTTP transport). On first use, ask the agent to "connect my account" — it calls the `connect` tool, which shows a World ID link + code to approve in the World App.
+Point the client at `https://<mcp-domain>/mcp` (Streamable HTTP transport). On first use, ask the agent to "connect my account" (or just ask it to buy something — `request_promise` bootstraps an account in one step) — it shows a World ID link + code to approve in the World App.
 
-Known limitation today: a **brand-new** MCP session with no `Authorization` header falls back to whatever account last connected on this shared server (`apps/mcp/credentials.ts` keys its stored credential only by firewall URL, not by session — see the parent report for the exact fix). In practice this means: as long as your MCP client keeps the same session alive (most do, for the life of the app), you keep your own account; but a session that gets dropped and reconnects with no header may pick up a teammate's account instead of starting fresh. If you want a hard guarantee of your own separate account, use Option B.
+Multi-user safe: each MCP session keeps its own credential in memory only, for that session alone — never written to a shared file, never visible to another session (T8, `apps/mcp/session.ts`/`apps/mcp/index.ts`). Two teammates connecting to the same `https://<mcp-domain>/mcp` at the same time each get their own separate World ID account, with no cross-account bleed. `check_approval` likewise refuses (with a plain "not found"-style answer, never confirming or denying that a receipt exists) if it's asked about a payment some other session started.
 
-**Option B — stdio, pointed at the VPS firewall (one teammate, one account, no sharing):**
+The one thing to know: a session's credential lives only as long as that session does. If your MCP client's connection drops and reconnects with a brand-new session id (most clients keep one session for as long as the app runs, so this is uncommon in practice), it starts credential-less again — the agent will say so and just needs to call `connect`/`request_promise` once more.
 
-Each teammate runs the MCP server themselves, on their own machine, in stdio mode, pointed at the hosted firewall:
+**Option B — stdio, pointed at the VPS firewall (run the MCP server yourself):**
+
+Still available if you'd rather run the process yourself (e.g. to keep your credential in your own local file across restarts):
 
 ```json
 {
@@ -108,7 +110,7 @@ Each teammate runs the MCP server themselves, on their own machine, in stdio mod
 }
 ```
 
-This keeps each teammate's credential in their own local `~/.omamorisan/credentials.json` — no sharing, no cross-session risk. This was the anticipated answer in the original task doc's open question, and is the one to recommend for now.
+This keeps your credential in your own local `~/.omamorisan/credentials.json`, remembered across restarts — unchanged behavior, and no longer needed just to avoid sharing an account (Option A already isolates that).
 
 ## Reading logs
 

@@ -69,17 +69,39 @@ export interface SessionState {
   pendingFirstPromise?: PendingFirstPromise;
 }
 
-const NO_CREDENTIAL_MESSAGE =
-  "no credential yet for this MCP session — call the connect tool to link this agent to a human's account via " +
-  "World ID (or provide an existing wallet mandate key (yk_...) or account key (ya_...) via the Authorization: " +
-  "Bearer header, OMAMORISAN_AGENT_KEY, or the credentials file)";
+/** T8 fix A follow-up (odd/tasks/dokploy-deploy.md) — the no-credential hint
+ * differs by transport, since Fix A stopped the HTTP transport from ever
+ * reading/writing the shared credentials file (index.ts): stdio's credential
+ * is still file-backed (a stored key survives a process restart), so
+ * pointing at the file is still accurate there. An HTTP session's credential
+ * now lives ONLY in that session's own memory — never the shared file, never
+ * another session — so the only way back in is calling connect/
+ * request_promise again, which this message says plainly instead of naming a
+ * fallback that no longer applies to it. Exported so tools.ts's own direct
+ * "no credential yet" messages (pay_x402, get_mandate) stay in sync with
+ * this one. */
+export function noCredentialMessage(httpMode: boolean): string {
+  if (httpMode) {
+    return (
+      "no credential yet for this MCP session — call connect (or request_promise, which can create one in a " +
+      "single step) to link this agent to a human's account via World ID. This session's credential lives in " +
+      "memory only for this session — it is never shared with another session and never persisted, so a session " +
+      "that reconnects with a new session id must call connect/request_promise again."
+    );
+  }
+  return (
+    "no credential yet for this MCP session — call the connect tool to link this agent to a human's account via " +
+    "World ID (or provide an existing wallet mandate key (yk_...) or account key (ya_...) via the Authorization: " +
+    "Bearer header, OMAMORISAN_AGENT_KEY, or the credentials file)"
+  );
+}
 
-export function createSessionState(firewallUrl: string, credential: CredentialRef): SessionState {
+export function createSessionState(firewallUrl: string, credential: CredentialRef, httpMode: boolean): SessionState {
   return {
     untrustedContent: [],
     firewallUrl,
     getAgentKey: () => {
-      if (!credential.current) throw new Error(NO_CREDENTIAL_MESSAGE);
+      if (!credential.current) throw new Error(noCredentialMessage(httpMode));
       return credential.current;
     },
     hasAgentKey: () => credential.current !== undefined,

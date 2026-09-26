@@ -43,7 +43,7 @@ async function runStdio(): Promise<void> {
   const envKey = process.env.OMAMORISAN_AGENT_KEY || undefined;
   const stored = envKey ? undefined : await loadStoredCredential(FIREWALL_URL);
   const credential: CredentialRef = { current: envKey ?? stored?.agentKey };
-  const session = createSessionState(FIREWALL_URL, credential);
+  const session = createSessionState(FIREWALL_URL, credential, false);
   await buildServer(session, false).connect(new StdioServerTransport());
   console.error(
     `[omamorisan-mcp] stdio ready (firewall ${FIREWALL_URL}) — ` +
@@ -56,11 +56,23 @@ async function runStdio(): Promise<void> {
 // One McpServer + WebStandardStreamableHTTPServerTransport per MCP session
 // (keyed by the SDK's own Mcp-Session-Id, stateful mode). The agent key is
 // resolved from `Authorization: Bearer` on every request that carries one —
-// falling back to OMAMORISAN_AGENT_KEY, then the credentials file
-// (credentials.ts) — and is otherwise sticky for the rest of that session, so
-// a client that authenticates once doesn't need to repeat the header on
-// every call. `connect`/`check_connection` (tools.ts) update the same
-// `CredentialRef` cell the moment World ID approves.
+// falling back to OMAMORISAN_AGENT_KEY — and is otherwise sticky for the
+// rest of that session, so a client that authenticates once doesn't need to
+// repeat the header on every call. `connect`/`check_connection` (tools.ts)
+// update the same `CredentialRef` cell the moment World ID approves.
+//
+// T8 fix A (odd/tasks/dokploy-deploy.md) — this shared server is used by
+// every tester who talks to the hosted MCP URL, so it deliberately NEVER
+// reads or writes the credentials file (credentials.ts): that file is keyed
+// only by firewall URL, not by session, so a brand-new session with no
+// header/env key used to silently inherit whichever account last connected
+// on this same server — a real cross-tester account leak. A brand-new HTTP
+// session with no header/env key now starts credential-less (session.ts's
+// `noCredentialMessage(true)` tells the agent to call connect/
+// request_promise); its credential then lives ONLY in this session's own
+// `CredentialRef` cell for the life of the session — never persisted, never
+// shared. Stdio (`runStdio` above) is unchanged: one process, one operator,
+// file persistence across restarts is still the whole point there.
 
 const httpSessions = new Map<string, { transport: WebStandardStreamableHTTPServerTransport; credential: CredentialRef }>();
 
@@ -87,13 +99,12 @@ async function handleMcpRequest(req: Request): Promise<Response> {
     .catch(() => undefined);
   if (!isInitializeRequest(parsedBody)) return jsonRpcError("Bad Request: Session ID required", 400);
 
-  // P9.3: no header/env key just means "not connected yet" now — same
-  // resolution order as stdio (env > credentials file), plus the header.
+  // T8 fix A: header > OMAMORISAN_AGENT_KEY > credential-less. Deliberately
+  // no credentials-file fallback here (see the file-header comment above) —
   // `|| undefined` so an accidentally-empty-string env var is "unset".
-  let resolvedKey = headerKey ?? (process.env.OMAMORISAN_AGENT_KEY || undefined);
-  if (!resolvedKey) resolvedKey = (await loadStoredCredential(FIREWALL_URL))?.agentKey;
+  const resolvedKey = headerKey ?? (process.env.OMAMORISAN_AGENT_KEY || undefined);
   const credential: CredentialRef = { current: resolvedKey };
-  const session = createSessionState(FIREWALL_URL, credential);
+  const session = createSessionState(FIREWALL_URL, credential, true);
 
   const transport: WebStandardStreamableHTTPServerTransport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
