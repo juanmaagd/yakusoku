@@ -1,7 +1,7 @@
 import TutorialVideo from "../ui/TutorialVideo";
 import { useCallback, useEffect, useState } from "react";
 import { MANDATE_CATEGORY_OPTIONS, SITE } from "../../config";
-import { listMandates, revokeMandate, type SerializedMandate } from "../../lib/api";
+import { listMandates, listOwnerPromises, revokeMandate, type OwnerPromise, type SerializedMandate } from "../../lib/api";
 import { formatRemaining, formatUsdcFixed, shortHex } from "../../lib/format";
 import { dangerOutlinedButton, primaryButton, textButton } from "../../lib/ui";
 import ConfirmInline from "../ui/ConfirmInline";
@@ -18,10 +18,15 @@ interface PromiseListProps {
   onNew: () => void;
 }
 
-type LoadState = { kind: "loading" } | { kind: "error"; message: string } | { kind: "loaded"; mandates: SerializedMandate[] };
+type LoadState =
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "loaded"; mandates: SerializedMandate[]; worldIdPromises: OwnerPromise[] };
 
-/** S1: the owner's promises (mandates), with budget left, time left and the
- * two things you do with one: watch it live or revoke it. */
+/** S1: the owner's promises, with budget left, time left and what you do with
+ * one. Two sources: World ID promises on the accounts this wallet owns
+ * (`GET /owner/promises`, linked at /setup) and legacy wallet-signed mandates
+ * (`GET /intents`), which are the only ones that can be revoked from here. */
 export default function PromiseList({ sessionToken, refreshSignal, onNew }: PromiseListProps) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [, setTick] = useState(0);
@@ -29,8 +34,8 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
   const load = useCallback(async () => {
     setState({ kind: "loading" });
     try {
-      const mandates = await listMandates(sessionToken);
-      setState({ kind: "loaded", mandates: sortPromises(mandates) });
+      const [mandates, worldIdPromises] = await Promise.all([listMandates(sessionToken), listOwnerPromises(sessionToken)]);
+      setState({ kind: "loaded", mandates: sortPromises(mandates), worldIdPromises: sortWorldIdPromises(worldIdPromises) });
     } catch (err) {
       setState({ kind: "error", message: err instanceof Error ? err.message : "Could not load your promises." });
     }
@@ -49,10 +54,14 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
   async function handleRevoke(id: string) {
     await revokeMandate(sessionToken, id);
     const mandates = await listMandates(sessionToken);
-    setState({ kind: "loaded", mandates: sortPromises(mandates) });
+    setState((prev) => ({
+      kind: "loaded",
+      mandates: sortPromises(mandates),
+      worldIdPromises: prev.kind === "loaded" ? prev.worldIdPromises : [],
+    }));
   }
 
-  const hasPromises = state.kind === "loaded" && state.mandates.length > 0;
+  const hasPromises = state.kind === "loaded" && (state.mandates.length > 0 || state.worldIdPromises.length > 0);
 
   return (
     <section>
@@ -62,7 +71,7 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
             Your <strong>promises</strong>
           </h1>
           <p className="mt-2 text-body text-graphite">
-            What your agent may buy, with how much, until when. Signed by your wallet, enforced before every payment.
+            What your agent may buy, with how much, until when. Enforced before every payment.
           </p>
         </div>
         {hasPromises && (
@@ -89,7 +98,7 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
 
         {state.kind === "error" && <InlineError title="Couldn't load your promises." detail={state.message} onRetry={() => void load()} />}
 
-        {state.kind === "loaded" && state.mandates.length === 0 && (
+        {state.kind === "loaded" && !hasPromises && (
           <div className="rounded-card border border-hairline">
             <EmptyState
               art="/art/app/intent.webp"
@@ -106,6 +115,9 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
 
         {hasPromises && (
           <ul className="grid gap-4 lg:grid-cols-2">
+            {state.worldIdPromises.map((p) => (
+              <WorldIdPromiseCard key={p.id} promise={p} />
+            ))}
             {state.mandates.map((mandate) => (
               <PromiseCard key={mandate.id} mandate={mandate} onRevoke={handleRevoke} />
             ))}
@@ -130,6 +142,90 @@ function sortPromises(mandates: SerializedMandate[]): SerializedMandate[] {
     const bLive = promiseStatus(b) === "active" ? 0 : 1;
     return aLive - bLive || b.createdAt.localeCompare(a.createdAt);
   });
+}
+
+type WorldIdStatus = "active" | "pending" | "expired" | "revoked" | "denied" | "error";
+
+/** The firewall only flips `status` to `expired` lazily, so an `active`
+ * promise past its expiry is shown as expired here. */
+function worldIdStatus(p: OwnerPromise): WorldIdStatus {
+  if (p.status === "pending_approval") return "pending";
+  if (p.status !== "active") return p.status;
+  return Number(p.expiry) * 1000 <= Date.now() ? "expired" : "active";
+}
+
+function sortWorldIdPromises(promises: OwnerPromise[]): OwnerPromise[] {
+  return [...promises].sort((a, b) => {
+    const aLive = worldIdStatus(a) === "active" ? 0 : 1;
+    const bLive = worldIdStatus(b) === "active" ? 0 : 1;
+    return aLive - bLive || b.createdAt.localeCompare(a.createdAt);
+  });
+}
+
+function merchantHost(merchant: string | undefined): string | undefined {
+  if (!merchant) return undefined;
+  try {
+    return new URL(merchant).host;
+  } catch {
+    return merchant;
+  }
+}
+
+/** A World ID promise: approved on the phone, spent from the account's smart
+ * account, bound to one merchant. No revoke here (not an owner action yet). */
+function WorldIdPromiseCard({ promise }: { promise: OwnerPromise }) {
+  const status = worldIdStatus(promise);
+  const expiryMs = Number(promise.expiry) * 1000;
+  const absolute = new Date(expiryMs).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  const live = status === "active";
+  const host = merchantHost(promise.merchant);
+
+  return (
+    <li className="flex flex-col rounded-card border border-hairline bg-surface p-5">
+      <div className="flex items-center justify-between gap-3">
+        {status === "active" && <StatusPill tone="neutral">Active</StatusPill>}
+        {status === "pending" && <StatusPill tone="ask">Pending approval</StatusPill>}
+        {status === "expired" && <StatusPill tone="muted">Expired</StatusPill>}
+        {(status === "revoked" || status === "denied" || status === "error") && (
+          <StatusPill tone="refuse">{status === "revoked" ? "Revoked" : status === "denied" ? "Denied" : "Error"}</StatusPill>
+        )}
+        <PromiseIdRef id={promise.id} />
+      </div>
+
+      <h2 className={`mt-3 text-body-lg font-medium text-pretty ${live ? "text-ink" : "text-graphite"}`}>{promise.task}</h2>
+
+      <BudgetMeter remaining={promise.remainingBudget} total={promise.budget} />
+
+      <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-graphite">
+        {promise.categories.map((c) => (
+          <span key={c} className="rounded-sm bg-fog px-1.5 py-0.5 text-ink">
+            {categoryLabel(c)}
+          </span>
+        ))}
+        {host && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>{host}</span>
+          </>
+        )}
+        <span aria-hidden="true">·</span>
+        {status === "active" && <span title={absolute}>Expires in {formatRemaining(expiryMs - Date.now())}</span>}
+        {status !== "active" && <span>Expires {absolute}</span>}
+      </p>
+
+      <div className="mt-auto pt-5">
+        <div className="border-t border-hairline pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <a href={`${SITE.dashboardRoute}?promise=${encodeURIComponent(promise.id)}`} className={textButton}>
+              Watch live
+              <IconArrowRight size={14} />
+            </a>
+            <span className="text-caption text-graphite">Approved with World ID</span>
+          </div>
+        </div>
+      </div>
+    </li>
+  );
 }
 
 function categoryLabel(value: string): string {
@@ -210,7 +306,7 @@ function PromiseCard({ mandate, onRevoke }: { mandate: SerializedMandate; onRevo
 /** The promise's reference, labeled and short (`5fcb…2252`); copies the full id. */
 function PromiseIdRef({ id }: { id: string }) {
   const [copied, setCopied] = useState(false);
-  const short = shortHex(id.replace(/^intent_/, ""), 4, 4);
+  const short = shortHex(id.replace(/^(intent|promise)_/, ""), 4, 4);
 
   async function copy() {
     try {
