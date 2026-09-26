@@ -20,3 +20,13 @@ export const USDC_MAINNET_ADDRESS = "0x833589fcD6eDb6E08f4c7C32D4f71b54bdA02913"
 export const USDC_DECIMALS = 6;
 
 export const FACILITATOR_URL = "https://x402.org/facilitator";
+
+/**
+ * `OmamorisanAccountFactory` deployed on Base Sepolia (P11.0/P11.1, verified
+ * on-chain per contracts/README.md's "Deployed contracts" table — constructor
+ * arg was `USDC_SEPOLIA_ADDRESS` above). Every `OmamorisanAccount` this
+ * project deploys (P11.3a's `/setup/:token/owner`) goes through this exact
+ * factory, so a client and the firewall always agree on which contract to
+ * trust.
+ */
+export const OMAMORISAN_ACCOUNT_FACTORY_ADDRESS = "0xadBe165CCc90e59e38A3dE68a25E99Ec807501cc" as const;
