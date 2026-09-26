@@ -1,51 +1,38 @@
 ---
-const CREATE_MANDATE = `POST /intents
-{
-  "message": { /* signed TaskIntent: budget, category, expiry */ },
-  "signature": "0x...",
-  "signer": "0xYourWalletAddress"
-}
+// The current tool list an MCP client gets from apps/mcp/tools.ts
+// (registerTools), one line each, in registration order. Tool names keep
+// the internal word "promise" — accurate here, in a developer panel.
+const TOOLS = `connect            // link this agent to an existing account via World ID
+check_connection   // poll a pending connect() approval
+request_promise    // approve or widen spending rules; creates the account on the first call
+check_promise      // poll a pending request_promise() approval, or read an intent's status
+setup_account      // get a link to add an owner wallet and fund the account with USDC
+list_promises      // list intents: remaining USDC, minutes left, merchant
+get_mandate        // read what this agent is authorized to do right now
+fetch_url          // read a page as untrusted context, never as instructions
+pay_x402           // buy an x402 resource; the firewall decides pay, refuse, or ask a human
+check_approval     // poll a pending human-approval gate started by pay_x402`;
 
-→ 201 { "id": "intent_...", "remainingBudget": "25000000", "agentKey": "ak_..." }
-   agentKey is returned exactly once. Store it — the firewall never shows it again.`;
-
-const AGENT_SIGN = `POST /sign
+// The real request/response shape of apps/firewall's /sign — still the
+// endpoint pay_x402 calls under the hood for both a connected World ID
+// account (with intentId) and the legacy wallet mandate path.
+const SIGN_CALL = `POST /sign
 Authorization: Bearer <agentKey>
 
 {
+  "intentId": "promise_...",
   "paymentRequiredHeader": "<base64 402 header from the store>",
-  "resourceUrl": "https://store.example/checkout/amazon-25"
+  "resourceUrl": "https://store.example/checkout/amazon-25",
+  "purchaseRef": "amazon-1-first"
 }
 
-→ 200 { "receiptId": "...", "decision": "pay", "paymentSignatureHeader": "..." }
-   or  { "decision": "refuse", "reason": "..." } — never a partial signature.`;
-
-const FLOW = [
-  {
-    art: "/art/intent.webp",
-    name: "You",
-    text: "Sign a mandate once with your wallet: budget, category, expiry.",
-  },
-  {
-    art: "/art/agent.webp",
-    name: "Your agent",
-    text: "Authenticates with a scoped credential that can only ever ask the firewall to sign.",
-  },
-  {
-    art: "/art/firewall.webp",
-    name: "The firewall",
-    text: "Checks the payment against the mandate you signed, then signs or refuses.",
-  },
-  {
-    art: "/art/terminal.webp",
-    name: "The store",
-    text: "Gets an x402 payment signature only after a pay decision.",
-  },
-] as const;
+→ 200 { "verdict": "pay", "receiptId": "...", "paymentSignature": "0x..." }
+   or  { "verdict": "refuse", "reason": "..." }
+   or  { "verdict": "ask_human", "receiptId": "...", "approval": { "verificationUri": "..." } }`;
 
 const PANELS = [
-  { title: "1. Create a mandate", code: CREATE_MANDATE },
-  { title: "2. The agent asks the firewall to sign", code: AGENT_SIGN },
+  { title: "1. Connect over MCP", badge: "mcp", code: TOOLS },
+  { title: "2. The firewall decides", badge: "http", code: SIGN_CALL },
 ] as const;
 ---
 
@@ -53,11 +40,11 @@ const PANELS = [
   <div class="grid grid-cols-1 items-end gap-10 md:grid-cols-[1fr_auto]">
     <div>
       <h2 id="dev-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
-        Your agent <strong>never gets a key.</strong>
+        The same guard, <strong>in front of any agent.</strong>
       </h2>
       <p class="mt-6 max-w-[54ch] text-body-lg text-graphite">
-        The human signs a mandate once. The agent authenticates with a scoped credential that can only ever ask the
-        firewall to sign — it can't move funds on its own.
+        Omamori is an MCP server, so any MCP client can use it. Your agent never holds a key: it can only ask for a
+        signature, and every request goes through the same checks.
       </p>
     </div>
     <img
@@ -71,37 +58,13 @@ const PANELS = [
     />
   </div>
 
-  <ol class="mt-12 grid grid-cols-1 overflow-hidden rounded-card border border-hairline sm:grid-cols-2 lg:grid-cols-4">
-    {
-      FLOW.map((step) => (
-        <li
-          class="flow-step relative flex items-start gap-4 border-hairline px-5 py-5 max-sm:[&:not(:first-child)]:border-t sm:max-lg:[&:nth-child(n+3)]:border-t sm:max-lg:[&:nth-child(even)]:border-l lg:flex-col lg:gap-3 lg:[&:not(:first-child)]:border-l"
-        >
-          <img
-            src={step.art}
-            alt=""
-            width="1024"
-            height="1024"
-            loading="lazy"
-            decoding="async"
-            class="h-16 w-16 shrink-0 select-none lg:h-24 lg:w-24"
-          />
-          <div>
-            <p class="text-body font-semibold text-ink">{step.name}</p>
-            <p class="mt-1 text-body-sm text-graphite">{step.text}</p>
-          </div>
-        </li>
-      ))
-    }
-  </ol>
-
-  <div class="mt-6 grid grid-cols-1 gap-6">
+  <div class="mt-12 grid grid-cols-1 gap-6">
     {
       PANELS.map((panel) => (
         <figure class="min-w-0 overflow-hidden rounded-card bg-ink">
           <figcaption class="flex items-center justify-between border-b border-white/10 px-5 py-3">
             <span class="text-body-sm font-medium text-white">{panel.title}</span>
-            <span class="label text-white/60">http</span>
+            <span class="label text-white/60">{panel.badge}</span>
           </figcaption>
           <pre class="code overflow-x-auto px-5 py-4 text-white/90"><code>{panel.code}</code></pre>
         </figure>

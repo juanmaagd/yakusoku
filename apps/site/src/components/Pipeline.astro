@@ -32,10 +32,10 @@ const STAGES = [
   <div class="grid grid-cols-1 items-end gap-10 md:grid-cols-[1fr_auto]">
     <div>
       <h2 id="pipeline-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
-        Six stages. <strong>All of them before any signature.</strong>
+        Six checks. <strong>All before any signature.</strong>
       </h2>
       <p class="mt-6 max-w-[52ch] text-body-lg text-graphite">
-        Every stage runs, in order, before the firewall signs anything. A refusal from any stage wins outright.
+        Every check runs in order before anything is signed. A refusal from any of them wins outright.
       </p>
     </div>
     <img
@@ -150,15 +150,5 @@ const STAGES = [
     :global(.js) .pipeline:not(.is-in) .pipeline-node::before {
       transform: scaleX(0);
     }
-  }
-
-  .state-tag {
-    display: inline-block;
-    border-radius: var(--radius-sm);
-    padding: 1px 7px;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-stretch: 90%;
-    vertical-align: 1px;
   }
 </style>

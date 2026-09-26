@@ -6,7 +6,7 @@ export const SITE = {
   name: "Omamori",
   tagline: "Your agent pays only for what you intended.",
   description:
-    "A pre-signature firewall for AI agent payments. The agent never holds a key: every payment is checked against the intent you signed, before anything is signed.",
+    "Give your AI agent a budget, not your keys. It shops for you from an account you fund, and can't be talked into buying anything you didn't ask for.",
   githubUrl: "https://github.com/juanmaagd/yakusoku",
   appRoute: "/app",
   dashboardRoute: "/app/dashboard",

@@ -4,7 +4,7 @@ import { SITE } from "../config";
 // Relay diagram node positions, as a share of the 600-unit viewBox width.
 const NODES = [
   { label: "Agent", x: 20 },
-  { label: "Firewall", x: 300 },
+  { label: "Omamori", x: 300 },
   { label: "Store", x: 580 },
 ] as const;
 ---
@@ -26,7 +26,7 @@ const NODES = [
         NODES.map((node) => (
           <span class="absolute top-0 flex -translate-x-1/2 flex-col items-center gap-1.5" style={`left: ${(node.x / 600) * 100}%`}>
             <span class="label text-graphite">{node.label}</span>
-            {node.label === "Firewall" && <span class="relay-tag">refuse</span>}
+            {node.label === "Omamori" && <span class="relay-tag">refuse</span>}
           </span>
         ))
       }
@@ -34,10 +34,11 @@ const NODES = [
   </div>
 
   <h2 id="close-heading" class="headline mx-auto mt-10 max-w-[18ch] text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:mt-12 md:text-heading-lg">
-    Give your agent a budget, <strong>not your keys.</strong>
+    It shops for you. <strong>Only what you asked.</strong>
   </h2>
-  <div class="mt-9 flex justify-center">
-    <a href={SITE.appRoute} class="btn btn-primary">Launch app</a>
+  <div class="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+    <a href="#setup-agent" class="btn btn-primary">Set up your agent</a>
+    <a href={SITE.appRoute} class="btn btn-outline">Launch app</a>
   </div>
 </section>
 
