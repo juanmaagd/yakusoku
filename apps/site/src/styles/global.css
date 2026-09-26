@@ -7,7 +7,7 @@
 /* The expanded walkthrough owns the right side, leaving the active page visible. */
 @media (min-width: 1024px) {
   body.tutorial-side-open {
-    padding-right: min(700px, 48vw);
+    padding-right: min(720px, 46vw);
   }
 }
 
@@ -90,6 +90,7 @@
 
   /* --- Motion --- */
   --ease-out-soft: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-out-quint: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @layer base {
@@ -208,6 +209,60 @@
     animation: sheet-in 220ms var(--ease-out-soft);
   }
 
+  /* Tutorial walkthrough player: dock entrance, dock<->chip swap, panel enter/exit. */
+  .tutorial-dock-in {
+    transition:
+      opacity 420ms var(--ease-out-quint),
+      transform 420ms var(--ease-out-quint),
+      filter 420ms var(--ease-out-quint);
+  }
+  .tutorial-dock-in[data-hidden="true"] {
+    opacity: 0;
+    transform: translateY(8px);
+    filter: blur(4px);
+  }
+  .tutorial-swap-in {
+    animation: tutorial-swap-in 200ms var(--ease-out-quint);
+  }
+  /* Mobile default: bottom sheet slides up. Desktop overrides to a side slide-in below. */
+  .tutorial-panel {
+    transform: translateY(24px);
+    opacity: 0;
+    transition:
+      transform 380ms var(--ease-out-quint),
+      opacity 380ms var(--ease-out-quint);
+  }
+  .tutorial-panel[data-visible="true"] {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  .tutorial-panel[data-phase="closing"] {
+    transition:
+      transform 200ms ease-in,
+      opacity 200ms ease-in;
+  }
+  @media (min-width: 1024px) {
+    .tutorial-panel {
+      transform: translateX(32px);
+    }
+    .tutorial-panel[data-visible="true"] {
+      transform: translateX(0);
+    }
+  }
+
+  /* Scrubber fill / thumb / active-phase progress: written every frame via a ref, not React state. */
+  .tutorial-progress-fill {
+    transform: scaleX(var(--progress, 0));
+    transform-origin: left;
+  }
+  .tutorial-progress-thumb {
+    left: calc(var(--progress, 0) * 100%);
+  }
+  .tutorial-phase-progress {
+    transform: scaleX(var(--phase-progress, 0));
+    transform-origin: left;
+  }
+
   /* Blueprint frame: the landing lives in one railed column. */
   .frame {
     margin-inline: auto;
@@ -240,6 +295,13 @@
   }
 }
 
+@keyframes tutorial-swap-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -248,5 +310,15 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  /* The dock entrance and panel open/close still cue with an opacity fade,
+     not the blanket instant snap above: no translate, scale or blur. */
+  .tutorial-dock-in,
+  .tutorial-panel {
+    transition-property: opacity !important;
+    transition-duration: 150ms !important;
+    transform: none !important;
+    filter: none !important;
   }
 }

@@ -106,6 +106,12 @@ export const IconClock = (p: IconProps) => (
   </Svg>
 );
 
+export const IconExpand = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6 3.5H3.5V6M10 3.5h2.5V6M6 12.5H3.5V10M10 12.5h2.5V10" />
+  </Svg>
+);
+
 /** Round status mark used by checklists: pass / fail / pending / skipped. */
 export function StatusMark({ kind }: { kind: "pass" | "verified" | "fail" | "wait" | "skip" | "todo" }) {
   const ring =
