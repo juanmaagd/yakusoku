@@ -112,6 +112,10 @@ async function handleMcpRequest(req: Request): Promise<Response> {
 function runHttp(): void {
   Bun.serve({
     port: HTTP_PORT,
+    // Bun's default idleTimeout (10 s) is shorter than the ~30 s that
+    // connect / request_promise wait for a World ID approval; clients then
+    // see ECONNRESET mid-call.
+    idleTimeout: 120,
     routes: { "/mcp": { POST: handleMcpRequest, GET: handleMcpRequest, DELETE: handleMcpRequest } },
     fetch: () => new Response("not found", { status: 404 }),
   });
