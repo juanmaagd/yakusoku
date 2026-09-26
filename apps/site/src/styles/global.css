@@ -171,6 +171,20 @@
     font-weight: 600;
   }
 
+  /* A state chip: mono word in a state wash (verified/refuse/ask), paired
+     with a bg-*-wash/text-*-ink (or text-verified) utility class at each
+     call site — the system's one state-color chip, reused across the hero
+     errand card, the security outcomes, and the pipeline diagram. */
+  .state-tag {
+    display: inline-block;
+    border-radius: var(--radius-sm);
+    padding: 1px 7px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-stretch: 90%;
+    vertical-align: 1px;
+  }
+
   .btn {
     display: inline-flex;
     align-items: center;
