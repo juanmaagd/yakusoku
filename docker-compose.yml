@@ -110,6 +110,7 @@ services:
       - MERCHANT_ADDRESS_DATA=${MERCHANT_ADDRESS_DATA}
       - PORT_CLOUD=4003
       - MERCHANT_ADDRESS_CLOUD=${MERCHANT_ADDRESS_CLOUD}
+      - GIFT_CARDS_PUBLIC_URL=${GIFT_CARDS_PUBLIC_URL}
     networks:
       - default
       - dokploy-network
