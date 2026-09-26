@@ -20,6 +20,8 @@ Naming: the product is Omamori and the spending rules a human approves for an ag
 
 The main way to use Omamori is **through your agent**, over MCP. The current account flow uses World ID to approve each task and budget; the older wallet mandate flow is still supported.
 
+**Canonical setup guide:** [`skills/omamori-setup/`](skills/omamori-setup/) is an [Agent Skills](https://agentskills.io/specification) package that walks any MCP-capable agent (Claude Code, Claude Desktop, Cursor, Codex, or another client) through detecting the client, connecting, first run, verification and troubleshooting — the steps below are the short version.
+
 **1. Run the services and add the MCP server to your client.**
 
 ```
