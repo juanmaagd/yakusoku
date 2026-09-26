@@ -41,8 +41,7 @@ export const MANDATE_EXPIRY_PRESETS = [
 ] as const;
 
 /** Mirrors apps/mcp/README.md's "Claude Desktop / Cursor (mcpServers JSON)" stdio config exactly.
- * Not rendered in the app (the UI shows connection details, never commands);
- * kept because README.md and docs/ai cite it as the canonical config shape. */
+ * Legacy generic example. The handoff uses lib/mcpSetup.ts for client-specific downloads. */
 export function mcpStdioConfigSnippet(agentKey: string): string {
   return JSON.stringify(
     {

@@ -57,6 +57,14 @@ A key is **never** returned in any tool's output — the LLM never sees it,
 only `connect`/`check_connection` see it (to store it) and every other tool
 sees it only as an `Authorization` header value it sends to the firewall.
 
+## Guided setup in the app
+
+For the wallet mandate path, after signing a promise at `/app`, use the embedded **Connect your agent** video and client selector. The app generates a configuration containing the promise's agent key and shows its exact save location. Downloading a file does not install it: save or merge it into the chosen client's settings, restart that client, then ask it to call `get_mandate` without buying anything.
+
+For stdio, the **client launches this server** and provides `OMAMORISAN_AGENT_KEY` through its configuration. You do not need to start this server manually or put that key in the shared `.env.local`. A manually started stdio process is waiting for protocol messages, not for conversational input.
+
+Keep generated credential files private and out of Git. The agent key authorizes requests under a signed promise; do not paste it into a model prompt. Configure only the agent key and firewall URL for MCP, not the firewall or merchant private keys.
+
 ## Running
 
 ```bash
@@ -86,7 +94,7 @@ claude mcp add omamorisan \
   -- bun /absolute/path/to/yakusoku/apps/mcp/index.ts
 ```
 
-### Claude Desktop / Cursor / Codex (`mcpServers` JSON)
+### Claude Desktop / Cursor (`mcpServers` JSON)
 
 ```json
 {
@@ -101,6 +109,8 @@ claude mcp add omamorisan \
   }
 }
 ```
+
+Codex uses `~/.codex/config.toml`, not this JSON format. The `/app` wallet-promise handoff generates a Codex TOML section and gives its save location. For agent-first setup, use the landing page instructions without a key.
 
 Omit `OMAMORISAN_AGENT_KEY` entirely for the agent-first flow above, or set
 it to an existing `ya_...`/`yk_...` key.

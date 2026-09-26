@@ -1,3 +1,4 @@
+import TutorialVideo from "../ui/TutorialVideo";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { DecisionReceipt } from "@yakusoku/shared";
 import { SITE } from "../../config";
@@ -323,6 +324,7 @@ function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps)
       </div>
 
       {!isDesktop && selectedReceipt && <DetailSheet receipt={selectedReceipt} onClose={() => setSelectedReceiptId(undefined)} />}
+      <TutorialVideo topic="live" />
     </section>
   );
 }

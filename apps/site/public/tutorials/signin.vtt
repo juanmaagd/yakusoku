@@ -1,0 +1,17 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:13.000
+1. Open the app
+Open localhost:4321/app. Have a browser wallet installed and unlocked. Click Connect wallet and choose your account in the wallet popup. Your private key stays in the wallet.
+
+00:00:13.000 --> 00:00:26.000
+2. Use Base Sepolia
+If the app asks, click Switch network and confirm Base Sepolia in your wallet. This is the test network used here. Return to this tab after approving the switch.
+
+00:00:26.000 --> 00:00:43.000
+3. Sign the login message
+Click Sign in with wallet and review the message in your wallet. Confirm only the expected localhost domain and account. This signature costs no gas and does not authorize a purchase. The wallet popup is not shown in this example.
+
+00:00:43.000 --> 00:00:59.000
+4. You should see Promises
+Successful login opens your promises. If you see Could not reach the firewall, start the firewall on port 4001 first. If you reject the wallet prompt, try Sign in with wallet again. Reload after switching wallet accounts.

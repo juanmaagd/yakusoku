@@ -16,40 +16,31 @@ Omamorisan's agent never holds a private key — it asks the firewall to sign �
 
 ## Give your agent a firewall
 
-The main way to use Omamorisan is **through your agent**, over MCP. A human only signs once, approves the occasional doubtful payment, and supervises.
+Use Omamorisan through an MCP-speaking agent. The landing page offers an agent-first World ID account flow; the `/app` wizard offers an existing wallet-signed promise flow. Both use the same payment firewall.
 
-**1. Sign a promise at `/app`.**
+**1. Choose a connection path.**
 
 ```
 bun run site   # apps/site on :4321
 ```
 
-Open `http://localhost:4321/app`, connect a wallet, and sign a promise — an EIP-712 mandate — with what your agent may buy, its budget in USDC, and when it expires.
+For agent-first setup, open `http://localhost:4321/#setup-claude`, configure your MCP client without a key, and ask it to call `connect`. Approve the account connection in World App. The agent then requests a promise for each task, which you approve in World App.
 
-This never costs gas and is the only thing that ever authorizes spending.
+For a wallet-signed promise, open `http://localhost:4321/app`, connect a wallet, and sign an EIP-712 mandate with what your agent may buy, its budget in USDC, and when it expires.
+
+Signing the wallet promise costs no gas. Each World ID promise also needs its own approval before spending.
 
 **2. Connect your agent.**
 
-The result screen shows your agent key exactly once, with the promise ID, the MCP server URL and the auth header to copy. For a stdio MCP client (Claude Desktop, Cursor), use this config (`apps/site/src/config.ts`, `mcpStdioConfigSnippet`):
+For the wallet path, the result screen includes an embedded connection video and a client selector for Claude Desktop, Claude Code, Cursor, Codex, VS Code/Copilot, Windsurf/Cascade, and Gemini CLI. Choose your client, confirm the local MCP file path, and download its configuration. The page tells you exactly where to save or merge it. The file includes the one-time agent key: keep it private and out of Git.
 
-```json
-{
-  "mcpServers": {
-    "omamorisan": {
-      "command": "bun",
-      "args": ["/absolute/path/to/yakusoku/apps/mcp/index.ts"],
-      "env": {
-        "OMAMORISAN_AGENT_KEY": "yk_your_key_here",
-        "OMAMORISAN_FIREWALL_URL": "http://localhost:4001"
-      }
-    }
-  }
-}
-```
+For these local stdio configurations, **your MCP client starts the server and supplies the key**. You do not separately run `bun index.ts`, and you do not need the agent key in `.env.local`. Restart the client, then ask it to call `get_mandate` without making a purchase to confirm the connection.
 
-Drop that into Claude Code, Claude Desktop, Cursor, or any MCP-speaking client (see `apps/mcp/README.md` for `claude mcp add` and Streamable HTTP variants).
+The handoff also explains the Streamable HTTP setup: run `cd apps/mcp && bun index.ts --http`, then configure a compatible local client with `http://localhost:4010/mcp`. A wallet promise uses its Authorization header; agent-first World ID can start without one. See [the MCP README](apps/mcp/README.md) for reference configuration.
 
-Your agent now has four tools — `get_mandate`, `fetch_url`, `pay_x402`, `check_approval` — and never sees a private key; every payment still goes through the firewall's pipeline before it's signed.
+Each frontend screen embeds its own captioned walkthrough and transcript: landing, wallet sign-in, promise list, promise creation, agent connection, Live decisions, and World ID approval. The videos use clearly marked example data and do not demonstrate real settlement. See [video maintenance instructions](docs/tutorial-videos.md).
+
+The MCP server offers `connect`, promise management, browsing, payment, and approval tools. An agent never sees a wallet private key; every payment still goes through the firewall's pipeline before it is signed.
 
 **3. CLI alternative**, no MCP client needed:
 
@@ -105,7 +96,7 @@ Bun workspaces monorepo, 7 packages.
 
 | App/package | Purpose | Port |
 |---|---|---|
-| `apps/mcp` | MCP server exposing the firewall to any MCP client (Claude Code, Claude Desktop, Cursor, a custom agent, ...) as four tools; never holds a key | `:4010` (Streamable HTTP), or stdio |
+| `apps/mcp` | MCP server exposing the firewall to any MCP client (Claude Code, Claude Desktop, Cursor, a custom agent, ...) as nine tools; never holds a signing key | `:4010` (Streamable HTTP), or stdio |
 | `apps/firewall` | Hono service holding the signing key; the pipeline, receipts, SSE events, World ID gate, and a loopback-only plain operator dashboard | `:4001` |
 | `apps/site` | Astro + Tailwind site: landing (`/`), the mandate wizard (`/app`), the live owner dashboard (`/app/dashboard`) | `:4321` |
 | `apps/store` | Express x402 gift-card store (legit SKUs + a promo endpoint serving prompt-injection trap copy) | `:4000` |
@@ -241,7 +232,7 @@ bun run agent -- --intent <intentId> --key <agentKey> "Buy me a $1 Amazon gift c
 | `bun test` | 135 unit tests across firewall/shared (idempotency, policy, provenance obfuscation cases, Intercepta/Jev/World ID logic with stubbed network calls, StepUp signature tampering, SIWE) | No |
 | `bun run typecheck` | All 7 workspaces compile with no type errors | No |
 | `bun run scenarios` | Self-contained 29-scenario end-to-end suite (own store `:4020` + firewall `:4021`, real Jev + real World ID sandbox) covering legit purchase, the key attack case, provenance traps, budget/expiry, tampered network/asset, idempotent replay, concurrency, World ID expiry, pause/revoke, SIWE sign-in/replay, and owner-scoped access control across `/intents`, `/receipts`, `/approvals`, `/events` | No — never sends a payment signature back to the store |
-| `bun run --filter @yakusoku/mcp smoke` | Drives the MCP server as a real client would over stdio: mints its own mandate, calls all four tools against the live store/firewall | No |
+| `bun run --filter @yakusoku/mcp smoke` | Drives the MCP server as a real client would over stdio: exercises the MCP tools against the live store/firewall | No |
 | `bun run jev-cases` | Runs the calibration-critical cases live against the real Jev API (key case refuses, legit purchases pass/escalate as calibrated) | No |
 | `bun run intercepta-check` | Live Intercepta calls through the real pipeline stage: a clean address passes, a known-risk (OFAC-sanctioned) address blocks, an unreachable endpoint escalates | No |
 | `bun run world-id-check` | Starts a real sandbox device-authorization flow and polls it; `-- --wait` waits for a real phone approval/denial and validates the resulting ID token | No |

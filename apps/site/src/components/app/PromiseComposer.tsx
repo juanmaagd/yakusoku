@@ -1,3 +1,4 @@
+import TutorialVideo from "../ui/TutorialVideo";
 import { useMemo, useState, type ReactNode } from "react";
 import type { Address, EIP1193Provider } from "viem";
 import { MANDATE_CATEGORY_OPTIONS, MANDATE_EXPIRY_PRESETS, SITE } from "../../config";
@@ -230,6 +231,7 @@ export default function PromiseComposer({ provider, address, onCreated, onCancel
           />
         </aside>
       </div>
+      <TutorialVideo topic="create" />
     </section>
   );
 }

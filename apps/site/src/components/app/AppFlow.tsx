@@ -13,12 +13,12 @@ import SignInGate from "./SignInGate";
  * then the promises home (S1), the composer (S2) and the one-time key
  * handoff (S3) as view states. The wallet/SIWE state machine itself lives in
  * `useWalletSession`, shared with `/app/dashboard`. */
-export default function AppFlow() {
+export default function AppFlow({ entryPath }: { entryPath?: string }) {
   const session = useWalletSession();
   return (
     <AppShell active="promises" session={session}>
       {session.stage.kind === "signed-in" ? (
-        <SignedIn key={session.stage.sessionToken} address={session.stage.address} sessionToken={session.stage.sessionToken} />
+        <SignedIn entryPath={entryPath} key={session.stage.sessionToken} address={session.stage.address} sessionToken={session.stage.sessionToken} />
       ) : (
         <SignInGate session={session} />
       )}
@@ -28,7 +28,7 @@ export default function AppFlow() {
 
 type View = { kind: "list" } | { kind: "new" } | { kind: "handoff"; created: CreatedPromise };
 
-function SignedIn({ address, sessionToken }: { address: Address; sessionToken: string }) {
+function SignedIn({ address, sessionToken, entryPath }: { address: Address; sessionToken: string; entryPath?: string }) {
   const [view, setView] = useState<View>({ kind: "list" });
   const [refreshSignal, setRefreshSignal] = useState(0);
 
@@ -42,7 +42,7 @@ function SignedIn({ address, sessionToken }: { address: Address; sessionToken: s
   }, []);
 
   if (view.kind === "handoff") {
-    return <KeyHandoff created={view.created} onDone={backToList} />;
+    return <KeyHandoff entryPath={entryPath} created={view.created} onDone={backToList} />;
   }
 
   if (view.kind === "new") {

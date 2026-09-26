@@ -1,0 +1,45 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:18.000
+1. Understand this key
+The agent key lets MCP request payments under this promise. It is not your wallet private key, but it is a secret. Store it in the client configuration, not in a chat message. The example key in this video is deliberately invalid.
+
+00:00:18.000 --> 00:00:31.000
+2. Choose your agent app
+Select Claude Desktop, Claude Code, Cursor, Codex, VS Code/Copilot, Windsurf/Cascade, or Gemini CLI. Choose the application you use, not the model provider. Instructions and file format change with your selection.
+
+00:00:31.000 --> 00:00:45.000
+3. Check the local file path
+Confirm the full path to yakusoku/apps/mcp/index.ts. If Bun cannot be found, use command -v bun in Terminal and put that full executable path into Bun executable. Windows PowerShell equivalents appear below the fields.
+
+00:00:45.000 --> 00:01:00.000
+4. Download the configuration
+Click Download. The generated file already includes this promise's key. Your browser saves it to Downloads; that does not install it. Open the downloaded file in a text editor. Keep it private and out of Git.
+
+00:01:00.000 --> 00:01:13.000
+5. Save in your client's settings
+For Claude Desktop, open Settings, Developer, Edit Config. On Mac the destination is Library/Application Support/Claude in your home folder; Windows uses APPDATA/Claude. Merge the omamorisan entry into claude_desktop_config.json, then save.
+
+00:01:13.000 --> 00:01:30.000
+Cursor and Claude Code
+Cursor uses your home folder's .cursor/mcp.json. Claude Code can use .mcp.json in the project folder where you run claude. Each selector option gives the exact destination. Keep other server entries when merging. Do not commit a file containing this key.
+
+00:01:30.000 --> 00:01:46.000
+Codex uses TOML
+Select Codex to download a TOML section. Merge that section into ~/.codex/config.toml. Do not replace your whole settings file. VS Code has a different JSON shape too: always generate the file for the client you actually use.
+
+00:01:46.000 --> 00:02:01.000
+VS Code, Gemini, and Cascade
+VS Code: run MCP: Open User Configuration from the Command Palette. Gemini: merge into ~/.gemini/settings.json. Cascade: open its raw MCP configuration from the MCP settings. Follow the selected client's instructions, then restart or refresh it.
+
+00:02:01.000 --> 00:02:18.000
+6. Check before buying
+Ask your agent to call Omamorisan get_mandate and report the task and remaining budget without buying. Confirm the answer matches this wallet promise. The server also has World ID connection and promise tools; this example uses your existing wallet-signed promise.
+
+00:02:18.000 --> 00:02:37.000
+Why bun index.ts failed before
+A stdio client launches MCP and passes the key in its environment. You do not start it separately or put the key in .env.local for that setup. For HTTP instead, run bun index.ts --http and configure the client with the URL and Authorization header.
+
+00:02:37.000 --> 00:02:53.000
+7. Finish the handoff
+After saving and checking the configuration, confirm that you stored the key and choose Open Live. A new promise needs its own key. Restart the MCP client after changing the key so it uses the right promise.
