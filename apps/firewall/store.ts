@@ -11,13 +11,23 @@ import { join } from "node:path";
 import { generateSiweNonce } from "viem/siwe";
 import {
   decisionReceiptSchema,
+  promiseAttestationSchema,
   stringifyWithBigint,
   taskIntentMessageSchema,
   type DecisionReceipt,
+  type PromiseAttestation,
   type TaskIntentMessage,
   type Verdict,
 } from "@yakusoku/shared";
-import { generateAgentKey, generateSessionToken, hashAgentKey, hashSessionToken, hashesEqual } from "./auth";
+import {
+  generateAccountKey,
+  generateAgentKey,
+  generateSessionToken,
+  hashAccountKey,
+  hashAgentKey,
+  hashSessionToken,
+  hashesEqual,
+} from "./auth";
 
 export interface StoredIntent {
   id: string;
@@ -39,6 +49,23 @@ export interface StoredIntent {
    * agent request again (see `findIntentByAgentKey`). Never serialized back
    * to a client (index.ts's `serializeIntent` omits it). */
   agentKeyHash?: string;
+  /**
+   * P9.2 — set only on the `StoredIntent`-shaped adapter `promises.ts`'s
+   * `promiseAsMandate` builds from a `StoredPromise` row, never on a real row
+   * in the `intents` table. Lets pipeline.ts's `checkPolicy` and
+   * approvals.ts's `settleApproved` tell "this mandate is a World-ID-only
+   * promise" apart from "this mandate is a wallet-signed intent" without a
+   * second parameter threaded through every call site — a plain wallet
+   * intent from `getIntent` never sets these, so every existing check
+   * (`intent.revoked`, `getOwnerControl(intent.signer)`, ...) is unaffected.
+   */
+  source?: "wallet" | "world_id";
+  /** The owning account's id, only set for a `source: "world_id"` mandate. */
+  accountId?: string;
+  /** The backing promise's own status, only set for a `source: "world_id"`
+   * mandate — `checkPolicy` refuses any promise that isn't `"active"`
+   * (fail-closed), independent of the (always-`false`) `revoked` flag above. */
+  promiseStatus?: PromiseStatus;
 }
 
 /** WU13 kill switch — a single persisted row (store.ts's `control` table).
@@ -92,8 +119,107 @@ export interface PendingApproval {
 
 /** WU13 adds `paused`/`revoked` — resolved at signing time (approvals.ts's
  * `resolveApprovalInBackground`) when the kill switch or an intent revoke
- * lands while a World ID approval was still in flight. */
-export type PendingApprovalStatus = "pending" | "approved" | "denied" | "expired" | "error" | "paused" | "revoked";
+ * lands while a World ID approval was still in flight. P9.2 adds
+ * `world_id_wrong_human`: a doubtful-payment approval on a world_id-sourced
+ * promise resolved with a real, valid, fresh World ID token — but for a
+ * DIFFERENT human than the promise's own account (approvals.ts's
+ * `settleApproved`). Fail-closed: the payment refuses under the existing
+ * `world_id_denied` receipt state, this status just names the reason. */
+export type PendingApprovalStatus =
+  | "pending"
+  | "approved"
+  | "denied"
+  | "expired"
+  | "error"
+  | "paused"
+  | "revoked"
+  | "world_id_wrong_human";
+
+// --- Accounts / connect / promises shared types (Phase 3, P9.1/P9.2) --------
+
+export interface StoredAccount {
+  id: string;
+  /** `keccak256` of the World ID ID token's `sub` claim — never the raw
+   * subject (see `hashWorldIdSubject`, packages/shared/step-up.ts). */
+  subjectHash: `0x${string}`;
+  createdAt: string;
+}
+
+export type ConnectStatus = "pending" | "approved" | "denied" | "expired" | "error";
+
+/**
+ * A `POST /connect` device flow in flight or resolved (P9.1) — same
+ * "persist everything the device flow needs to resume" shape as
+ * `PendingApproval` above, plus the account-issuance bookkeeping specific to
+ * connect: `pendingAccountKey` holds the freshly minted RAW account key
+ * (P9.1's `ya_...`) only until the first successful `POST /connect/poll`
+ * delivers it (`keyDelivered` flips to `true` and the raw value is cleared —
+ * see accounts.ts's `deliverConnectAccountKey`), so a later poll can report
+ * `status:"approved"` forever without ever handing the key out again.
+ */
+export interface ConnectRequest {
+  id: string;
+  pollSecretHash: string;
+  deviceCode: string;
+  status: ConnectStatus;
+  accountId?: string;
+  pendingAccountKey?: string;
+  keyDelivered: boolean;
+  reason?: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  userCode: string;
+  intervalSeconds: number;
+  requestedAt: string;
+  gateStartedAtMs: number;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PromiseStatus = "pending_approval" | "active" | "denied" | "expired" | "revoked" | "error";
+
+/**
+ * A promise (P9.2) — the World-ID-only replacement for a wallet-signed
+ * `TaskIntent` (`StoredIntent` above). Deliberately its OWN table rather than
+ * extra nullable columns bolted onto `intents`: the wallet path's `signature`
+ * / `signer` columns are `NOT NULL` and pervasively assumed non-empty
+ * throughout this file and index.ts's owner-scoping routes, so reusing that
+ * table would mean loosening those constraints for every existing wallet
+ * mandate too. `promises.ts`'s `promiseAsMandate` adapts a `StoredPromise`
+ * into the SAME `StoredIntent` shape pipeline.ts/jev.ts/provenance.ts already
+ * read, so the pipeline itself never needs to know which table a mandate
+ * came from — see `StoredIntent.source` above.
+ */
+export interface StoredPromise {
+  id: string;
+  accountId: string;
+  task: string;
+  budget: bigint;
+  categories: string[];
+  expiry: bigint;
+  nonce: `0x${string}`;
+  /** Atomic USDC units already committed/reserved — same semantics as
+   * `StoredIntent.spent`, updated through the same `recordSpend`. */
+  spent: bigint;
+  status: PromiseStatus;
+  reason?: string;
+  /** Firewall-generated human-readable one-liner shown while approving
+   * (`POST /promises`' response, `GET /promises/:id` while pending). */
+  summary: string;
+  deviceCode?: string;
+  verificationUri?: string;
+  verificationUriComplete?: string;
+  userCode?: string;
+  intervalSeconds?: number;
+  requestedAt?: string;
+  gateStartedAtMs?: number;
+  /** Approval-window deadline while `status === "pending_approval"`. */
+  expiresAt?: string;
+  attestation?: PromiseAttestation;
+  createdAt: string;
+  updatedAt: string;
+}
 
 // --- Database setup ----------------------------------------------------------
 
@@ -159,6 +285,64 @@ db.exec(`
     paused_at TEXT,
     reason TEXT
   );
+  CREATE TABLE IF NOT EXISTS accounts (
+    id TEXT PRIMARY KEY,
+    subject_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS account_keys (
+    key_hash TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    revoked INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS account_keys_account_id ON account_keys (account_id);
+  CREATE TABLE IF NOT EXISTS connect_requests (
+    id TEXT PRIMARY KEY,
+    poll_secret_hash TEXT NOT NULL,
+    device_code TEXT NOT NULL,
+    status TEXT NOT NULL,
+    account_id TEXT,
+    pending_account_key TEXT,
+    key_delivered INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    verification_uri TEXT NOT NULL,
+    verification_uri_complete TEXT,
+    user_code TEXT NOT NULL,
+    interval_seconds INTEGER NOT NULL,
+    requested_at TEXT NOT NULL,
+    gate_started_at_ms INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS connect_requests_status ON connect_requests (status);
+  CREATE TABLE IF NOT EXISTS promises (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    task TEXT NOT NULL,
+    budget TEXT NOT NULL,
+    categories_json TEXT NOT NULL,
+    expiry TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    spent TEXT NOT NULL DEFAULT '0',
+    status TEXT NOT NULL,
+    reason TEXT,
+    summary TEXT NOT NULL,
+    device_code TEXT,
+    verification_uri TEXT,
+    verification_uri_complete TEXT,
+    user_code TEXT,
+    interval_seconds INTEGER,
+    requested_at TEXT,
+    gate_started_at_ms INTEGER,
+    expires_at TEXT,
+    attestation_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS promises_account_id ON promises (account_id);
+  CREATE INDEX IF NOT EXISTS promises_status ON promises (status);
 `);
 
 // WU13 migration: `intents` may already exist from before the `revoked`
@@ -227,6 +411,70 @@ const getControlStmt = db.prepare(`SELECT paused, paused_at, reason FROM control
 const setControlStmt = db.prepare(
   `UPDATE control SET paused = $paused, paused_at = $pausedAt, reason = $reason WHERE id = 1`,
 );
+
+// P9.1 accounts / account keys.
+const insertAccountStmt = db.prepare(`INSERT INTO accounts (id, subject_hash, created_at) VALUES ($id, $subjectHash, $createdAt)`);
+const getAccountBySubjectHashStmt = db.prepare(`SELECT * FROM accounts WHERE subject_hash = $subjectHash`);
+const getAccountStmt = db.prepare(`SELECT * FROM accounts WHERE id = $id`);
+const insertAccountKeyStmt = db.prepare(
+  `INSERT INTO account_keys (key_hash, account_id, created_at, revoked) VALUES ($keyHash, $accountId, $createdAt, 0)`,
+);
+// Only unrevoked keys can ever authenticate — same dataset-stays-small
+// constant-time-scan tradeoff `findIntentByAgentKey` documents.
+const listActiveAccountKeysStmt = db.prepare(`SELECT * FROM account_keys WHERE revoked = 0`);
+
+// P9.1 connect requests.
+const insertConnectRequestStmt = db.prepare(
+  `INSERT INTO connect_requests (
+     id, poll_secret_hash, device_code, status, account_id, pending_account_key, key_delivered, reason,
+     verification_uri, verification_uri_complete, user_code, interval_seconds, requested_at, gate_started_at_ms,
+     expires_at, created_at, updated_at
+   ) VALUES (
+     $id, $pollSecretHash, $deviceCode, $status, $accountId, $pendingAccountKey, $keyDelivered, $reason,
+     $verificationUri, $verificationUriComplete, $userCode, $intervalSeconds, $requestedAt, $gateStartedAtMs,
+     $expiresAt, $createdAt, $updatedAt
+   )`,
+);
+const updateConnectRequestStmt = db.prepare(
+  `UPDATE connect_requests SET
+     status = $status, account_id = $accountId, pending_account_key = $pendingAccountKey,
+     key_delivered = $keyDelivered, reason = $reason, interval_seconds = $intervalSeconds, updated_at = $updatedAt
+   WHERE id = $id`,
+);
+const getConnectRequestStmt = db.prepare(`SELECT * FROM connect_requests WHERE id = $id`);
+const listConnectRequestsByStatusStmt = db.prepare(`SELECT * FROM connect_requests WHERE status = $status`);
+
+// P9.2 promises.
+const insertPromiseStmt = db.prepare(
+  `INSERT INTO promises (
+     id, account_id, task, budget, categories_json, expiry, nonce, spent, status, reason, summary,
+     device_code, verification_uri, verification_uri_complete, user_code, interval_seconds, requested_at,
+     gate_started_at_ms, expires_at, attestation_json, created_at, updated_at
+   ) VALUES (
+     $id, $accountId, $task, $budget, $categoriesJson, $expiry, $nonce, $spent, $status, $reason, $summary,
+     $deviceCode, $verificationUri, $verificationUriComplete, $userCode, $intervalSeconds, $requestedAt,
+     $gateStartedAtMs, $expiresAt, $attestationJson, $createdAt, $updatedAt
+   )`,
+);
+// Full-row update for every mutable field — same "rewrite everything on each
+// transition" pattern `savePendingApproval` uses for a `PendingApproval`.
+const updatePromiseStmt = db.prepare(
+  `UPDATE promises SET
+     status = $status, reason = $reason, spent = $spent, device_code = $deviceCode,
+     verification_uri = $verificationUri, verification_uri_complete = $verificationUriComplete,
+     user_code = $userCode, interval_seconds = $intervalSeconds, expires_at = $expiresAt,
+     attestation_json = $attestationJson, updated_at = $updatedAt
+   WHERE id = $id`,
+);
+// Narrow statement `recordSpend` uses so a budget reservation/release never
+// has to round-trip every other promise column.
+const updatePromiseSpentStmt = db.prepare(`UPDATE promises SET spent = $spent WHERE id = $id`);
+const getPromiseStmt = db.prepare(`SELECT * FROM promises WHERE id = $id`);
+const listPromisesByAccountStmt = db.prepare(`SELECT * FROM promises WHERE account_id = $accountId ORDER BY created_at DESC`);
+const countPromisesByAccountAndStatusStmt = db.prepare(
+  `SELECT COUNT(*) as count FROM promises WHERE account_id = $accountId AND status = $status`,
+);
+const listPromisesByStatusStmt = db.prepare(`SELECT * FROM promises WHERE status = $status`);
 
 // --- Row <-> domain mapping ----------------------------------------------
 
@@ -347,9 +595,23 @@ export function remainingBudget(intent: StoredIntent): bigint {
  */
 export function recordSpend(intentId: string, amount: bigint): void {
   const row = getIntentStmt.get({ $id: intentId }) as IntentRow | null;
-  if (!row) throw new Error(`recordSpend: unknown intentId ${intentId}`);
-  const newSpent = BigInt(row.spent) + amount;
-  updateSpentStmt.run({ $spent: newSpent.toString(), $id: intentId });
+  if (row) {
+    const newSpent = BigInt(row.spent) + amount;
+    updateSpentStmt.run({ $spent: newSpent.toString(), $id: intentId });
+    return;
+  }
+  // P9.2: a world_id-sourced mandate's budget lives on its OWN row in the
+  // `promises` table (there is no corresponding `intents` row for it —
+  // `promiseAsMandate`, promises.ts, only ever builds an in-memory adapter),
+  // so a miss above falls through here instead of throwing. Same reserve
+  // (positive)/release (negative) semantics as the wallet path above.
+  const promiseRow = getPromiseStmt.get({ $id: intentId }) as PromiseRow | null;
+  if (promiseRow) {
+    const newSpent = BigInt(promiseRow.spent) + amount;
+    updatePromiseSpentStmt.run({ $spent: newSpent.toString(), $id: intentId });
+    return;
+  }
+  throw new Error(`recordSpend: unknown intentId ${intentId}`);
 }
 
 // --- Receipts --------------------------------------------------------------
@@ -563,4 +825,290 @@ export function setOwnerControl(address: string, paused: boolean, reason?: strin
     $reason: paused ? (reason ?? null) : null,
   });
   return getOwnerControl(address);
+}
+
+// --- Accounts (Phase 3, P9.1) ------------------------------------------------
+//
+// One account per human, identified by the `keccak256` hash of their World
+// ID `sub` claim (never the raw subject — `hashWorldIdSubject`,
+// packages/shared/step-up.ts). `accounts.ts` finds-or-creates one every time
+// a `POST /connect` device flow resolves `approved`, so reconnecting the
+// same human (a second agent, a reinstalled MCP client, ...) reuses their
+// existing account and mints a fresh account key rather than a duplicate.
+
+interface AccountRow {
+  id: string;
+  subject_hash: string;
+  created_at: string;
+}
+
+function rowToAccount(row: AccountRow): StoredAccount {
+  return { id: row.id, subjectHash: row.subject_hash as `0x${string}`, createdAt: row.created_at };
+}
+
+export function findOrCreateAccountBySubjectHash(subjectHash: `0x${string}`): StoredAccount {
+  const existing = getAccountBySubjectHashStmt.get({ $subjectHash: subjectHash }) as AccountRow | null;
+  if (existing) return rowToAccount(existing);
+  const account: StoredAccount = { id: `account_${crypto.randomUUID()}`, subjectHash, createdAt: new Date().toISOString() };
+  insertAccountStmt.run({ $id: account.id, $subjectHash: subjectHash, $createdAt: account.createdAt });
+  return account;
+}
+
+export function getAccount(id: string): StoredAccount | undefined {
+  const row = getAccountStmt.get({ $id: id }) as AccountRow | null;
+  return row ? rowToAccount(row) : undefined;
+}
+
+/** Mints a fresh account credential (`ya_...`) bound to `accountId` — the raw
+ * key is returned so the caller (accounts.ts) can deliver it exactly once via
+ * `POST /connect/poll`; only its SHA-256 hash is persisted. */
+export function createAccountKey(accountId: string): string {
+  const accountKey = generateAccountKey();
+  insertAccountKeyStmt.run({
+    $keyHash: hashAccountKey(accountKey),
+    $accountId: accountId,
+    $createdAt: new Date().toISOString(),
+  });
+  return accountKey;
+}
+
+interface AccountKeyRow {
+  account_id: string;
+  key_hash: string;
+}
+
+/** Constant-time scan against every unrevoked account key — same
+ * dataset-stays-small tradeoff `findIntentByAgentKey` documents, chosen for
+ * the same reason (no timing side-channel tied to key material). */
+export function findAccountByAccountKey(accountKey: string): StoredAccount | undefined {
+  const providedHash = hashAccountKey(accountKey);
+  const rows = listActiveAccountKeysStmt.all() as AccountKeyRow[];
+  for (const row of rows) {
+    if (hashesEqual(row.key_hash, providedHash)) return getAccount(row.account_id);
+  }
+  return undefined;
+}
+
+// --- Connect requests (Phase 3, P9.1) ---------------------------------------
+
+interface ConnectRequestRow {
+  id: string;
+  poll_secret_hash: string;
+  device_code: string;
+  status: string;
+  account_id: string | null;
+  pending_account_key: string | null;
+  key_delivered: number;
+  reason: string | null;
+  verification_uri: string;
+  verification_uri_complete: string | null;
+  user_code: string;
+  interval_seconds: number;
+  requested_at: string;
+  gate_started_at_ms: number;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToConnectRequest(row: ConnectRequestRow): ConnectRequest {
+  return {
+    id: row.id,
+    pollSecretHash: row.poll_secret_hash,
+    deviceCode: row.device_code,
+    status: row.status as ConnectStatus,
+    accountId: row.account_id ?? undefined,
+    pendingAccountKey: row.pending_account_key ?? undefined,
+    keyDelivered: Boolean(row.key_delivered),
+    reason: row.reason ?? undefined,
+    verificationUri: row.verification_uri,
+    verificationUriComplete: row.verification_uri_complete ?? undefined,
+    userCode: row.user_code,
+    intervalSeconds: row.interval_seconds,
+    requestedAt: row.requested_at,
+    gateStartedAtMs: row.gate_started_at_ms,
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function createConnectRequest(request: ConnectRequest): void {
+  insertConnectRequestStmt.run({
+    $id: request.id,
+    $pollSecretHash: request.pollSecretHash,
+    $deviceCode: request.deviceCode,
+    $status: request.status,
+    $accountId: request.accountId ?? null,
+    $pendingAccountKey: request.pendingAccountKey ?? null,
+    $keyDelivered: request.keyDelivered ? 1 : 0,
+    $reason: request.reason ?? null,
+    $verificationUri: request.verificationUri,
+    $verificationUriComplete: request.verificationUriComplete ?? null,
+    $userCode: request.userCode,
+    $intervalSeconds: request.intervalSeconds,
+    $requestedAt: request.requestedAt,
+    $gateStartedAtMs: request.gateStartedAtMs,
+    $expiresAt: request.expiresAt,
+    $createdAt: request.createdAt,
+    $updatedAt: request.updatedAt,
+  });
+}
+
+/** Full-row update for every mutable field (status/account/key-delivery/
+ * reason/interval) — the same "rewrite on each transition" pattern
+ * `savePendingApproval` uses. */
+export function saveConnectRequest(request: ConnectRequest): void {
+  updateConnectRequestStmt.run({
+    $id: request.id,
+    $status: request.status,
+    $accountId: request.accountId ?? null,
+    $pendingAccountKey: request.pendingAccountKey ?? null,
+    $keyDelivered: request.keyDelivered ? 1 : 0,
+    $reason: request.reason ?? null,
+    $intervalSeconds: request.intervalSeconds,
+    $updatedAt: request.updatedAt,
+  });
+}
+
+export function getConnectRequest(id: string): ConnectRequest | undefined {
+  const row = getConnectRequestStmt.get({ $id: id }) as ConnectRequestRow | null;
+  return row ? rowToConnectRequest(row) : undefined;
+}
+
+/** Every connect request still awaiting a human, for resuming on boot
+ * (accounts.ts's `resumeConnectRequestsOnBoot`). */
+export function listConnectRequestsByStatus(status: ConnectStatus): ConnectRequest[] {
+  const rows = listConnectRequestsByStatusStmt.all({ $status: status }) as ConnectRequestRow[];
+  return rows.map(rowToConnectRequest);
+}
+
+// --- Promises (Phase 3, P9.2) ------------------------------------------------
+
+interface PromiseRow {
+  id: string;
+  account_id: string;
+  task: string;
+  budget: string;
+  categories_json: string;
+  expiry: string;
+  nonce: string;
+  spent: string;
+  status: string;
+  reason: string | null;
+  summary: string;
+  device_code: string | null;
+  verification_uri: string | null;
+  verification_uri_complete: string | null;
+  user_code: string | null;
+  interval_seconds: number | null;
+  requested_at: string | null;
+  gate_started_at_ms: number | null;
+  expires_at: string | null;
+  attestation_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToPromise(row: PromiseRow): StoredPromise {
+  return {
+    id: row.id,
+    accountId: row.account_id,
+    task: row.task,
+    budget: BigInt(row.budget),
+    categories: JSON.parse(row.categories_json) as string[],
+    expiry: BigInt(row.expiry),
+    nonce: row.nonce as `0x${string}`,
+    spent: BigInt(row.spent),
+    status: row.status as PromiseStatus,
+    reason: row.reason ?? undefined,
+    summary: row.summary,
+    deviceCode: row.device_code ?? undefined,
+    verificationUri: row.verification_uri ?? undefined,
+    verificationUriComplete: row.verification_uri_complete ?? undefined,
+    userCode: row.user_code ?? undefined,
+    intervalSeconds: row.interval_seconds ?? undefined,
+    requestedAt: row.requested_at ?? undefined,
+    gateStartedAtMs: row.gate_started_at_ms ?? undefined,
+    expiresAt: row.expires_at ?? undefined,
+    attestation: row.attestation_json ? promiseAttestationSchema.parse(JSON.parse(row.attestation_json)) : undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function createPromise(promise: StoredPromise): void {
+  insertPromiseStmt.run({
+    $id: promise.id,
+    $accountId: promise.accountId,
+    $task: promise.task,
+    $budget: promise.budget.toString(),
+    $categoriesJson: JSON.stringify(promise.categories),
+    $expiry: promise.expiry.toString(),
+    $nonce: promise.nonce,
+    $spent: promise.spent.toString(),
+    $status: promise.status,
+    $reason: promise.reason ?? null,
+    $summary: promise.summary,
+    $deviceCode: promise.deviceCode ?? null,
+    $verificationUri: promise.verificationUri ?? null,
+    $verificationUriComplete: promise.verificationUriComplete ?? null,
+    $userCode: promise.userCode ?? null,
+    $intervalSeconds: promise.intervalSeconds ?? null,
+    $requestedAt: promise.requestedAt ?? null,
+    $gateStartedAtMs: promise.gateStartedAtMs ?? null,
+    $expiresAt: promise.expiresAt ?? null,
+    $attestationJson: promise.attestation ? JSON.stringify(promise.attestation) : null,
+    $createdAt: promise.createdAt,
+    $updatedAt: promise.updatedAt,
+  });
+}
+
+/** Full-row update for every mutable field — promises.ts's approval resolver
+ * rewrites this on each transition, same pattern `savePendingApproval` uses
+ * for a `PendingApproval`. Budget (`spent`) is included so a caller can use
+ * either this or the narrower `recordSpend` (store.ts) interchangeably. */
+export function savePromise(promise: StoredPromise): void {
+  updatePromiseStmt.run({
+    $id: promise.id,
+    $status: promise.status,
+    $reason: promise.reason ?? null,
+    $spent: promise.spent.toString(),
+    $deviceCode: promise.deviceCode ?? null,
+    $verificationUri: promise.verificationUri ?? null,
+    $verificationUriComplete: promise.verificationUriComplete ?? null,
+    $userCode: promise.userCode ?? null,
+    $intervalSeconds: promise.intervalSeconds ?? null,
+    $expiresAt: promise.expiresAt ?? null,
+    $attestationJson: promise.attestation ? JSON.stringify(promise.attestation) : null,
+    $updatedAt: promise.updatedAt,
+  });
+}
+
+export function getPromise(id: string): StoredPromise | undefined {
+  const row = getPromiseStmt.get({ $id: id }) as PromiseRow | null;
+  return row ? rowToPromise(row) : undefined;
+}
+
+/** Latest-first, for `GET /promises` (index.ts) and `GET /account`'s
+ * `promises` summaries. */
+export function listPromisesByAccount(accountId: string): StoredPromise[] {
+  const rows = listPromisesByAccountStmt.all({ $accountId: accountId }) as PromiseRow[];
+  return rows.map(rowToPromise);
+}
+
+/** How many of this account's promises are currently awaiting a human —
+ * `OMAMORISAN_MAX_PENDING_PROMISES` (promises.ts) caps this. */
+export function countPendingPromisesForAccount(accountId: string): number {
+  const row = countPromisesByAccountAndStatusStmt.get({ $accountId: accountId, $status: "pending_approval" }) as
+    | { count: number }
+    | null;
+  return row?.count ?? 0;
+}
+
+/** Every promise still awaiting a human, for resuming on boot
+ * (promises.ts's `resumePromiseApprovalsOnBoot`). */
+export function listPromisesByStatus(status: PromiseStatus): StoredPromise[] {
+  const rows = listPromisesByStatusStmt.all({ $status: status }) as PromiseRow[];
+  return rows.map(rowToPromise);
 }

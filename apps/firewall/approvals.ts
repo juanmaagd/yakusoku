@@ -18,6 +18,7 @@
 
 import type { PaymentRequired } from "@x402/core/types";
 import {
+  hashWorldIdSubject,
   paymentRequirementSchema,
   transition,
   USDC_DECIMALS,
@@ -27,12 +28,13 @@ import {
   type Verdict,
 } from "@yakusoku/shared";
 import { publish } from "./events-bus";
+import { resolveMandate } from "./promises";
 import { finalize, type ApprovalInfo, type PipelineOutcome, type ReceiptContext } from "./receipts";
 import { signPayment } from "./signer";
 import { signStepUpAttestation } from "./step-up";
 import {
+  getAccount,
   getControlState,
-  getIntent,
   getOwnerControl,
   getPendingApprovalByReceiptId,
   getReceipt,
@@ -332,10 +334,31 @@ export async function settleApproved(approval: PendingApproval, claims: FreshApp
     console.error(`[world-id] settleApproved: receipt ${approval.receiptId} missing`);
     return;
   }
-  const intent = getIntent(approval.intentId);
+  // P9.2: resolves either a wallet-signed intent or a world_id promise —
+  // see promises.ts's `resolveMandate`/`promiseAsMandate`.
+  const intent = resolveMandate(approval.intentId);
   if (!intent) {
     await settleRefused(approval, "error", "intent no longer available when the approval resolved", "error");
     return;
+  }
+
+  // P9.2: a doubtful-payment approval on a world_id-sourced promise must be
+  // approved by the SAME human the promise belongs to — a valid, fresh
+  // World ID token for a different person still refuses, fail-closed,
+  // exactly like promises.ts's own approval gate requires to activate the
+  // promise in the first place. Never reached for a wallet-sourced intent
+  // (`intent.source` is only ever set on the promise adapter).
+  if (intent.source === "world_id") {
+    const account = intent.accountId ? getAccount(intent.accountId) : undefined;
+    if (!account) {
+      await settleRefused(approval, "error", "account no longer available when the approval resolved", "error");
+      return;
+    }
+    const subjectHash = hashWorldIdSubject(claims.sub);
+    if (subjectHash.toLowerCase() !== account.subjectHash.toLowerCase()) {
+      await settleRefused(approval, "world_id_wrong_human", "world_id_wrong_human", "world_id_denied");
+      return;
+    }
   }
 
   // WU13: re-check the kill switch and intent-revocation status right here,

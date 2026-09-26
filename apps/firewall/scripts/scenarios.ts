@@ -25,6 +25,15 @@
 //
 // P6 adds S29 (~1 more World ID sandbox device-authorization call, same cost
 // as S13).
+//
+// P9.1/P9.2 add S30-S35 (accounts + promises): the isolated firewall now runs
+// with `OMAMORISAN_DEV_APPROVALS=1` (never on the live :4001 firewall), so
+// every connect/promise approval below is fabricated through the operator-
+// only `/dev/connect/:id/approve` / `/dev/promises/:id/approve` seam instead
+// of a real phone — S30 is the one exception (it never approves at all).
+// Real World ID sandbox device-authorization calls still happen for every
+// `POST /connect`/`POST /promises` though (~9 more across S30-S35, plus
+// `OMAMORISAN_MAX_PENDING_PROMISES` more for S31's cap check).
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -269,6 +278,129 @@ async function siweSignIn(account: ReturnType<typeof privateKeyToAccount>): Prom
   });
   const json = (await res.json().catch(() => ({}))) as SiweVerifyResponse;
   return { status: res.status, json };
+}
+
+// --- P9.1/P9.2: account connect + promises helpers ---------------------------
+// The isolated firewall this suite spawns runs with `OMAMORISAN_DEV_APPROVALS=1`
+// (see `main` below) — real World ID device-authorization calls still happen
+// (S30 checks that), but resolving them to `approved` uses the operator-only
+// `/dev/connect/:id/approve` / `/dev/promises/:id/approve` seam with a
+// fabricated subject instead of waiting for a real phone. Never enabled on
+// the live :4001 firewall — see index.ts's boot-time warning.
+
+interface ConnectStartResponse {
+  connectId?: string;
+  pollSecret?: string;
+  verificationUri?: string;
+  userCode?: string;
+  expiresAt?: string;
+  error?: string;
+}
+
+async function startConnectRequest(): Promise<{ status: number; json: ConnectStartResponse }> {
+  const res = await fetch(`${FIREWALL_URL}/connect`, { method: "POST" });
+  const json = (await res.json().catch(() => ({}))) as ConnectStartResponse;
+  return { status: res.status, json };
+}
+
+interface ConnectPollResponse {
+  status?: string;
+  accountId?: string;
+  accountKey?: string;
+  error?: string;
+}
+
+async function pollConnectRequest(connectId: string, pollSecret: string): Promise<{ status: number; json: ConnectPollResponse }> {
+  const res = await fetch(`${FIREWALL_URL}/connect/poll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ connectId, pollSecret }),
+  });
+  const json = (await res.json().catch(() => ({}))) as ConnectPollResponse;
+  return { status: res.status, json };
+}
+
+/** Dev-only fabricated approval (`OMAMORISAN_DEV_APPROVALS=1`) — same
+ * operator-loopback + admin-header bar as `pauseSigning`/`revokeIntentRequest`. */
+async function devApprove(kind: "connect" | "promises", id: string, subject: string): Promise<{ status: number }> {
+  const res = await fetch(`${FIREWALL_URL}/dev/${kind}/${id}/approve`, {
+    method: "POST",
+    headers: { ...ADMIN_HEADERS, "content-type": "application/json" },
+    body: JSON.stringify({ subject }),
+  });
+  return { status: res.status };
+}
+
+/** Full connect flow via the dev seam: start, dev-approve with `subject`,
+ * then poll once more to collect the delivered account key. Throws on any
+ * unexpected step so a caller doesn't have to re-check every intermediate
+ * status. */
+async function connectAccountViaDevSeam(subject: string): Promise<{ accountId: string; accountKey: string }> {
+  const start = await startConnectRequest();
+  if (start.status !== 201 || !start.json.connectId || !start.json.pollSecret) {
+    throw new Error(`POST /connect failed: ${start.status} ${JSON.stringify(start.json)}`);
+  }
+  const approve = await devApprove("connect", start.json.connectId, subject);
+  if (approve.status !== 200) throw new Error(`dev-approve connect failed: ${approve.status}`);
+  const poll = await pollConnectRequest(start.json.connectId, start.json.pollSecret);
+  if (poll.json.status !== "approved" || !poll.json.accountId || !poll.json.accountKey) {
+    throw new Error(`POST /connect/poll did not deliver an account key: ${JSON.stringify(poll.json)}`);
+  }
+  return { accountId: poll.json.accountId, accountKey: poll.json.accountKey };
+}
+
+interface CreatePromiseResponse {
+  promiseId?: string;
+  status?: string;
+  verificationUri?: string;
+  userCode?: string;
+  expiresAt?: string;
+  summary?: string;
+  error?: string;
+}
+
+async function createPromiseRequest(
+  accountKey: string,
+  body: { task: string; budgetUsdc: number; categories: string[]; expiresInSeconds: number },
+): Promise<{ status: number; json: CreatePromiseResponse }> {
+  const res = await fetch(`${FIREWALL_URL}/promises`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${accountKey}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => ({}))) as CreatePromiseResponse;
+  return { status: res.status, json };
+}
+
+interface PromiseDetailResponse {
+  id?: string;
+  status?: string;
+  remainingBudget?: string;
+  error?: string;
+}
+
+async function getPromiseRequest(promiseId: string, accountKey: string): Promise<{ status: number; json: PromiseDetailResponse }> {
+  const res = await fetch(`${FIREWALL_URL}/promises/${promiseId}`, { headers: { authorization: `Bearer ${accountKey}` } });
+  const json = (await res.json().catch(() => ({}))) as PromiseDetailResponse;
+  return { status: res.status, json };
+}
+
+/** Full "active promise" flow: create + dev-approve with the account's OWN
+ * subject, then confirm it reports `active` before handing the id back. */
+async function activePromiseViaDevSeam(
+  accountKey: string,
+  subject: string,
+  body: { task: string; budgetUsdc: number; categories: string[]; expiresInSeconds: number },
+): Promise<string> {
+  const created = await createPromiseRequest(accountKey, body);
+  if (created.status !== 201 || !created.json.promiseId) {
+    throw new Error(`POST /promises failed: ${created.status} ${JSON.stringify(created.json)}`);
+  }
+  const approve = await devApprove("promises", created.json.promiseId, subject);
+  if (approve.status !== 200) throw new Error(`dev-approve promise failed: ${approve.status}`);
+  const detail = await getPromiseRequest(created.json.promiseId, accountKey);
+  if (detail.json.status !== "active") throw new Error(`promise did not become active: ${JSON.stringify(detail.json)}`);
+  return created.json.promiseId;
 }
 
 /** Collects `event:`/`data:` frames from an SSE endpoint for `windowMs`, then
@@ -1265,6 +1397,218 @@ async function runS29(): Promise<void> {
   }
 }
 
+// --- P9.1/P9.2: accounts + promises scenarios --------------------------------
+
+/** S30 — `POST /connect` starts a real World ID sandbox device flow (the
+ * ONLY connect/promise scenario that doesn't use the dev seam — everything
+ * else below fabricates the approval), and a wrong poll secret against a
+ * real connectId is rejected without resolving anything. Never approves. */
+async function runS30(): Promise<void> {
+  const id = "S30";
+  const description = "POST /connect returns a real sandbox user code; wrong poll secret rejected";
+  const expected = "connect 201 with a user code; poll(right)=pending; poll(wrong)=401";
+  try {
+    const start = await startConnectRequest();
+    if (start.status !== 201 || !start.json.connectId || !start.json.pollSecret || !start.json.userCode) {
+      record(id, description, expected, `start=${start.status}`, false, JSON.stringify(start.json));
+      return;
+    }
+    const right = await pollConnectRequest(start.json.connectId, start.json.pollSecret);
+    const wrong = await pollConnectRequest(start.json.connectId, "definitely-not-the-secret");
+    const pass = right.status === 200 && right.json.status === "pending" && wrong.status === 401;
+    record(id, description, expected, `poll(right)=${right.status}/${right.json.status} poll(wrong)=${wrong.status}`, pass);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S31 — `POST /promises` auth + caps (P9.2): no account key -> 401; a
+ * budget over `OMAMORISAN_MAX_PROMISE_USDC` -> 400; more pending promises
+ * than `OMAMORISAN_MAX_PENDING_PROMISES` -> 429. Costs one dev-seam connect
+ * plus one real World ID device-authorization call per pending promise
+ * created to reach the cap (default 3) — every one of those stays
+ * `pending_approval` (never approved), so no attestation, no signature. */
+async function runS31(): Promise<void> {
+  const id = "S31";
+  const description = "POST /promises: no key 401, over budget cap 400, too many pending 429";
+  const expected = "401, 400, 429";
+  try {
+    const noKeyRes = await fetch(`${FIREWALL_URL}/promises`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task: "irrelevant", budgetUsdc: 1, categories: ["gift_card:amazon"], expiresInSeconds: 3600 }),
+    });
+
+    const { accountKey } = await connectAccountViaDevSeam(`world-id-subject-s31-${crypto.randomUUID()}`);
+
+    const maxUsdc = Number(process.env.OMAMORISAN_MAX_PROMISE_USDC ?? 50);
+    const overBudget = await createPromiseRequest(accountKey, {
+      task: "Buy something absurdly expensive",
+      budgetUsdc: maxUsdc + 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+    });
+
+    const maxPending = Number(process.env.OMAMORISAN_MAX_PENDING_PROMISES ?? 3);
+    for (let i = 0; i < maxPending; i++) {
+      const r = await createPromiseRequest(accountKey, {
+        task: `Buy a $1 Amazon gift card (rehearsal) — S31 pending #${i}`,
+        budgetUsdc: 1,
+        categories: ["gift_card:amazon"],
+        expiresInSeconds: 3600,
+      });
+      if (r.status !== 201) throw new Error(`S31: expected pending promise #${i} to be created, got ${r.status}: ${JSON.stringify(r.json)}`);
+    }
+    const overPending = await createPromiseRequest(accountKey, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S31 one too many",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+    });
+
+    const pass = noKeyRes.status === 401 && overBudget.status === 400 && overPending.status === 429;
+    record(
+      id,
+      description,
+      expected,
+      `no-key=${noKeyRes.status} over-budget=${overBudget.status} over-pending=${overPending.status}`,
+      pass,
+    );
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S32 — a promise still `pending_approval` cannot pay: `/sign` refuses via
+ * pipeline.ts's `checkPolicy` fail-closed "promise not active" check, before
+ * Jev/Intercepta/World ID ever run. */
+async function runS32(): Promise<void> {
+  const id = "S32";
+  const description = "a pending_approval promise cannot /sign";
+  const expected = "refuse (promise not active)";
+  try {
+    const { accountKey } = await connectAccountViaDevSeam(`world-id-subject-s32-${crypto.randomUUID()}`);
+    const created = await createPromiseRequest(accountKey, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S32",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+    });
+    if (created.status !== 201 || !created.json.promiseId) throw new Error(`POST /promises failed: ${created.status}`);
+
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S32", "n/a", []);
+    const { json } = await signRequest(
+      { intentId: created.json.promiseId, paymentRequiredHeader: header, resourceUrl, context },
+      accountKey,
+    );
+    const pass = json.verdict === "refuse" && /not active/i.test(json.reason ?? "");
+    record(id, description, expected, json.verdict, pass, json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S33 — account A's key can neither read nor sign account B's promise
+ * (P9.2, `authenticateMandateCredential`'s account branch — same
+ * no-existence-leak-on-read shape `GET /receipts/:id` already uses). */
+async function runS33(): Promise<void> {
+  const id = "S33";
+  const description = "account A's key cannot read or sign account B's promise";
+  const expected = "read 404, sign forbidden";
+  try {
+    const { accountKey: keyA } = await connectAccountViaDevSeam(`world-id-subject-s33-a-${crypto.randomUUID()}`);
+    const subjectB = `world-id-subject-s33-b-${crypto.randomUUID()}`;
+    const { accountKey: keyB } = await connectAccountViaDevSeam(subjectB);
+    const promiseIdB = await activePromiseViaDevSeam(keyB, subjectB, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S33b",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+    });
+
+    const readRes = await getPromiseRequest(promiseIdB, keyA);
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S33b", "n/a", []);
+    const { status: signStatus, json: signJson } = await signRequest(
+      { intentId: promiseIdB, paymentRequiredHeader: header, resourceUrl, context },
+      keyA,
+    );
+
+    const pass = readRes.status === 404 && (signJson.error === "forbidden" || signStatus === 403);
+    record(id, description, expected, `read=${readRes.status} sign=${signJson.error ?? signStatus}`, pass);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S34 — full dev-seam happy path (P9.1+P9.2): connect -> account key ->
+ * promise approved by the SAME subject -> a legit `/sign` reaches the
+ * expected verdict. Never sends the resulting signature back to the store —
+ * no settlement, no on-chain payment, same discipline as every other
+ * scenario in this file. Expected verdict adapts to INTERCEPTA_API_KEY same
+ * as S1: unset -> ask_human (documented, not a failure); set -> pay. */
+async function runS34(): Promise<void> {
+  const id = "S34";
+  const description = "dev seam: connect -> account key -> promise active -> legit /sign";
+  const expected = HAS_INTERCEPTA_KEY ? "pay" : "ask_human";
+  try {
+    const subject = `world-id-subject-s34-${crypto.randomUUID()}`;
+    const { accountKey } = await connectAccountViaDevSeam(subject);
+    const promiseId = await activePromiseViaDevSeam(accountKey, subject, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S34",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+    });
+
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S34", "Exact match for the promise.", []);
+    const { json } = await signRequest(
+      { intentId: promiseId, paymentRequiredHeader: header, resourceUrl, context },
+      accountKey,
+    );
+    record(id, description, expected, json.verdict ?? json.error ?? "unknown", json.verdict === expected, json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S35 — KEY CASE #9 on a world_id promise: Jev must still catch a clean
+ * address / in-budget / wrong-item payment, exactly like on a wallet mandate
+ * (S2) — refuse dominance holds even with Intercepta escalating first. */
+async function runS35(): Promise<void> {
+  const id = "S35";
+  const description = "KEY CASE: steam-1 under an account promise (clean payTo, in budget)";
+  const expected = "refuse";
+  try {
+    const subject = `world-id-subject-s35-${crypto.randomUUID()}`;
+    const { accountKey } = await connectAccountViaDevSeam(subject);
+    const promiseId = await activePromiseViaDevSeam(accountKey, subject, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S35",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+    });
+
+    const { header, resourceUrl } = await fetch402(STEAM_1_SKU);
+    const traps = await fetchPromo(AMAZON_REHEARSAL_SKU);
+    const untrustedContent = traps.map((t) => ({ source: `promo:${AMAZON_REHEARSAL_SKU}#${t.id}`, text: t.text }));
+    const context = cleanContext(
+      "Buy a $1 Amazon gift card (rehearsal) — S35",
+      "The checkout page offered to add a Steam gift card to the same order.",
+      untrustedContent,
+    );
+    const { json } = await signRequest(
+      { intentId: promiseId, paymentRequiredHeader: header, resourceUrl, context },
+      accountKey,
+    );
+    record(id, description, expected, json.verdict, json.verdict === "refuse", json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
 // --- Process orchestration ---------------------------------------------------
 
 async function waitForHttp(url: string, timeoutMs = 20_000): Promise<void> {
@@ -1323,6 +1667,12 @@ async function main(): Promise<void> {
     PORT: String(FIREWALL_PORT),
     FIREWALL_DATA_DIR: tmpDir,
     WORLD_ID_APPROVAL_TIMEOUT_S: "10",
+    // P9.1/P9.2: this isolated, temp-data-dir firewall is the ONLY place the
+    // dev approval seam is ever enabled — never on the live :4001 firewall
+    // (index.ts logs a loud boot warning either way). S30-S35 below use it
+    // to exercise the paid path behind a connected account/promise without a
+    // real phone.
+    OMAMORISAN_DEV_APPROVALS: "1",
   });
 
   let exitCode = 0;
@@ -1360,6 +1710,12 @@ async function main(): Promise<void> {
     await runS27();
     await runS28();
     await runS29();
+    await runS30();
+    await runS31();
+    await runS32();
+    await runS33();
+    await runS34();
+    await runS35();
 
     printTable();
     exitCode = results.every((r) => r.pass) ? 0 : 1;

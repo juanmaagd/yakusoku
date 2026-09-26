@@ -61,11 +61,11 @@ import { pendingApprovalOutcome, startApprovalGate, worldIdThresholdStage } from
 import { interceptaStage } from "./intercepta";
 import { jevStage } from "./jev";
 import { provenanceStage } from "./provenance";
+import { resolveMandate } from "./promises";
 import { finalize, type PipelineOutcome, type ReceiptContext } from "./receipts";
 import {
   getCachedSignOutcome,
   getControlState,
-  getIntent,
   getOwnerControl,
   getPendingApprovalByPaymentIdentifier,
   recordSpend,
@@ -145,6 +145,15 @@ function checkPolicy(
   requirement: PaymentRequirement,
 ): { ok: true } | { ok: false; reason: string } {
   if (!intent) return { ok: false, reason: "unknown intentId" };
+  // P9.2: a world_id-sourced mandate (promiseAsMandate, promises.ts) must be
+  // `active` — `pending_approval`/`denied`/`expired`/`revoked`/`error` all
+  // refuse here, fail-closed, before any of the wallet-only checks below
+  // (which a promise's placeholder `signer`/`revoked` fields would otherwise
+  // pass trivially). A wallet-sourced `StoredIntent` never sets `source`, so
+  // this is a no-op for the existing path.
+  if (intent.source === "world_id" && intent.promiseStatus !== "active") {
+    return { ok: false, reason: `promise not active (status: ${intent.promiseStatus})` };
+  }
   // WU13: a revoked intent is a permanent business fact (unlike the kill
   // switch, there's no "unrevoke") — check it here so the refusal is cached
   // like any other policy rejection.
@@ -177,7 +186,9 @@ function checkPolicy(
 
 async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string): Promise<PipelineOutcome> {
   const timeline: ReceiptTimelineEntry[] = [];
-  const intent = getIntent(req.intentId);
+  // P9.2: resolves either a wallet-signed intent or a world_id promise —
+  // see promises.ts's `resolveMandate`/`promiseAsMandate`.
+  const intent = resolveMandate(req.intentId);
   const accepts0 = (req.paymentRequired.accepts?.[0] ?? {}) as Partial<PaymentRequirement>;
   const receiptContext: ReceiptContext = {
     paymentIdentifier,

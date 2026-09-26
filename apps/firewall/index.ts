@@ -16,14 +16,18 @@ import {
   createIntent,
   createNonce,
   createSession,
+  findAccountByAccountKey,
   findIntentByAgentKey,
+  getAccount,
   getControlState,
   getIntent,
   getOwnerControl,
   getPendingApprovalByReceiptId,
+  getPromise,
   getReceipt,
   getSessionByToken,
   listIntents,
+  listPromisesByAccount,
   listReceipts,
   remainingBudget,
   revokeIntent,
@@ -31,6 +35,7 @@ import {
   saveReceipt,
   setControlState,
   setOwnerControl,
+  type StoredAccount,
   type StoredIntent,
 } from "./store";
 import { extractBearerToken } from "./auth";
@@ -38,6 +43,16 @@ import { verifyTaskIntentSignature } from "./signer";
 import { verifySiweSignIn } from "./siwe";
 import { computePaymentIdentifier, runSignPipeline } from "./pipeline";
 import { approvalStatusResponse, resumePendingApprovalsOnBoot } from "./approvals";
+import { devApproveConnect, pollConnect, resumeConnectRequestsOnBoot, startConnect } from "./accounts";
+import {
+  createPromiseRequest,
+  devApprovePromise,
+  resolveMandate,
+  revokePromiseRequest,
+  resumePromiseApprovalsOnBoot,
+  serializePromiseDetail,
+  serializePromiseSummary,
+} from "./promises";
 import { publish, subscribe, type FirewallEvent } from "./events-bus";
 
 const PORT = Number(process.env.PORT) || 4001;
@@ -225,6 +240,186 @@ function authenticateAgent(c: Context, requestedIntentId?: string): AgentAuthRes
   }
   return { ok: true, mandate };
 }
+
+// --- P9.1 account credential auth --------------------------------------------
+//
+// `GET /account` and `POST /promises` are account-scoped: an account
+// authenticates with `Authorization: Bearer <accountKey>` (`ya_...`, minted
+// once by `POST /connect/poll`). Unlike a mandate key, one account key can
+// own several promises, so it never resolves a single mandate by itself.
+
+type AccountAuthResult =
+  | { ok: true; account: StoredAccount }
+  | { ok: false; status: 401; body: { error: "unauthorized" } };
+
+function authenticateAccount(c: Context): AccountAuthResult {
+  const token = extractBearerToken(c.req.header("authorization"));
+  if (!token) return { ok: false, status: 401, body: { error: "unauthorized" } };
+  const account = findAccountByAccountKey(token);
+  if (!account) return { ok: false, status: 401, body: { error: "unauthorized" } };
+  return { ok: true, account };
+}
+
+// --- P9.2 unified mandate-credential auth ------------------------------------
+//
+// `/sign`, `/approvals/:receiptId` and `/receipts/:id/settlement` accept
+// EITHER a wallet mandate key (`yk_...`, unchanged since WU-P1 — see
+// `authenticateAgent` above, whose exact behavior this reproduces byte for
+// byte for a `yk_` token) OR an account key (`ya_...`) naming one of that
+// account's own promises via `requestedIntentId` (the request's `intentId` /
+// the receipt's `intentId`). An account key with no `requestedIntentId` still
+// authenticates (kind `"account"`, `mandate: undefined`) — used for a
+// pre-body-parse check (mirrors `/sign`'s `preAuth` pattern) before the
+// caller knows which promise the request names.
+type MandateCredentialResult =
+  | { ok: true; kind: "wallet"; mandate: StoredIntent }
+  | { ok: true; kind: "account"; account: StoredAccount; mandate?: StoredIntent }
+  | { ok: false; status: 401 | 403; body: { error: "unauthorized" | "forbidden" } };
+
+function authenticateMandateCredential(c: Context, requestedIntentId?: string): MandateCredentialResult {
+  const token = extractBearerToken(c.req.header("authorization"));
+  if (!token) return { ok: false, status: 401, body: { error: "unauthorized" } };
+
+  const walletMandate = findIntentByAgentKey(token);
+  if (walletMandate) {
+    if (walletMandate.revoked) return { ok: false, status: 401, body: { error: "unauthorized" } };
+    if (requestedIntentId !== undefined && requestedIntentId !== walletMandate.id) {
+      return { ok: false, status: 403, body: { error: "forbidden" } };
+    }
+    return { ok: true, kind: "wallet", mandate: walletMandate };
+  }
+
+  const account = findAccountByAccountKey(token);
+  if (account) {
+    if (requestedIntentId === undefined) return { ok: true, kind: "account", account };
+    const promise = getPromise(requestedIntentId);
+    if (!promise || promise.accountId !== account.id) return { ok: false, status: 403, body: { error: "forbidden" } };
+    // resolveMandate never returns undefined here — `getPromise` just found
+    // this exact row, and `resolveMandate` checks the very same table.
+    return { ok: true, kind: "account", account, mandate: resolveMandate(requestedIntentId) };
+  }
+
+  return { ok: false, status: 401, body: { error: "unauthorized" } };
+}
+
+// --- POST /connect (P9.1) -----------------------------------------------------
+//
+// No auth: nobody is authenticated yet, that's the whole point of connecting
+// an agent to a human via World ID. Starts a fresh device flow and returns
+// everything the MCP client needs to show the human a link/code and start
+// polling.
+
+app.post("/connect", async (c) => {
+  try {
+    const result = await startConnect();
+    return c.json(result, 201);
+  } catch (err) {
+    return c.json(
+      { error: "connect_start_failed", message: err instanceof Error ? err.message : String(err) },
+      502,
+    );
+  }
+});
+
+const connectPollSchema = z.object({
+  connectId: z.string().min(1),
+  pollSecret: z.string().min(1),
+});
+
+app.post("/connect/poll", async (c) => {
+  const body = await c.req.json().catch(() => undefined);
+  const parsed = connectPollSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_connect_poll_request", issues: parsed.error.issues }, 400);
+  }
+  const result = pollConnect(parsed.data.connectId, parsed.data.pollSecret);
+  if (!result.ok) return c.json(result.body, result.status);
+  const { ok: _ok, ...body2 } = result;
+  return c.json(body2);
+});
+
+// --- GET /account (P9.1) ------------------------------------------------------
+
+app.get("/account", (c) => {
+  const auth = authenticateAccount(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  return c.json({
+    accountId: auth.account.id,
+    createdAt: auth.account.createdAt,
+    promises: listPromisesByAccount(auth.account.id).map(serializePromiseSummary),
+  });
+});
+
+// --- Promises (P9.2) ----------------------------------------------------------
+
+const createPromiseSchema = z.object({
+  task: z.string().min(1),
+  budgetUsdc: z.union([z.string(), z.number()]).transform((v) => Number(v)),
+  categories: z.array(z.string().min(1)).min(1).max(5),
+  expiresInSeconds: z.number().int().positive(),
+});
+
+app.post("/promises", async (c) => {
+  const auth = authenticateAccount(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const body = await c.req.json().catch(() => undefined);
+  const parsed = createPromiseSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_promise_request", issues: parsed.error.issues }, 400);
+  }
+  if (!Number.isFinite(parsed.data.budgetUsdc)) {
+    return c.json({ error: "invalid_promise_request", issues: "budgetUsdc must be numeric" }, 400);
+  }
+  const outcome = await createPromiseRequest(auth.account, parsed.data);
+  if (!outcome.ok) return c.json({ error: outcome.error }, outcome.status);
+  const p = outcome.promise;
+  return c.json(
+    {
+      promiseId: p.id,
+      status: p.status,
+      verificationUri: p.verificationUri,
+      verificationUriComplete: p.verificationUriComplete,
+      userCode: p.userCode,
+      expiresAt: p.expiresAt,
+      summary: p.summary,
+    },
+    201,
+  );
+});
+
+app.get("/promises", (c) => {
+  const auth = authenticateAccount(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  // Same detail shape as `GET /promises/:id` (pending-approval info included
+  // while pending) — an MCP client's `list_promises` wants to show a live
+  // approval link without a follow-up call per promise.
+  return c.json(listPromisesByAccount(auth.account.id).map(serializePromiseDetail));
+});
+
+app.get("/promises/:id", (c) => {
+  const auth = authenticateAccount(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const promise = getPromise(c.req.param("id"));
+  if (!promise || promise.accountId !== auth.account.id) return c.json({ error: "promise_not_found" }, 404);
+  return c.json(serializePromiseDetail(promise));
+});
+
+app.get("/promises/:id/attestation", (c) => {
+  const auth = authenticateAccount(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const promise = getPromise(c.req.param("id"));
+  if (!promise || promise.accountId !== auth.account.id) return c.json({ error: "promise_not_found" }, 404);
+  if (!promise.attestation) return c.json({ error: "attestation_not_found" }, 404);
+  return c.json(promise.attestation);
+});
+
+app.post("/promises/:id/revoke", (c) => {
+  const auth = authenticateAccount(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const promise = revokePromiseRequest(c.req.param("id"), auth.account.id);
+  if (!promise) return c.json({ error: "promise_not_found" }, 404);
+  return c.json(serializePromiseDetail(promise));
+});
 
 // --- POST /intents -----------------------------------------------------------
 
@@ -439,9 +634,11 @@ const signRequestSchema = z
   });
 
 app.post("/sign", async (c) => {
-  // WU-P1: authenticate first — an unknown, missing, or revoked-mandate key
-  // gets no validation details and never reaches the pipeline.
-  const preAuth = authenticateAgent(c);
+  // P9.2: authenticate first — an unknown/invalid credential, or a revoked
+  // wallet mandate, gets no validation details and never reaches the
+  // pipeline. Accepts either the wallet mandate key (`yk_`, unchanged) or an
+  // account key (`ya_`) — see `authenticateMandateCredential`.
+  const preAuth = authenticateMandateCredential(c);
   if (!preAuth.ok) return c.json(preAuth.body, preAuth.status);
 
   const body = await c.req.json().catch(() => undefined);
@@ -451,8 +648,16 @@ app.post("/sign", async (c) => {
   }
   const { paymentRequiredHeader, resourceUrl, context } = parsed.data;
 
-  const auth = authenticateAgent(c, parsed.data.intentId);
+  const auth = authenticateMandateCredential(c, parsed.data.intentId);
   if (!auth.ok) return c.json(auth.body, auth.status);
+  // An account key with no resolvable `intentId` (either omitted, or naming
+  // a promise it doesn't own) never reaches here as `ok:true` without a
+  // `mandate` — the account-key branch above only returns `mandate:
+  // undefined` when `requestedIntentId` itself was undefined, which for
+  // `/sign` means the caller never said which promise to pay from.
+  if (!auth.mandate) {
+    return c.json({ error: "intent_id_required" }, 400);
+  }
   const intentId = auth.mandate.id;
 
   let paymentRequired: PaymentRequired;
@@ -552,9 +757,11 @@ const settlementRequestSchema = z.object({
 });
 
 app.post("/receipts/:id/settlement", async (c) => {
-  // Only the mandate's own agent may report its settlement.
-  const auth = authenticateAgent(c);
-  if (!auth.ok) return c.json(auth.body, auth.status);
+  // P9.2: authenticate the credential itself first (any valid wallet key or
+  // account key) — same "an invalid credential never learns whether the
+  // receipt exists" ordering the original wallet-only check used.
+  const preAuth = authenticateMandateCredential(c);
+  if (!preAuth.ok) return c.json(preAuth.body, preAuth.status);
 
   const id = c.req.param("id");
   const body = await c.req.json().catch(() => undefined);
@@ -565,7 +772,13 @@ app.post("/receipts/:id/settlement", async (c) => {
 
   const receipt = getReceipt(id);
   if (!receipt) return c.json({ error: "receipt_not_found" }, 404);
-  if (receipt.intentId !== auth.mandate.id) return c.json({ error: "forbidden" }, 403);
+
+  // Only the receipt's own mandate may report its settlement — resolve
+  // ownership against the receipt's ACTUAL `intentId`: a wallet key must BE
+  // that mandate, an account key must OWN that promise.
+  const auth = authenticateMandateCredential(c, receipt.intentId);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  if (!auth.mandate || receipt.intentId !== auth.mandate.id) return c.json({ error: "forbidden" }, 403);
   if (receipt.verdict !== "pay") {
     return c.json({ error: "not_a_pay_receipt", verdict: receipt.verdict }, 400);
   }
@@ -620,11 +833,16 @@ app.get("/approvals/:receiptId", (c) => {
     return c.json(approvalStatusResponse(approval));
   }
 
-  const auth = authenticateAgent(c);
-  if (!auth.ok) return c.json(auth.body, auth.status);
+  // P9.2: the wallet mandate key path above is untouched; a caller
+  // presenting an account key instead reads any approval belonging to a
+  // promise that account owns.
+  const preAuth = authenticateMandateCredential(c);
+  if (!preAuth.ok) return c.json(preAuth.body, preAuth.status);
   const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
   if (!approval) return c.json({ error: "approval_not_found" }, 404);
-  if (approval.intentId !== auth.mandate.id) return c.json({ error: "forbidden" }, 403);
+  const auth = authenticateMandateCredential(c, approval.intentId);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  if (!auth.mandate || approval.intentId !== auth.mandate.id) return c.json({ error: "forbidden" }, 403);
   return c.json(approvalStatusResponse(approval));
 });
 
@@ -692,10 +910,56 @@ app.get("/events", (c) => {
   });
 });
 
+// --- Dev approval seam (OMAMORISAN_DEV_APPROVALS=1) --------------------------
+//
+// Off by default. Exists ONLY so the scenarios' isolated firewall
+// (scripts/scenarios.ts) can exercise the paid path behind a world_id
+// promise without a real phone — never set this on the live :4001 firewall.
+// Gated on BOTH the env var (checked once here, at boot, so the routes don't
+// even exist unless it's on) and `requireLocalAdmin` (loopback + the fixed
+// `x-yakusoku-admin` header) per-request, same operator-only bar as
+// `/control/pause`. Every attestation minted through this path carries
+// `acr: "dev"`, never `orb-v3` — nothing genuine.
+if (process.env.OMAMORISAN_DEV_APPROVALS === "1") {
+  console.warn(
+    "[SECURITY] OMAMORISAN_DEV_APPROVALS=1 — the fabricated-approval dev seam is ENABLED on this process. " +
+      "Never set this on the live demo firewall (:4001).",
+  );
+
+  const devApproveSchema = z.object({ subject: z.string().min(1) });
+
+  // `isLocalAdminRequest` called directly (rather than as the
+  // `requireLocalAdmin` middleware) so Hono keeps inferring `:id` as `string`
+  // from the literal path pattern on these routes.
+  app.post("/dev/connect/:id/approve", async (c) => {
+    if (!isLocalAdminRequest(c)) return c.json({ error: "forbidden" }, 403);
+    const body = await c.req.json().catch(() => undefined);
+    const parsed = devApproveSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: "invalid_dev_approve_request", issues: parsed.error.issues }, 400);
+    const result = await devApproveConnect(c.req.param("id"), parsed.data.subject);
+    if (!result.ok) return c.json({ error: result.error }, 400);
+    return c.json({ ok: true });
+  });
+
+  app.post("/dev/promises/:id/approve", async (c) => {
+    if (!isLocalAdminRequest(c)) return c.json({ error: "forbidden" }, 403);
+    const body = await c.req.json().catch(() => undefined);
+    const parsed = devApproveSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: "invalid_dev_approve_request", issues: parsed.error.issues }, 400);
+    const result = await devApprovePromise(c.req.param("id"), parsed.data.subject);
+    if (!result.ok) return c.json({ error: result.error }, 400);
+    return c.json({ ok: true });
+  });
+}
+
 // Resume any World ID approval left pending by a previous process (crash or
 // `--watch` restart) — approvals.ts fails closed (expires + releases budget)
 // for any row whose deadline already passed while the firewall was down.
 resumePendingApprovalsOnBoot();
+// Same resumability for a connect request (accounts.ts) or a promise
+// approval (promises.ts) left pending across a restart.
+resumeConnectRequestsOnBoot();
+resumePromiseApprovalsOnBoot();
 
 console.log(`Omamorisan firewall listening on :${PORT}`);
 

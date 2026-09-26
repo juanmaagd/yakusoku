@@ -16,7 +16,16 @@ export type FirewallEventName =
   | "approval.resolved"
   // WU13: the kill switch changing state, and an intent being revoked.
   | "control.changed"
-  | "intent.revoked";
+  | "intent.revoked"
+  // P9.1/P9.2: an account finishing its World ID connect device flow, and a
+  // promise's own device flow being requested/resolved (accounts.ts,
+  // promises.ts). Payloads never carry secrets (account keys, poll secrets,
+  // the raw World ID subject) — same discipline as `intent.created` never
+  // carrying the mandate's agent key.
+  | "account.connected"
+  | "promise.requested"
+  | "promise.approved"
+  | "promise.denied";
 
 export interface FirewallEvent {
   id: string;

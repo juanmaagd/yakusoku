@@ -17,7 +17,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { privateKeyToAccount } from "viem/accounts";
-import type { TaskIntentMessage } from "@yakusoku/shared";
+import { toHex } from "viem";
+import { hashWorldIdSubject, type TaskIntentMessage } from "@yakusoku/shared";
 
 // store.ts opens a bun:sqlite file under FIREWALL_DATA_DIR at module-load
 // time, and signer.ts/step-up.ts read FIREWALL_PRIVATE_KEY at module-load
@@ -32,7 +33,9 @@ process.env.FIREWALL_PRIVATE_KEY ??= `0x${"22".repeat(32)}`;
 const FIREWALL_KEY = process.env.FIREWALL_PRIVATE_KEY as `0x${string}`;
 const EXPECTED_SIGNER = privateKeyToAccount(FIREWALL_KEY).address;
 
-const { createIntent, getReceipt, savePendingApproval } = await import("./store");
+const { createIntent, createPromise, findOrCreateAccountBySubjectHash, getPromise, getReceipt, savePendingApproval } = await import(
+  "./store"
+);
 const { finalize } = await import("./receipts");
 const { settleApproved, settleRefused } = await import("./approvals");
 
@@ -180,5 +183,107 @@ describe("settleRefused — never attaches an attestation (WU12)", () => {
     const receipt = getReceipt(receiptId);
     expect(receipt?.verdict).toBe("refuse");
     expect(receipt?.worldId).toEqual({ approved: false, status: "error" });
+  });
+});
+
+// --- P9.2: a doubtful-payment approval on a world_id-sourced promise -------
+//
+// Same `settleApproved` entry point as the WU12 tests above, but the
+// resolved mandate (approvals.ts's `resolveMandate`) is a world_id promise
+// instead of a wallet intent — so a valid, fresh World ID token for a human
+// OTHER than the promise's own account must still refuse, fail-closed,
+// exactly like promises.ts's own approval gate requires to activate a
+// promise in the first place (promises.test.ts covers that gate directly;
+// this covers the SEPARATE doubtful-payment gate reusing the same check).
+
+function randomNonce(): `0x${string}` {
+  return toHex(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+/** Seeds an ACTIVE promise (as if `settlePromiseApproved` already ran) owned
+ * by an account bound to `ownerSubject`, plus the same `awaiting_world_id`
+ * receipt + pending `PendingApproval` row `seedPendingApproval` above seeds
+ * for a wallet intent — but with `intentId` naming the promise. */
+function seedPendingApprovalOnPromise(ownerSubject: string) {
+  const account = findOrCreateAccountBySubjectHash(hashWorldIdSubject(ownerSubject));
+  const promiseId = `promise_approvals_test_${crypto.randomUUID()}`;
+  createPromise({
+    id: promiseId,
+    accountId: account.id,
+    task: "Buy a $1 Amazon gift card (rehearsal)",
+    budget: 5_000_000n,
+    categories: ["gift_card:amazon"],
+    expiry: BigInt(Math.floor(Date.now() / 1000) + 3600),
+    nonce: randomNonce(),
+    spent: BigInt(AMOUNT), // simulates the reservation pipeline.ts would have made
+    status: "active",
+    summary: "test setup",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const paymentIdentifier = `pay_test_${crypto.randomUUID()}`;
+  const { receiptId } = finalize({
+    paymentIdentifier,
+    intentId: promiseId,
+    resourceUrl: "http://localhost:4000/giftcard/amazon-1",
+    amount: AMOUNT,
+    payTo: PAY_TO,
+    timeline: [],
+    state: "awaiting_world_id",
+    verdict: "ask_human",
+    reason: "test setup",
+    cache: false,
+  });
+  const approval = {
+    receiptId,
+    paymentIdentifier,
+    intentId: promiseId,
+    amountAtomic: AMOUNT,
+    deviceCode: "device-1",
+    userCode: "USER-1",
+    verificationUri: "https://sandbox.auth.world.org/device",
+    intervalSeconds: 1,
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    requestedAt: new Date().toISOString(),
+    gateStartedAtMs: Date.now(),
+    status: "pending" as const,
+    reason: "test setup",
+    paymentRequiredJson: JSON.stringify({
+      x402Version: 2,
+      accepts: [{ scheme: "exact", network: NETWORK, amount: AMOUNT, asset: ASSET, payTo: PAY_TO, maxTimeoutSeconds: 60, extra: { name: "USDC", version: "2" } }],
+    }),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  savePendingApproval(approval);
+  return { approval, receiptId, promiseId, account };
+}
+
+describe("settleApproved — a world_id promise requires the SAME human (P9.2)", () => {
+  test("the promise's own subject -> pays normally, budget reserved stays spent", async () => {
+    const ownerSubject = "world-id-subject-approvals-owner";
+    const { approval, receiptId, promiseId } = seedPendingApprovalOnPromise(ownerSubject);
+
+    await settleApproved(approval, { sub: ownerSubject, acr: "dev", authTime: Math.floor(Date.now() / 1000) });
+
+    const receipt = getReceipt(receiptId);
+    expect(receipt?.verdict).toBe("pay");
+    expect(getPromise(promiseId)?.spent).toBe(BigInt(AMOUNT));
+  });
+
+  test("a DIFFERENT (but valid, fresh) human refuses with world_id_wrong_human and releases the budget", async () => {
+    const ownerSubject = "world-id-subject-approvals-owner-2";
+    const { approval, receiptId, promiseId } = seedPendingApprovalOnPromise(ownerSubject);
+
+    await settleApproved(approval, { sub: "world-id-subject-approvals-intruder", acr: "dev", authTime: Math.floor(Date.now() / 1000) });
+
+    const receipt = getReceipt(receiptId);
+    expect(receipt?.verdict).toBe("refuse");
+    expect(receipt?.state).toBe("world_id_denied");
+    expect(receipt?.worldId).toEqual({ approved: false, status: "world_id_wrong_human" });
+    // The reservation `seedPendingApprovalOnPromise` simulated is released
+    // back to 0, same as every other `settleRefused` path.
+    expect(getPromise(promiseId)?.spent).toBe(0n);
   });
 });
