@@ -16,13 +16,13 @@ Recording checklist before hitting record (do these once, right before the take)
 
 ## Beat 1 — Intro (0:00–0:18, ≤ 20s)
 
-**Say:** "AI agents can already pay for things on their own — x402 lets a store or API say 'pay 25 USDC' and the agent just pays. The problem: a hidden prompt in a page can trick the agent into paying a *clean* address, for a *reasonable* amount, for something you never asked for. Every existing guard — spend caps, address blocklists — misses exactly that case. Omamorisan is a firewall that only signs a payment if it matches a promise you actually signed."
+**Say:** "AI agents can already pay for things on their own — x402 lets a store or API say 'pay 25 USDC' and the agent just pays. The problem: a hidden prompt in a page can trick the agent into paying a *clean* address, for a *reasonable* amount, for something you never asked for. Every existing guard — spend caps, address blocklists — misses exactly that case. Omamori is a firewall that only signs a payment if it matches an intent you actually signed."
 
 **Show:** one slide, 4 bullets max — "Problem / Clean address / In budget / Wrong item" — or skip the slide and say it over the terminal/dashboard idle screen.
 
-## Beat 2 — Sign the promise, hand it to the agent (0:18–0:55)
+## Beat 2 — Sign the intent, hand it to the agent (0:18–0:55)
 
-**Do:** In `/app` (`localhost:4321`), connect the demo wallet, switch to Base Sepolia, sign in (SIWE), fill in "Buy a 25 USDC Amazon gift card for my sister's birthday, expires today", and sign the EIP-712 promise in MetaMask. Copy the MCP config the result screen shows and (if not already pasted in) drop it into Claude Code.
+**Do:** In `/app` (`localhost:4321`), connect the demo wallet, switch to Base Sepolia, sign in (SIWE), fill in "Buy a 25 USDC Amazon gift card for my sister's birthday, expires today", and sign the EIP-712 intent in MetaMask. Copy the MCP config the result screen shows and (if not already pasted in) drop it into Claude Code.
 
 **Say:** "This signature is the only thing that authorizes any spending. My agent never sees my private key, and it never sees this signature either — only the firewall does. I just handed it the mandate over MCP; it can act on its own from here."
 
@@ -46,7 +46,7 @@ bun run dev-intent -- "Buy a 1 USDC Amazon gift card (rehearsal)" 1 gift_card:am
 bun run attack -- --intent <intentId> --key <agentKey>
 ```
 
-**Say (while the dashboard updates):** "Jev — the semantic layer — compares the payment to the signed promise and refuses: 'does not match the signed intent.' Budget untouched."
+**Say (while the dashboard updates):** "Jev — the semantic layer — compares the payment to the signed intent and refuses: 'does not match the signed intent.' Budget untouched."
 
 **Show:** dashboard receipt detail — `jev.matchesIntent` near zero, verdict `refuse`, reason visible.
 
@@ -65,7 +65,7 @@ bun run attack -- --intent <intentId> --key <agentKey>
 bun run verify -- --from-block <n>
 ```
 
-**Say:** "This doesn't trust the firewall's own database — it reads the chain directly and cross-checks every payment and every human-approval signature against it. Zero critical findings. The base transaction layer is commodity now. What nobody was checking is whether the payment actually matches what you asked for — that's Omamorisan."
+**Say:** "This doesn't trust the firewall's own database — it reads the chain directly and cross-checks every payment and every human-approval signature against it. Zero critical findings. The base transaction layer is commodity now. What nobody was checking is whether the payment actually matches what you asked for — that's Omamori."
 
 **Show:** verifier CLI output (`0 CRITICAL`), then cut.
 

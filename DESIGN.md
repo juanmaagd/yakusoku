@@ -1,5 +1,5 @@
 ---
-name: Omamorisan
+name: Omamori
 description: A pre-signature firewall for AI agent payments, presented as a security-grade white gallery.
 colors:
   ink: "#0b0d12"
@@ -71,15 +71,15 @@ components:
     rounded: "{rounded.card}"
 ---
 
-# Design System: Omamorisan
+# Design System: Omamori
 
 ## Overview
 
 **Creative North Star: "The Gallery Console"**
 
-A sober, security-grade white gallery, not a warm notebook and not a dark neon shield hero — both were explicitly rejected in favor of a hairline-framed, near-monochrome canvas where the signed promise and the agent's request appear as real product fragments and color only ever reports state. The craft bar was three pinned reference products (clutch.security, base.org, neverhack.com), borrowed for grammar only — white gallery canvas, mixed-weight grotesk headlines, technical line diagrams, mono uppercase labels, split hero with live product — never their logos, fonts, or exact colors. The world explicitly refuses any Japanese aesthetic despite the Japanese product name.
+A sober, security-grade white gallery, not a warm notebook and not a dark neon shield hero — both were explicitly rejected in favor of a hairline-framed, near-monochrome canvas where the signed intent and the agent's request appear as real product fragments and color only ever reports state. The craft bar was three pinned reference products (clutch.security, base.org, neverhack.com), borrowed for grammar only — white gallery canvas, mixed-weight grotesk headlines, technical line diagrams, mono uppercase labels, split hero with live product — never their logos, fonts, or exact colors. The world explicitly refuses any Japanese aesthetic despite the Japanese product name.
 
-The landing (Persuade) and the app (Operate) share one world at two densities: the landing tells the story once, spaciously, with an animated promise-diff hero; the app is denser and quieter, its motion reserved for actual state changes (a new receipt sliding into the feed, a sheet opening), never decoration.
+The landing (Persuade) and the app (Operate) share one world at two densities: the landing tells the story once, spaciously, with an animated intent-diff hero; the app is denser and quieter, its motion reserved for actual state changes (a new receipt sliding into the feed, a sheet opening), never decoration.
 
 **Key Characteristics:**
 - White canvas, hairline-framed 1200px column, near-zero shadow.
@@ -109,7 +109,7 @@ Color is rationed to mean state, never mood or decoration; everything else in th
 - **Hairline** (`#e6e8ec`) / **Hairline-strong** (`#d5d8de`): the only borders in the system — the frame rails, card edges, dividers, input strokes.
 
 ### Named Rules
-**The State-Only Rule.** Blue, red and amber never appear as decoration. Each exists solely to report a firewall/promise state (verified, refused, needs-you); if a UI element isn't reporting one of those three states, it is ink, graphite, stone, or hairline.
+**The State-Only Rule.** Blue, red and amber never appear as decoration. Each exists solely to report a firewall/intent state (verified, refused, needs-you); if a UI element isn't reporting one of those three states, it is ink, graphite, stone, or hairline.
 
 **The Black-Action Rule.** The primary/confident action color is ink-black (`#0b0d12`), not the accent blue. Blue is reserved for the "verified" state, so it never gets diluted into meaning "click here."
 
@@ -124,7 +124,7 @@ Color is rationed to mean state, never mood or decoration; everything else in th
 - **Display** (400, 68px / hero up to `clamp` ~44–56px on landing, 1.04 line-height, -0.02em): the hero headline only; set as a `.headline` block mixing 400 body weight with a 600 `<strong>` span on the key phrase — never the whole sentence bolded.
 - **Heading-lg** (400/600 mixed, 52px, 1.06): section headers ("Six stages...").
 - **Heading** (400, 38px, 1.12, -0.015em): sub-section headers.
-- **Heading-sm** (400, 24px, 1.25, -0.01em): card/verdict headings (e.g. the promise card's "Refused").
+- **Heading-sm** (400, 24px, 1.25, -0.01em): card/verdict headings (e.g. the intent card's "Refused").
 - **Body-lg / Body / Body-sm** (400, 18/16/14px, ~1.5): copy, subheads, help text; body copy is capped at roughly 46–52ch measure.
 - **Label** (400, 11px, uppercase, 0.12em tracking, Martian Mono, `font-stretch: 90%`): stage numbers, nav-adjacent metadata, pill text, "You signed" / "Agent asks" data-row keys, the "Built with" strip.
 - **Caption** (400, 12px, often mono/tabular for numbers): timestamps, addresses, resource paths.
@@ -142,13 +142,13 @@ The app (`/app`, `/app/dashboard`) runs the same frame and hairline vocabulary a
 
 ## Elevation & Depth
 
-The system is flat by default: cards use a single hairline border (`border border-hairline`) and no shadow. Exactly one shadow token exists in the whole build, `--shadow-console` (`0 30px 60px -30px rgba(11,13,18,0.28), 0 2px 6px rgba(11,13,18,0.06)`), and it is applied to exactly one element — the hero's "promise" verdict card — to lift the one artifact the story asks the visitor to focus on. Depth everywhere else is conveyed by hairline framing and fog-tinted hover backgrounds, not shadow.
+The system is flat by default: cards use a single hairline border (`border border-hairline`) and no shadow. Exactly one shadow token exists in the whole build, `--shadow-console` (`0 30px 60px -30px rgba(11,13,18,0.28), 0 2px 6px rgba(11,13,18,0.06)`), and it is applied to exactly one element — the hero's "intent" verdict card — to lift the one artifact the story asks the visitor to focus on. Depth everywhere else is conveyed by hairline framing and fog-tinted hover backgrounds, not shadow.
 
 ### Shadow Vocabulary
-- **Console** (`0 30px 60px -30px rgba(11,13,18,0.28), 0 2px 6px rgba(11,13,18,0.06)`): the hero promise/verdict card only. Not used on any other card, panel, or dashboard element.
+- **Console** (`0 30px 60px -30px rgba(11,13,18,0.28), 0 2px 6px rgba(11,13,18,0.06)`): the hero intent/verdict card only. Not used on any other card, panel, or dashboard element.
 
 ### Named Rules
-**The One-Shadow Rule.** A single soft shadow token exists, reserved for the hero's promise card. Every other card, panel and row in the system is a flat hairline rectangle.
+**The One-Shadow Rule.** A single soft shadow token exists, reserved for the hero's intent card. Every other card, panel and row in the system is a flat hairline rectangle.
 
 ## Shapes
 
@@ -179,9 +179,9 @@ Corners are consistently small and understated: 6px on cards and buttons (`--rad
 - **Error:** refuse-ink text below the field.
 
 ### Navigation
-- Sticky 64px header, hairline bottom border, canvas background; nav links are graphite, darkening to ink on hover, never underlined; the black "Launch app" button sits right-aligned. The app shell reuses the same 64px bar height with Promises/Live tabs and a "Pause all" control instead of marketing links.
+- Sticky 64px header, hairline bottom border, canvas background; nav links are graphite, darkening to ink on hover, never underlined; the black "Launch app" button sits right-aligned. The app shell reuses the same 64px bar height with Intents/Live tabs and a "Pause all" control instead of marketing links.
 
-### Signature Component: The Promise-Diff Card
+### Signature Component: The Intent-Diff Card
 The hero's centerpiece: a hairline-framed, console-shadowed card showing a `dl` of "You signed" vs. "Agent asks" rows, a mismatched word underlined in a refuse-red gradient wash, a row of small passed-rule checkmarks in mono caption text, and a verdict line ("Refused — not what you signed"). On load (or on manual "Replay"), rows fade/slide in in sequence and the mismatch underline sweeps in via a `background-size` transition, timed 380–1500ms with `ease-out-soft`; it is the landing's only choreographed motion sequence and fully respects `prefers-reduced-motion`, defaulting to its final, fully-revealed state.
 
 ## Do's and Don'ts
@@ -192,8 +192,8 @@ The hero's centerpiece: a hairline-framed, console-shadowed card showing a `dl` 
 - **Do** keep radius small and consistent: 6px for cards/buttons, 4px for compact chips, full round only for tiny status-mark rings.
 - **Do** set headlines at 400 weight with only the key phrase lifted to 600 — never a fully bold headline.
 - **Do** reserve Martian Mono for data/labels/metadata, never for prose sentences.
-- **Do** keep the interface flat; the hero promise card is the one deliberate exception to the no-shadow rule.
-- **Do** scope motion to actual state changes (a new decision arriving, a sheet opening) in the app, and to the hero's one promise-diff replay on the landing; always provide a fully-revealed reduced-motion final state.
+- **Do** keep the interface flat; the hero intent card is the one deliberate exception to the no-shadow rule.
+- **Do** scope motion to actual state changes (a new decision arriving, a sheet opening) in the app, and to the hero's one intent-diff replay on the landing; always provide a fully-revealed reduced-motion final state.
 - **Do** keep 1-bit stippled obsidian illustrations sparse and load-bearing (hero, gate, empty states, handoff, approval) rather than generic decoration.
 
 ### Don't:
@@ -202,4 +202,4 @@ The hero's centerpiece: a hairline-framed, console-shadowed card showing a `dl` 
 - **Don't** add a second shadow token or shadow a second card; the system is otherwise flat by design.
 - **Don't** invent a kicker/eyebrow line above headlines; the shipped hierarchy is mixed-weight headline direct to subhead, with mono labels reserved for actual data rows, not decorative overline text.
 - **Don't** use glyph icon fonts; the built icon set is hand-authored 16px stroke SVGs at a single 1.5 stroke weight, `currentColor`-driven so state color always comes from the parent.
-- **Don't** surface internal technical names (Jev, Intercepta, state-machine values) in primary product copy — the user-facing noun is "promise," and technical detail sits one click away in a disclosure.
+- **Don't** surface internal technical names (Jev, Intercepta, state-machine values) in primary product copy — the user-facing noun is "intent," and technical detail sits one click away in a disclosure.
