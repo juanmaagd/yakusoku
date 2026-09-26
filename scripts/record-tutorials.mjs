@@ -76,6 +76,11 @@ await context.route("**/*", async (route) => {
       if (route.request().method() === "POST") { hasPromise = true; return respond({ id: intentId, agentKey: fakeKey, remainingBudget: "1000000" }, 201); }
       return respond(hasPromise ? [mandate()] : []);
     }
+    // /owner/promises backs the World ID Account tab's owner-wide list, merged
+    // into main after this fixture was written; the wallet-signed walkthrough
+    // never has any, but PromiseList Promise.all()s it alongside /intents, so
+    // leaving it unhandled (404) throws and the intent list never renders.
+    if (url.pathname === "/owner/promises") return respond([]);
     if (url.pathname === "/me/pause") { paused = true; return respond({ paused }); }
     if (url.pathname === "/me/resume") { paused = false; return respond({ paused }); }
     if (url.pathname === "/me/control") return respond({ paused });
@@ -297,17 +302,17 @@ try {
   await page.getByRole("button", { name: "Sign in with wallet", exact: true }).waitFor();
   await capture("sign-message", page.getByRole("button", { name: "Sign in with wallet", exact: true }));
   await page.getByRole("button", { name: "Sign in with wallet", exact: true }).click();
-  await page.getByRole("button", { name: "New promise", exact: true }).waitFor();
-  await capture("promises", page.getByRole("button", { name: "New promise", exact: true }));
-  await page.getByRole("button", { name: "New promise", exact: true }).click();
+  await page.getByRole("button", { name: "New intent", exact: true }).waitFor();
+  await capture("promises", page.getByRole("button", { name: "New intent", exact: true }));
+  await page.getByRole("button", { name: "New intent", exact: true }).click();
   await capture("compose-empty", page.locator("#promise-task"));
   await page.locator("#promise-task").fill(task);
   await page.locator("#promise-budget").fill("1");
   await page.getByRole("button", { name: "Amazon gift cards", exact: true }).click();
   await page.getByRole("radio", { name: "1 hour", exact: true }).click();
   await capture("compose-filled", page.locator("#promise-budget"));
-  await capture("compose-preview", page.getByRole("button", { name: "Sign promise", exact: true }));
-  await page.getByRole("button", { name: "Sign promise", exact: true }).click();
+  await capture("compose-preview", page.getByRole("button", { name: "Sign intent", exact: true }));
+  await page.getByRole("button", { name: "Sign intent", exact: true }).click();
   await page.locator("#mcp-client").waitFor();
   assert.match(await page.locator("#mcp-entry").inputValue(), /\/apps\/mcp\/index\.ts$/);
   await page.locator("#mcp-entry").fill("/Users/you/yakusoku/apps/mcp/index.ts");
@@ -340,7 +345,7 @@ try {
   await page.locator("#mcp-client").scrollIntoViewIfNeeded();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "Mobile handoff overflows horizontally");
   await page.setViewportSize({ width: CAPTURE_W, height: CAPTURE_H });
-  await page.getByRole("button", { name: "Back to promises", exact: true }).click();
+  await page.getByRole("button", { name: "Back to intents", exact: true }).click();
   await page.getByRole("button", { name: "Revoke", exact: true }).waitFor();
   await capture("promise-list", page.getByText(task, { exact: true }).first());
   await page.getByRole("button", { name: "Revoke", exact: true }).click();

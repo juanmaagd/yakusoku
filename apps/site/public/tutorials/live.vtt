@@ -14,7 +14,7 @@ If the firewall needs you, a World ID approval appears with a code, link, and ex
 
 00:00:46.000 --> 00:01:01.000
 4. Stop future signing
-Click Pause all and confirm to pause signing for all your promises. Resume when ready. To permanently disable just one promise, return to Promises and revoke it. These actions do not undo payments that already settled.
+Click Pause all and confirm to pause signing for all your intents. Resume when ready. To permanently disable just one intent, return to Intents and revoke it. These actions do not undo payments that already settled.
 
 00:01:01.000 --> 00:01:16.000
 5. If purchases cannot proceed

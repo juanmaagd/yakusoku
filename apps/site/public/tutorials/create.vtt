@@ -2,7 +2,7 @@ WEBVTT
 
 00:00:00.000 --> 00:00:14.000
 1. Describe the purchase
-Click New promise. Write exactly what the agent may buy, for example one 1 USDC Amazon gift card. Be specific about the product and quantity; the firewall compares purchases with this instruction.
+Click New intent. Write exactly what the agent may buy, for example one 1 USDC Amazon gift card. Be specific about the product and quantity; the firewall compares purchases with this instruction.
 
 00:00:14.000 --> 00:00:29.000
 2. Set the limits
@@ -10,8 +10,8 @@ Enter the maximum budget in USDC, select Amazon gift cards, and choose an expiry
 
 00:00:29.000 --> 00:00:44.000
 3. Review and sign
-Check the promise preview, then click Sign promise. Your wallet asks you to sign structured TaskIntent data. Unlike login, this signature authorizes purchases under those limits. It does not immediately send a payment.
+Check the intent preview, then click Sign intent. Your wallet asks you to sign structured TaskIntent data. Unlike login, this signature authorizes purchases under those limits. It does not immediately send a payment.
 
 00:00:44.000 --> 00:00:58.000
 4. Keep the result screen open
-The firewall returns a Promise ID and a one-time agent key. Follow Connect your agent on this screen before leaving. A lost key cannot be shown again; you would need a replacement promise.
+The firewall returns an Intent ID and a one-time agent key. Follow Connect your agent on this screen before leaving. A lost key cannot be shown again; you would need a replacement intent.

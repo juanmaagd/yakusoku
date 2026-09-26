@@ -10,12 +10,12 @@ The landing page gives Claude Code a prompt and other clients an MCP URL. Connec
 
 00:00:32.000 --> 00:00:45.000
 Wallet-signed alternative
-At /app, sign in with your browser wallet and create a promise with a task, budget, categories, and expiry. This creates a one-time key for an existing wallet mandate.
+At /app, sign in with your browser wallet and create an intent with a task, budget, categories, and expiry. This creates a one-time key for an existing wallet mandate.
 
 00:00:45.000 --> 00:00:59.000
-Hand the wallet promise to your client
-On the signed-promise screen choose your MCP client, then save its generated configuration in the location shown. This configuration passes the key to MCP without putting it in a model prompt.
+Hand the wallet intent to your client
+On the signed-intent screen choose your MCP client, then save its generated configuration in the location shown. This configuration passes the key to MCP without putting it in a model prompt.
 
 00:00:59.000 --> 00:01:13.000
 Supervise decisions
-The Live page shows payment attempts and reasons. Approve a human check only when the request matches your purchase. Pause all signing or revoke an individual promise to stop future requests.
+The Live page shows payment attempts and reasons. Approve a human check only when the request matches your purchase. Pause all signing or revoke an individual intent to stop future requests.
