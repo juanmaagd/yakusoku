@@ -18,7 +18,7 @@ import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
 import { z } from "zod";
 
 function issuer(): string {
-  return process.env.WORLD_ID_ISSUER ?? "https://sandbox.auth.world.org";
+  return process.env.WORLD_ID_ISSUER || "https://sandbox.auth.world.org"; // `||`: compose passes unset vars as ""
 }
 
 /** World ID for Agents currently only issues this credential (discovery
