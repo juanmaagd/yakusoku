@@ -47,7 +47,7 @@ const {
   setAccountDeployment,
 } = await import("./store");
 const { finalize } = await import("./receipts");
-const { settleApproved, settleRefused } = await import("./approvals");
+const { hasPendingApprovalForItem, settleApproved, settleRefused } = await import("./approvals");
 
 const PAY_TO = "0xbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef";
 const ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
@@ -466,5 +466,28 @@ describe("settleApproved — a world_id promise requires the SAME human (P9.2)",
     // Released back to 0, same as every other `settleRefused` path — never
     // signed, despite a genuine, fresh, correct-human World ID approval.
     expect(getPromise(promiseId)?.spent).toBe(0n);
+  });
+});
+
+describe("hasPendingApprovalForItem — one pending phone prompt per item", () => {
+  test("a pending approval under any purchaseRef blocks a new one for the same base identifier", () => {
+    const base = `pay_base_${crypto.randomUUID()}`;
+    expect(hasPendingApprovalForItem(base)).toBe(false);
+    seedPendingApproval({ paymentIdentifier: `pay_purchase_${crypto.randomUUID()}`, baseIdentifier: base });
+    expect(hasPendingApprovalForItem(base)).toBe(true);
+    expect(hasPendingApprovalForItem(`pay_other_${crypto.randomUUID()}`)).toBe(false);
+  });
+
+  test("a legacy row without baseIdentifier counts under its own payment identifier", () => {
+    const legacy = `pay_legacy_${crypto.randomUUID()}`;
+    seedPendingApproval({ paymentIdentifier: legacy });
+    expect(hasPendingApprovalForItem(legacy)).toBe(true);
+  });
+
+  test("a resolved approval no longer blocks the item", async () => {
+    const base = `pay_base_${crypto.randomUUID()}`;
+    const { approval } = seedPendingApproval({ paymentIdentifier: `pay_purchase_${crypto.randomUUID()}`, baseIdentifier: base });
+    await settleRefused(approval, "expired", "World ID approval window elapsed without a response", "world_id_expired");
+    expect(hasPendingApprovalForItem(base)).toBe(false);
   });
 });

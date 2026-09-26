@@ -158,6 +158,14 @@ export interface StartApprovalGateInput {
   markPending: () => void;
 }
 
+/** WU: purchase ref — true while a World ID approval for this item (same
+ * BASE identifier, any purchaseRef) is still pending. Rows written before
+ * purchase refs carry no `baseIdentifier`; their purchase identifier is the
+ * base one. */
+export function hasPendingApprovalForItem(baseIdentifier: string): boolean {
+  return listPendingApprovalsByStatus("pending").some((a) => (a.baseIdentifier ?? a.paymentIdentifier) === baseIdentifier);
+}
+
 export async function startApprovalGate(input: StartApprovalGateInput): Promise<PipelineOutcome> {
   const { receiptContext, timeline, stageCtx, jevDetail, interceptaDetail, triggerReason, baseIdentifier, markPending } = input;
   const receiptId = `receipt_${crypto.randomUUID()}`;
@@ -185,6 +193,27 @@ export async function startApprovalGate(input: StartApprovalGateInput): Promise<
       cache: true,
       // WU: purchase ref — freeze the BASE identifier, not the purchase one.
       cacheIdentifier: baseIdentifier,
+    });
+  }
+
+  // One pending phone prompt per item: a new purchaseRef must not open
+  // parallel World ID approvals for the same item. Checked after the await
+  // above and before the insert below, with no await in between, so two
+  // concurrent requests cannot both pass. Not cached — retry once the pending
+  // one resolves; pipeline.ts releases this request's budget reservation.
+  if (hasPendingApprovalForItem(baseIdentifier)) {
+    const reason = "world_id: another approval for this item is already pending; wait for it, then retry";
+    return finalize({
+      ...receiptContext,
+      receiptId,
+      createdAt,
+      timeline: [...timeline, { stage: "world_id", outcome: "refuse" as const, reason, ms: Date.now() - gateStartedAtMs }],
+      jev: jevDetail,
+      intercepta: interceptaDetail,
+      state: transition("initial", "error"),
+      verdict: "refuse",
+      reason,
+      cache: false,
     });
   }
 
