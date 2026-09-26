@@ -5,10 +5,12 @@ import { SITE } from "../../config";
 import {
   getApprovalStatus,
   listMandates,
+  listOwnerPromises,
   listReceipts,
   ownerEventsUrl,
   UnauthorizedError,
   type ApprovalStatus,
+  type OwnerPromise,
   type SerializedMandate,
 } from "../../lib/api";
 import { connectSseWithRetry, type SseConnectionStatus } from "../../lib/sse";
@@ -23,12 +25,14 @@ import Skeleton from "../ui/Skeleton";
 import ApprovalBanner, { ApprovalResolved, type ApprovalOutcome } from "./ApprovalBanner";
 import DecisionDetail from "./DecisionDetail";
 import DecisionFeed from "./DecisionFeed";
+import PromisesSection from "./PromisesSection";
 
 // --- Live state: GET /receipts + GET /intents once, then SSE forever -------
 
 interface LiveState {
   receipts: Map<string, DecisionReceipt>;
   mandates: Map<string, SerializedMandate>;
+  promises: Map<string, OwnerPromise>;
   approvals: Map<string, ApprovalStatus>;
   fresh: Set<string>;
 }
@@ -36,6 +40,10 @@ interface LiveState {
 type LiveAction =
   | { type: "receipts"; receipts: DecisionReceipt[]; live?: boolean }
   | { type: "mandates"; mandates: SerializedMandate[] }
+  // `GET /owner/promises` (index.ts) has no "since" filter — every refetch
+  // hands back the FULL current list, so this replaces rather than merges
+  // (unlike "receipts"/"mandates", which only ever add/overwrite one item).
+  | { type: "promises"; promises: OwnerPromise[] }
   | { type: "approval"; receiptId: string; approval: ApprovalStatus };
 
 function reducer(state: LiveState, action: LiveAction): LiveState {
@@ -54,6 +62,8 @@ function reducer(state: LiveState, action: LiveAction): LiveState {
       for (const m of action.mandates) mandates.set(m.id, m);
       return { ...state, mandates };
     }
+    case "promises":
+      return { ...state, promises: new Map(action.promises.map((p) => [p.id, p])) };
     case "approval": {
       const approvals = new Map(state.approvals);
       approvals.set(action.receiptId, action.approval);
@@ -62,7 +72,7 @@ function reducer(state: LiveState, action: LiveAction): LiveState {
   }
 }
 
-const initialState: LiveState = { receipts: new Map(), mandates: new Map(), approvals: new Map(), fresh: new Set() };
+const initialState: LiveState = { receipts: new Map(), mandates: new Map(), promises: new Map(), approvals: new Map(), fresh: new Set() };
 
 /** `/app/dashboard`'s React island (S4 Live): gated on the same wallet+SIWE
  * session as `/app`, then the owner's decisions kept live over SSE. */
@@ -131,6 +141,18 @@ function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps)
     [sessionToken, handleUnauthorized],
   );
 
+  // dashboard-promises (D2) — fetched independently of the receipts/mandates
+  // `Promise.all` below: a hiccup here should never blank out the existing
+  // decision feed, it just means no World ID promises show up this round.
+  const fetchPromises = useCallback(async () => {
+    try {
+      const promises = await listOwnerPromises(sessionToken);
+      dispatch({ type: "promises", promises });
+    } catch (err) {
+      handleUnauthorized(err);
+    }
+  }, [sessionToken, handleUnauthorized]);
+
   // --- Initial load ---------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
@@ -148,10 +170,11 @@ function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps)
         if (!handleUnauthorized(err)) setLoad({ kind: "error", message: err instanceof Error ? err.message : "Could not load your decisions." });
       }
     })();
+    void fetchPromises();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchApproval is stable per sessionToken
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchApproval/fetchPromises are stable per sessionToken
   }, [sessionToken, reloadKey]);
 
   // --- Live updates (fetch-stream SSE, never EventSource: see lib/sse.ts) ----
@@ -172,10 +195,20 @@ function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps)
             const receipt = JSON.parse(frame.data) as DecisionReceipt;
             dispatch({ type: "receipts", receipts: [receipt], live: true });
             if (receipt.state === "awaiting_world_id") void fetchApproval(receipt.receiptId);
+            // A decision may have spent against (or activated) a promise's
+            // budget — refetch rather than try to patch one in from the
+            // receipt alone.
+            void fetchPromises();
             break;
           }
           case "settlement.reported":
             dispatch({ type: "receipts", receipts: [JSON.parse(frame.data) as DecisionReceipt] });
+            void fetchPromises();
+            break;
+          case "promise.requested":
+          case "promise.approved":
+          case "promise.denied":
+            void fetchPromises();
             break;
           case "approval.requested": {
             const data = JSON.parse(frame.data) as { receiptId: string };
@@ -189,15 +222,21 @@ function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps)
       },
     );
     return disconnect;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchApproval is stable per sessionToken
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchApproval/fetchPromises are stable per sessionToken
   }, [sessionToken]);
 
   const mandates = useMemo(() => [...state.mandates.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [state.mandates]);
+  const promises = useMemo(() => [...state.promises.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [state.promises]);
 
-  const ownedReceipts = useMemo(() => {
-    const owned = new Set(mandates.map((m) => m.id));
-    return [...state.receipts.values()].filter((r) => owned.has(r.intentId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [state.receipts, mandates]);
+  // dashboard-promises (D2) fix: `GET /receipts`/`GET /events?session=...`
+  // are already owner-scoped server-side (index.ts's
+  // `listOwnedMandateIds`/`eventOwnerAddress`), so every receipt already in
+  // `state.receipts` belongs to this wallet — whether it's a legacy
+  // wallet-signed intent or a World ID promise. This used to re-filter by
+  // `mandates` (the wallet-only `GET /intents` list), which silently
+  // dropped every promise-backed receipt since a promise id never appears
+  // there.
+  const ownedReceipts = useMemo(() => [...state.receipts.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [state.receipts]);
 
   const visibleReceipts = useMemo(
     () => (selectedMandateId ? ownedReceipts.filter((r) => r.intentId === selectedMandateId) : ownedReceipts),
@@ -252,6 +291,8 @@ function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps)
         {mandates.length > 0 && <PromiseFilter mandates={mandates} selectedId={selectedMandateId} onSelect={selectPromise} />}
       </div>
 
+      <PromisesSection promises={promises} />
+
       <div className="mt-6 space-y-4">
         {ownerControl?.control.paused && <PausedBanner onResume={ownerControl.resume} />}
         {resolved && <ApprovalResolved outcome={resolved} />}
@@ -280,7 +321,7 @@ function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps)
           </div>
         )}
 
-        {load.kind === "loaded" && mandates.length === 0 && (
+        {load.kind === "loaded" && mandates.length === 0 && promises.length === 0 && (
           <div className="rounded-card border border-hairline">
             <EmptyState art="/art/app/agent.webp" title="No promises yet" body="Your agent can only pay against a promise you signed. Sign one first.">
               <a href={SITE.appRoute} className={primaryButton}>
@@ -291,14 +332,14 @@ function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps)
           </div>
         )}
 
-        {load.kind === "loaded" && mandates.length > 0 && visibleReceipts.length === 0 && (
+        {load.kind === "loaded" && (mandates.length > 0 || promises.length > 0) && visibleReceipts.length === 0 && (
           <div className="rounded-card border border-hairline">
             <EmptyState
               art="/art/app/agent.webp"
               title="No payments yet."
               body="When your agent asks the firewall to pay, every decision shows up here in real time."
             >
-              <p className="max-w-[46ch] text-body-sm text-graphite">Connect your agent with the key you got when you signed a promise.</p>
+              <p className="max-w-[46ch] text-body-sm text-graphite">Connect your agent with the key or account it received when the promise was set up.</p>
               <a href={SITE.appRoute} className={textButton}>
                 Go to promises
                 <IconArrowRight size={14} />

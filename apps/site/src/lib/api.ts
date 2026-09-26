@@ -131,6 +131,29 @@ export async function revokeMandate(sessionToken: string, id: string): Promise<v
   if (!res.ok) throw new Error("Could not revoke this mandate.");
 }
 
+// --- World ID promises (dashboard-promises D2, apps/firewall/index.ts's
+// GET /owner/promises) ---------------------------------------------------
+// The owner-session counterpart to the account-key-scoped `GET /promises`
+// (apps/firewall/index.ts — used by the MCP client, not this site): every
+// World ID promise across every account this wallet linked as owner at
+// `/setup`.
+
+export type OwnerPromiseStatus = "pending_approval" | "active" | "denied" | "expired" | "revoked" | "error";
+
+export interface OwnerPromise {
+  id: string;
+  accountId: string;
+  smartAccount?: Address;
+  task: string;
+  status: OwnerPromiseStatus;
+  budget: string;
+  remainingBudget: string;
+  categories: string[];
+  expiry: string;
+  merchant?: string;
+  createdAt: string;
+}
+
 // --- Live dashboard (P6, apps/firewall/index.ts's owner-scoped routes) -----
 
 /** Thrown by any owner-scoped call below on a 401 — the dashboard's caller
@@ -162,6 +185,13 @@ export async function listReceipts(sessionToken: string, limit = 50): Promise<De
 
 export async function getReceipt(sessionToken: string, id: string): Promise<DecisionReceipt> {
   return ownerScopedJson<DecisionReceipt>(`/receipts/${encodeURIComponent(id)}`, sessionToken);
+}
+
+/** Newest-first, every World ID promise across every account this wallet
+ * linked as owner (apps/firewall/index.ts's `GET /owner/promises`). Public
+ * fields only — no agent keys, no attestation internals. */
+export async function listOwnerPromises(sessionToken: string): Promise<OwnerPromise[]> {
+  return ownerScopedJson<OwnerPromise[]>("/owner/promises", sessionToken);
 }
 
 /** No session required server-side (`GET /receipts/:id/attestation` is
