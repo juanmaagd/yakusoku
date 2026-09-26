@@ -22,6 +22,10 @@ function fakeAddress(seed: string): Address {
 }
 
 const OPERATOR = fakeAddress("mock-operator");
+/** Owner of the `demo-deployed` seed record — overridable so a QA session's
+ * throwaway wallet shows up as the owner (unlocking withdraw/pause) without
+ * hardcoding one specific address into committed source. */
+const DEMO_OWNER = (process.env.DEMO_OWNER_ADDRESS as Address | undefined) ?? fakeAddress("demo-owner");
 
 interface SetupRecord {
   status: "needs_owner" | "deployed";
@@ -65,7 +69,7 @@ const store = new Map<string, SetupRecord>([
       perPaymentLimitUsdc: "5.00",
       recipients: [{ address: fakeAddress("merchant-gift-cards"), label: "Demo Gift Card Store" }],
       messageTemplate: "I authorize {owner} as the owner of my Omamorisan smart account (acct_demo_deployed) on Base Sepolia (chain 84532).",
-      owner: fakeAddress("demo-owner"),
+      owner: DEMO_OWNER,
       smartAccount: fakeAddress("demo-deployed-account"),
       balanceUsdc: "0.00",
       expiresAt: inThirtyMinutes(),
