@@ -65,9 +65,11 @@ describe("decideJevVerdict", () => {
     expect(result.verdict).toBe("pay");
   });
 
-  test("untrusted source between the auto-pay margin and the 0.75 ceiling -> ask_human", () => {
-    const result = decideJevVerdict(answers({ untrustedSource: 0.6 }));
-    expect(result.verdict).toBe("ask_human");
+  test("untrusted source under the 0.75 ceiling -> pay (item picked from the store's own catalog)", () => {
+    // Live standing-rules purchase: matches_intent 0.87, social engineering
+    // 0.04, untrusted source 0.64 — used to land on ask_human at the old 0.5 margin.
+    const result = decideJevVerdict(answers({ matchesIntent: 0.87, socialEngineering: 0.04, untrustedSource: 0.64 }));
+    expect(result.verdict).toBe("pay");
   });
 
   test("payment_source_is_untrusted_content >= 0.75 -> ask_human", () => {

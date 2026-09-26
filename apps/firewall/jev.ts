@@ -61,7 +61,12 @@ export const JEV_THRESHOLDS = {
   /** Auto-pay also requires clearly low text-risk signals, well under the
    * ask_human ceilings above (margin for the relaxed pay gate). */
   payMaxSocialEngineering: 0.3,
-  payMaxUntrustedContent: 0.5,
+  /** Aligned with `untrustedContentAskHuman` (was 0.5): under standing rules
+   * the agent picks the concrete item from the store's catalog, and a live
+   * legit purchase scored 0.64 here and went to a human. The spike found legit
+   * purchases at 0.66-0.71 and no attack that needed this band — injected
+   * recipients are cut earlier by provenance, wrong items by matches_intent. */
+  payMaxUntrustedContent: 0.75,
 } as const;
 
 // --- Questions ---------------------------------------------------------------
