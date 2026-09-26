@@ -55,8 +55,8 @@ async function runStdio(): Promise<void> {
 //
 // One McpServer + WebStandardStreamableHTTPServerTransport per MCP session
 // (keyed by the SDK's own Mcp-Session-Id, stateful mode). The agent key is
-// resolved from `Authorization: Bearer` on every request that carries one —
-// falling back to OMAMORISAN_AGENT_KEY — and is otherwise sticky for the
+// resolved from `Authorization: Bearer` on every request that carries one
+// (never from OMAMORISAN_AGENT_KEY, which is stdio-only) and is otherwise sticky for the
 // rest of that session, so a client that authenticates once doesn't need to
 // repeat the header on every call. `connect`/`check_connection` (tools.ts)
 // update the same `CredentialRef` cell the moment World ID approves.
@@ -99,10 +99,10 @@ async function handleMcpRequest(req: Request): Promise<Response> {
     .catch(() => undefined);
   if (!isInitializeRequest(parsedBody)) return jsonRpcError("Bad Request: Session ID required", 400);
 
-  // T8 fix A: header > OMAMORISAN_AGENT_KEY > credential-less. Deliberately
-  // no credentials-file fallback here (see the file-header comment above) —
-  // `|| undefined` so an accidentally-empty-string env var is "unset".
-  const resolvedKey = headerKey ?? (process.env.OMAMORISAN_AGENT_KEY || undefined);
+  // T8 fix A: header > credential-less. Deliberately no credentials-file and
+  // no OMAMORISAN_AGENT_KEY fallback here (see the file-header comment above):
+  // either one would hand every headerless session the same account.
+  const resolvedKey = headerKey;
   const credential: CredentialRef = { current: resolvedKey };
   const session = createSessionState(FIREWALL_URL, credential, true);
 
@@ -138,6 +138,9 @@ function health(): Response {
 }
 
 function runHttp(): void {
+  if (process.env.OMAMORISAN_AGENT_KEY) {
+    console.error("[omamorisan-mcp] [SECURITY] OMAMORISAN_AGENT_KEY is set but ignored in HTTP mode (it would be shared by every session)");
+  }
   const loggedMcp = withRequestLog(handleMcpRequest);
   Bun.serve({
     port: HTTP_PORT,

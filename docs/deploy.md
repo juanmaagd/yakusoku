@@ -82,7 +82,7 @@ Names and where to get them — **never paste actual values into this file or a 
 | `OMAMORISAN_FETCH_ALLOWED_HOSTS` | mcp | Optional — comma list of hostnames exempted from T2's SSRF guard; leave blank unless you know you need it |
 | `WORLD_ID_APPROVAL_TIMEOUT_S`, `WORLD_ID_MAX_AUTH_AGE_S`, `INTERCEPTA_TIMEOUT_MS`, `OMAMORISAN_DEFAULT_PER_PAYMENT_LIMIT_USDC`, `OMAMORISAN_MAX_PROMISE_USDC`, `OMAMORISAN_MAX_PENDING_PROMISES`, `OMAMORISAN_FUNDING_TIMEOUT_MS`, `HUMAN_APPROVAL_OVER_USDC` | firewall | Optional tuning — every one safely falls back to the code's own default when left blank |
 
-**Never set** `OMAMORISAN_ACCOUNT_READER`, `OMAMORISAN_DEV_APPROVALS`, or `OMAMORISAN_ACCOUNT_DEPLOYER=stub` on this deployment — they're dev-only fabrication seams (the firewall prints its own `[SECURITY]` warning on boot if one is set); `docker-compose.yml` deliberately never sets them. Also never set `OMAMORISAN_AGENT_KEY` on the `mcp` service — see the next section for why.
+**Never set** `OMAMORISAN_ACCOUNT_READER`, `OMAMORISAN_DEV_APPROVALS`, or `OMAMORISAN_ACCOUNT_DEPLOYER=stub` on this deployment — they're dev-only fabrication seams (the firewall prints its own `[SECURITY]` warning on boot if one is set); `docker-compose.yml` deliberately never sets them. `OMAMORISAN_AGENT_KEY` is ignored by the `mcp` service in HTTP mode (it logs a `[SECURITY]` warning if set), because one env key would be shared by every session.
 
 ## How teammates connect their MCP client
 
