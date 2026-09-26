@@ -1,4 +1,6 @@
 {
   "prompt": "Monochrome 3D render of a single sculpted object, matte black obsidian and dark graphite materials, shading rendered as fine stippled halftone dither grain (1-bit dot texture) over a soft studio render, gentle light from the upper left, soft dithered contact shadow, isolated on a fully transparent background, generous empty margin around the object, three-quarter isometric view, calm and precise, premium security-software aesthetic. No text, no letters, no numbers, no logos, no brand marks, no Japanese motifs, no gradients backgrounds, no color except where explicitly specified. An ornate but minimal black key suspended inside an open cube cage made of thin black wireframe bars; the key floats in the center and cannot leave the cage. One tiny electric blue (#1f5bff) indicator light glows on one corner of the cage.",
-  "createdAt": "2026-09-26T03:31:46.180Z"
+  "createdAt": "2026-09-26T03:31:46.180Z",
+  "postProcess": "1-bit Floyd-Steinberg stipple: source PNG resized to 512px, ink coverage = darkness x alpha dithered to #0b0d12 dots on transparency, saturated blue accent pixels kept as #1f5bff, upscaled 2x nearest-neighbour, encoded as lossless WebP. Script: assets/art-v2/dither.py (outside the repo).",
+  "processedAt": "2026-09-26T03:40:52.693922+00:00"
 }

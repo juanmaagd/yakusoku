@@ -1,4 +1,6 @@
 {
   "prompt": "Monochrome 3D render of a single sculpted object, matte black obsidian and dark graphite materials, shading rendered as fine stippled halftone dither grain (1-bit dot texture) over a soft studio render, gentle light from the upper left, soft dithered contact shadow, isolated on a fully transparent background, generous empty margin around the object, three-quarter isometric view, calm and precise, premium security-software aesthetic. No text, no letters, no numbers, no logos, no brand marks, no Japanese motifs, no gradients backgrounds, no color except where explicitly specified. A small payment terminal kiosk, like a store checkout card reader on a short stand.",
-  "createdAt": "2026-09-26T03:31:54.797Z"
+  "createdAt": "2026-09-26T03:31:54.797Z",
+  "postProcess": "1-bit Floyd-Steinberg stipple: source PNG resized to 512px, ink coverage = darkness x alpha dithered to #0b0d12 dots on transparency, saturated blue accent pixels kept as #1f5bff, upscaled 2x nearest-neighbour, encoded as lossless WebP. Script: assets/art-v2/dither.py (outside the repo).",
+  "processedAt": "2026-09-26T03:40:52.694460+00:00"
 }
