@@ -6,17 +6,25 @@
 // :4000/:4001/:4010 servers or their sqlite data — same discipline as
 // apps/firewall/scripts/scenarios.ts. Never settles a payment onchain.
 //
-// Covers TWO credential paths:
+// Covers THREE credential paths:
 //   1. Legacy wallet mandate (`yk_`, WU-P2): mint via apps/agent's
 //      dev-intent script, then get_mandate/fetch_url/pay_x402/check_approval.
 //   2. World ID account (`ya_`, P9.3): connect -> (dev-approve) ->
-//      check_connection -> get_mandate -> request_promise -> (dev-approve) ->
-//      check_promise -> list_promises -> pay_x402 (legit, escalates to
-//      needs_human_approval — no INTERCEPTA_API_KEY here) -> a second promise
-//      -> pay_x402 (steam-1, KEY CASE, refused by Jev regardless of budget).
+//      check_connection -> get_mandate -> setup_account (P11.3a) ->
+//      request_promise -> (dev-approve) -> check_promise -> list_promises ->
+//      pay_x402 (legit, escalates to needs_human_approval — no
+//      INTERCEPTA_API_KEY here) -> a second promise -> pay_x402 (steam-1,
+//      KEY CASE, refused by Jev regardless of budget).
+//   3. First-time no-credential request_promise (P9.6): request_promise with
+//      NO prior connect creates the account AND activates this promise
+//      together under one dev-approved World ID gate -> check_promise ->
+//      get_mandate -> setup_account.
 //   Dev-approval uses the isolated firewall's operator-only
-//   `/dev/connect/:id/approve` / `/dev/promises/:id/approve` seam (never
-//   available on a live firewall) instead of a real phone.
+//   `/dev/connect/:id/approve` / `/dev/promises/:id/approve` /
+//   `/dev/promises/first/:id/approve` seams (never available on a live
+//   firewall) instead of a real phone. `setup_account` only mints a link
+//   here — it never posts a signature or deploys anything (that's
+//   account-setup.test.ts's and scenarios.ts's S39-S42's job).
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -156,6 +164,17 @@ async function devApprove(kind: "connect" | "promises", id: string, subject: str
   if (res.status !== 200) throw new Error(`dev-approve ${kind}/${id} failed: HTTP ${res.status}`);
 }
 
+/** P9.6's combined connect+promise gate — a nested path, so its own helper
+ * rather than widening `devApprove`'s `kind` union. */
+async function devApproveFirstPromise(id: string, subject: string): Promise<void> {
+  const res = await fetch(`${FIREWALL_URL}/dev/promises/first/${id}/approve`, {
+    method: "POST",
+    headers: ADMIN_HEADERS,
+    body: JSON.stringify({ subject }),
+  });
+  if (res.status !== 200) throw new Error(`dev-approve promises/first/${id} failed: HTTP ${res.status}`);
+}
+
 async function runAccountPathSmoke(credentialsDir: string): Promise<void> {
   const credentialsFile = join(credentialsDir, "credentials.json");
   const subject = `smoke-subject-${crypto.randomUUID()}`;
@@ -184,6 +203,14 @@ async function runAccountPathSmoke(credentialsDir: string): Promise<void> {
 
     printStep("[account] get_mandate (account path — expect {accountId, createdAt, promises: []})");
     await callTool(client, "get_mandate", {});
+
+    printStep("[account] setup_account (P11.3a — expect a setupUrl, no smart account deployed yet)");
+    const setup = await callTool(client, "setup_account", {});
+    console.log(
+      typeof setup.data.setupUrl === "string" && (setup.data.setupUrl as string).includes("/setup?token=")
+        ? "PASS: got a setup link"
+        : `FAIL: expected a setupUrl, got ${JSON.stringify(setup.data)}`,
+    );
 
     printStep("[account] request_promise (expect pending — nobody has dev-approved yet)");
     const promiseStart = await callTool(client, "request_promise", {
@@ -250,6 +277,54 @@ async function runAccountPathSmoke(credentialsDir: string): Promise<void> {
   }
 }
 
+// --- P9.6 no-credential request_promise (single-approval account+promise) ---
+
+async function runFirstTimePromiseSmoke(credentialsDir: string): Promise<void> {
+  const credentialsFile = join(credentialsDir, "credentials-first-time.json");
+  const subject = `smoke-subject-first-time-${crypto.randomUUID()}`;
+
+  const env: Record<string, string> = { ...(process.env as Record<string, string>), OMAMORISAN_FIREWALL_URL: FIREWALL_URL, OMAMORISAN_CREDENTIALS_FILE: credentialsFile };
+  delete env.OMAMORISAN_AGENT_KEY; // this session starts with no credential at all — connect is never called
+  const client = await connectClient(env);
+  try {
+    printStep("[first-time] request_promise with NO credential at all (expect pending — one World ID approval creates the account AND this promise together)");
+    const start = await callTool(client, "request_promise", {
+      task: "Buy a $1 Amazon gift card (rehearsal)",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInMinutes: 30,
+      merchant: STORE_URL,
+    });
+    const promiseId = start.data.promiseId as string | undefined;
+    if (start.data.status !== "pending" || !promiseId) {
+      throw new Error(`expected request_promise (no credential) to return pending+promiseId, got ${JSON.stringify(start.data)}`);
+    }
+
+    printStep("[first-time] dev-approving the combined connect+promise request");
+    await devApproveFirstPromise(promiseId, subject);
+
+    printStep("[first-time] check_promise (expect active — the account was created and this promise activated in ONE approval)");
+    const active = await callTool(client, "check_promise", { promiseId });
+    console.log(active.data.status === "active" ? "PASS: active" : `FAIL: expected active, got ${active.data.status}`);
+
+    printStep("[first-time] get_mandate (expect the freshly created account with this one promise)");
+    await callTool(client, "get_mandate", {});
+
+    printStep("[first-time] setup_account (expect a setupUrl now that this session holds an account credential)");
+    const setup = await callTool(client, "setup_account", {});
+    console.log(
+      typeof setup.data.setupUrl === "string" && (setup.data.setupUrl as string).includes("/setup?token=")
+        ? "PASS: got a setup link"
+        : `FAIL: expected a setupUrl, got ${JSON.stringify(setup.data)}`,
+    );
+
+    printStep("[first-time] credentials file — confirming the account key delivered by check_promise was persisted");
+    console.log(await Bun.file(credentialsFile).text());
+  } finally {
+    await client.close();
+  }
+}
+
 // --- process orchestration (isolated store + firewall, mirrors scenarios.ts) -
 
 async function waitForHttp(url: string, timeoutMs = 20_000): Promise<void> {
@@ -298,6 +373,7 @@ async function main(): Promise<void> {
 
     await runWalletPathSmoke();
     await runAccountPathSmoke(credentialsDir);
+    await runFirstTimePromiseSmoke(credentialsDir);
   } catch (err) {
     console.error("[smoke] failed:", err);
     exitCode = 1;

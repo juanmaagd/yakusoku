@@ -34,6 +34,22 @@ export interface PendingConnect {
   intervalSeconds: number;
 }
 
+/** P9.6 — everything `request_promise` (tools.ts) needs to resume polling a
+ * `POST /promises/first` request from `check_promise`, mirroring
+ * `PendingConnect` above: a single World ID approval that creates an
+ * account AND activates its first promise together, for a session with no
+ * credential at all yet. `pollSecret` stays server-side, same as
+ * `PendingConnect.pollSecret`. */
+export interface PendingFirstPromise {
+  promiseId: string;
+  pollSecret: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  userCode: string;
+  expiresAt: string;
+  summary: string;
+}
+
 export interface SessionState {
   untrustedContent: SeenContent[];
   /** The firewall base URL this session talks to — also the credentials
@@ -48,6 +64,9 @@ export interface SessionState {
   /** Set while a `connect` call is waiting on a human; cleared on any
    * terminal outcome (approved/denied/expired/error). */
   pendingConnect?: PendingConnect;
+  /** Set while a `request_promise` call made through the P9.6 no-credential
+   * path is waiting on a human; cleared on any terminal outcome. */
+  pendingFirstPromise?: PendingFirstPromise;
 }
 
 const NO_CREDENTIAL_MESSAGE =

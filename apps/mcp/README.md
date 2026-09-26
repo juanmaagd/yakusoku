@@ -10,11 +10,18 @@ Two credential paths, both usable from the same server:
 - **World ID account (`ya_...`, recommended)** — no wallet, no key ever
   typed anywhere. Add the MCP server once with no key at all; on first use
   the agent calls `connect`, which shows a link + short code for the human to
-  approve in World App. Per task, the agent calls `request_promise` (what,
-  budget, categories, expiry, and the one merchant/store origin it may pay)
-  for a fresh World ID approval; once active, `pay_x402` spends against it —
-  only on that exact origin — with zero further human taps until it runs out
-  or expires, or until a doubtful payment needs a fresh approval.
+  approve in World App — or, even simpler, just calls `request_promise`
+  directly: with no credential at all yet, this creates the account AND that
+  first promise together under a SINGLE World ID approval (P9.6). Per task,
+  the agent calls `request_promise` (what, budget, categories, expiry, and
+  the one merchant/store origin it may pay) for a fresh World ID approval;
+  once active, `pay_x402` spends against it — only on that exact origin —
+  with zero further human taps until it runs out or expires, or until a
+  doubtful payment needs a fresh approval. Once connected, the account still
+  needs its own smart account (`OmamorisanAccount`) deployed before it can
+  actually hold and pay USDC — `connect`/`check_connection`/a first-time
+  `request_promise` mention this with a `setupUrl`, and `setup_account`
+  fetches a fresh one any time (P11.3a).
 - **Wallet mandate (`yk_...`, legacy)** — a human signs a `TaskIntent` via the
   site's `/app` wizard and hands the agent a mandate key up front
   (`OMAMORISAN_AGENT_KEY`). Unchanged since WU-P2.
@@ -23,12 +30,13 @@ Two credential paths, both usable from the same server:
 
 | Tool | Input | Credential | What it does |
 |---|---|---|---|
-| `connect` | _(none)_ | none yet | Links this agent to a human's account via World ID. No-op ("already_connected") if this session already has a credential. Starts a World ID device flow, waits briefly (≤~30s) for approval, and returns `{status: "connected", accountId}` or `{status: "pending", connectId, verificationUri, userCode, expiresAt}` — call `check_connection` again if still pending. |
+| `connect` | _(none)_ | none yet | Links this agent to a human's account via World ID. No-op ("already_connected") if this session already has a credential. Starts a World ID device flow, waits briefly (≤~30s) for approval, and returns `{status: "connected", accountId, setupUrl?}` or `{status: "pending", connectId, verificationUri, userCode, expiresAt}` — call `check_connection` again if still pending. `setupUrl` (and a "Next: open ... " note in `message`) appears only while this account still has no deployed smart account (P11.3a). |
 | `check_connection` | _(none)_ | none yet | Resumes waiting on the pending `connect()` request. Same response shapes as `connect`. |
-| `request_promise` | `{ task, budgetUsdc, categories[1-5], expiresInMinutes, merchant }` | account | Asks the human to pre-authorize a task with a budget, bound to one merchant (store) origin — the World-ID-native replacement for a signed mandate. `merchant` is the store's base URL (e.g. `http://localhost:4000`); the resulting promise can only ever pay a resource on that exact origin, never a different store. Waits briefly for approval; returns `{status: "active", promiseId, summary, remainingBudget}` or `{status: "pending", promiseId, verificationUri, userCode, expiresAt, summary}` (call `check_promise`) or a terminal `{status: "denied"\|"expired", reason}`. |
-| `check_promise` | `{ promiseId }` | account | Resumes waiting on a pending promise, or reports the current status of any promise on the account. |
+| `request_promise` | `{ task, budgetUsdc, categories[1-5], expiresInMinutes, merchant }` | none yet, or account | Asks the human to pre-authorize a task with a budget, bound to one merchant (store) origin — the World-ID-native replacement for a signed mandate. **With no credential at all yet**, this creates the account AND this promise together under a SINGLE World ID approval (P9.6) instead of a separate `connect` first. `merchant` is the store's base URL (e.g. `http://localhost:4000`); the resulting promise can only ever pay a resource on that exact origin, never a different store. Waits briefly for approval; returns `{status: "active", promiseId, summary, remainingBudget, setupUrl?}` or `{status: "pending", promiseId, verificationUri, userCode, expiresAt, summary}` (call `check_promise`) or a terminal `{status: "denied"\|"expired", reason}`. `setupUrl` appears on the first-time (no-credential) path only, same P11.3a condition as `connect`. |
+| `check_promise` | `{ promiseId }` | none yet (if resuming a first-time `request_promise`), or account | Resumes waiting on a pending promise, or reports the current status of any promise on the account. |
 | `list_promises` | _(none)_ | account | Lists every promise on the account (pending, active, or resolved) with remaining budget, categories, and expiry. |
-| `get_mandate` | _(none)_ | either | With an account: `{accountId, createdAt, promises}`. With a wallet mandate: `{id, task, budget, remainingBudget, categories, expiry, revoked}`. |
+| `get_mandate` | _(none)_ | either | With an account: `{accountId, createdAt, promises, smartAccount?, owner?, balanceUsdc?, perPaymentLimitUsdc?, recipients?}` — the last five only once the smart account is deployed (`balanceUsdc`/`perPaymentLimitUsdc` are decimal USDC strings, e.g. `"25"`, never atomic units). With a wallet mandate: `{id, task, budget, remainingBudget, categories, expiry, revoked}`. |
+| `setup_account` | _(none)_ | account | P11.3a — mints a fresh `${setupUrl}` (a browser link, valid 30 minutes) for the human to link their own wallet as this account's owner and fund it with USDC, deploying the `OmamorisanAccount` smart account that actually holds and pays the money. Call it any time another tool mentions setup is still needed, or whenever asked how to fund the account. |
 | `fetch_url` | `{ url }` | either | GETs an http(s) URL (10s timeout, 200 KB cap) and returns its body (JSON-parsed when possible). Every fetched body is recorded in this session's untrusted-content log, so `pay_x402` can hand it to the firewall's provenance/Jev checks. Demo tool — no host allowlist. |
 | `pay_x402` | `{ url, justification, promiseId? }` | either | Runs the full x402 flow through the firewall. With an account, `promiseId` says which promise to spend from — omit it only when the account has exactly one active promise (the response then carries `autoSelectedPromise: true`). GETs `url`; if not a 402, returns the body as-is; if 402, asks `/sign` (with this session's untrusted-content log as context) and either pays immediately (`{status: "paid", resource, txHash, explorerUrl, receiptId}`), refuses (`{status: "refused", reason, receiptId}`, never retried), or starts a World ID approval (`{status: "needs_human_approval", verificationUri, userCode, expiresAt, receiptId, instructions}`). |
 | `check_approval` | `{ receiptId }` | either | Polls a pending World ID payment approval once. Still pending → `{status: "pending", ...}`. Approved → completes the purchase, same `paid` shape as `pay_x402`. Denied/expired → `{status: "refused", reason}`. |
@@ -131,6 +139,20 @@ reached — at which point a fresh `request_promise` is needed. A doubtful
 payment (one the firewall's pipeline can't clear on its own) still triggers
 a fresh World ID approval via `pay_x402`'s `needs_human_approval` response,
 exactly like the legacy path.
+
+**First task, zero prior setup (P9.6):** an agent doesn't even need to call
+`connect` first — calling `request_promise` directly with no credential at
+all creates the human's account AND activates that first promise together
+under ONE World ID approval, instead of two separate taps. `check_promise`
+resumes it exactly like an ordinary pending promise.
+
+**Funding the account (P11.3a):** a connected account still needs its own
+`OmamorisanAccount` smart account deployed before `pay_x402` can actually
+move money — `connect`/`check_connection`/a first-time `request_promise`
+mention this with a `setupUrl` the moment the account has none yet, and
+`setup_account` fetches a fresh link any time. The human opens it in a
+browser, links their own wallet as the account's owner, and funds it with
+USDC — the site (out of scope for this server) handles that page.
 
 **Legacy wallet mandate path:** the agent calls `get_mandate` first to learn
 what the human authorized (task, budget, categories, expiry) via the site's

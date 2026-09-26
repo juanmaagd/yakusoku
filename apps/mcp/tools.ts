@@ -26,6 +26,7 @@ import {
   pollWithTimeout,
   readCapped,
   type PendingConnect,
+  type PendingFirstPromise,
   type SessionState,
 } from "./session";
 
@@ -130,6 +131,44 @@ interface AccountInfo {
   accountId: string;
   createdAt: string;
   promises: PromiseSummary[];
+  /** P11.3a — only present once `POST /setup/:token/owner` has deployed this
+   * account's `OmamorisanAccount`. `balanceUsdc`/`perPaymentLimitUsdc` are
+   * decimal USDC strings (e.g. "25"), never atomic units. */
+  smartAccount?: string;
+  owner?: string;
+  balanceUsdc?: string;
+  perPaymentLimitUsdc?: string;
+  recipients?: { address: string; label: string }[];
+}
+
+// --- P11.3a account setup-link response shapes --------------------------------
+
+interface SetupLinkResponse {
+  setupUrl: string;
+  token: string;
+  expiresAt: string;
+}
+
+// --- P9.6 single-approval account+promise response shapes ---------------------
+
+interface FirstPromiseStartResponse {
+  promiseId: string;
+  pollSecret: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  userCode: string;
+  expiresAt: string;
+  summary: string;
+}
+
+interface FirstPromisePollResponse {
+  status: "pending" | "active" | "denied" | "expired" | "error";
+  accountId?: string;
+  promiseId?: string;
+  summary?: string;
+  remainingBudget?: string;
+  accountKey?: string;
+  reason?: string;
 }
 
 async function fetchMandate(firewallUrl: string, agentKey: string): Promise<MandateInfo> {
@@ -144,6 +183,34 @@ async function fetchAccount(firewallUrl: string, accountKey: string): Promise<Ac
   const body = await res.json().catch(() => undefined);
   if (!res.ok) throw new Error(`GET /account failed: ${res.status} ${JSON.stringify(body)}`);
   return body as AccountInfo;
+}
+
+/** `POST /accounts/setup-link` (P11.3a) — mints a fresh link every call, so
+ * callers only fetch it when they've already confirmed (via `GET /account`)
+ * that this account still has no smart account. */
+async function fetchSetupLink(firewallUrl: string, accountKey: string): Promise<SetupLinkResponse> {
+  const res = await fetch(`${firewallUrl}/accounts/setup-link`, { method: "POST", headers: { authorization: `Bearer ${accountKey}` } });
+  const body = await res.json().catch(() => undefined);
+  if (!res.ok) throw new Error(`POST /accounts/setup-link failed: ${res.status} ${JSON.stringify(body)}`);
+  return body as SetupLinkResponse;
+}
+
+/** Shared by `connect`/`check_connection` (on `connected`) and the P9.6
+ * no-credential `request_promise` path (on `active`): if the account still
+ * has no smart account deployed, mints a setup link and a one-line "next
+ * step" the caller should append to its own tool-result message. Best-effort
+ * — never throws, so a transient `/account`/`/accounts/setup-link` failure
+ * never turns an otherwise-successful connect/promise-approval response into
+ * an error. */
+async function maybeSetupHint(firewallUrl: string, accountKey: string): Promise<{ setupUrl?: string; nextStep?: string }> {
+  try {
+    const account = await fetchAccount(firewallUrl, accountKey);
+    if (account.smartAccount) return {};
+    const link = await fetchSetupLink(firewallUrl, accountKey);
+    return { setupUrl: link.setupUrl, nextStep: `Next: open ${link.setupUrl} to link your wallet and fund your account.` };
+  } catch {
+    return {};
+  }
 }
 
 async function fetchPromise(firewallUrl: string, accountKey: string, promiseId: string): Promise<PromiseDetail> {
@@ -294,10 +361,12 @@ async function waitForConnectOutcome(session: SessionState, firewallUrl: string)
     }
     session.setAgentKey(result.accountKey);
     await saveStoredCredential(firewallUrl, { agentKey: result.accountKey, kind: "account", connectedAt: new Date().toISOString() });
+    const { setupUrl, nextStep } = await maybeSetupHint(firewallUrl, result.accountKey);
     return ok({
       status: "connected",
       accountId: result.accountId,
-      message: "Connected. Call get_mandate to see the account, or request_promise to ask for a task budget.",
+      setupUrl,
+      message: `Connected. Call get_mandate to see the account, or request_promise to ask for a task budget.${nextStep ? ` ${nextStep}` : ""}`,
     });
   }
 
@@ -334,6 +403,69 @@ async function waitForPromiseOutcome(firewallUrl: string, accountKey: string, pr
     });
   }
   return ok({ status: detail.status, promiseId, reason: detail.reason ?? `promise resolved as ${detail.status}` });
+}
+
+// --- P9.6 no-credential request_promise (single-approval account+promise) ---
+
+async function pollFirstPromiseOnce(firewallUrl: string, pending: PendingFirstPromise): Promise<FirstPromisePollResponse> {
+  const res = await fetch(`${firewallUrl}/promises/first/${pending.promiseId}/poll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pollSecret: pending.pollSecret }),
+  });
+  const body = (await res.json().catch(() => undefined)) as FirstPromisePollResponse | undefined;
+  if (!res.ok || !body) throw new Error(`firewall POST /promises/first/:id/poll failed: HTTP ${res.status} ${JSON.stringify(body)}`);
+  return body;
+}
+
+/** Shared by `request_promise`'s no-credential branch (right after starting a
+ * fresh `POST /promises/first`) and `check_promise` (resuming it by id) —
+ * same ≤~30s wait budget as `waitForConnectOutcome`/`waitForPromiseOutcome`.
+ * On `active`, this is the FIRST time the session gets any credential at
+ * all, so it stores the delivered account key exactly like `connect` does,
+ * then applies the same P11.3a setup-link hint as a freshly connected
+ * account. */
+async function waitForFirstPromiseOutcome(session: SessionState, firewallUrl: string): Promise<CallToolResult> {
+  const pending = session.pendingFirstPromise;
+  if (!pending) return fail("no pending first-time promise request — call request_promise again");
+
+  const result = await pollWithTimeout(() => pollFirstPromiseOnce(firewallUrl, pending), (r) => r.status !== "pending");
+
+  if (result.status === "pending") {
+    return ok({
+      status: "pending",
+      promiseId: pending.promiseId,
+      verificationUri: pending.verificationUriComplete ?? pending.verificationUri,
+      userCode: pending.userCode,
+      expiresAt: pending.expiresAt,
+      summary: pending.summary,
+      message: "Still waiting for the human to approve in World App — call check_promise with this promiseId shortly.",
+    });
+  }
+
+  session.pendingFirstPromise = undefined;
+
+  if (result.status === "active") {
+    if (!result.accountKey) {
+      return fail(
+        "this first-time promise request already resolved as active and its account key was already delivered to " +
+          "another session — call request_promise again to start a fresh one",
+      );
+    }
+    session.setAgentKey(result.accountKey);
+    await saveStoredCredential(firewallUrl, { agentKey: result.accountKey, kind: "account", connectedAt: new Date().toISOString() });
+    const { setupUrl, nextStep } = await maybeSetupHint(firewallUrl, result.accountKey);
+    return ok({
+      status: "active",
+      promiseId: pending.promiseId,
+      summary: result.summary,
+      remainingBudget: result.remainingBudget,
+      setupUrl,
+      message: `Approved — pay_x402 can now spend against this promise.${nextStep ? ` ${nextStep}` : ""}`,
+    });
+  }
+
+  return ok({ status: result.status, promiseId: pending.promiseId, reason: result.reason ?? `promise resolved as ${result.status}` });
 }
 
 type ResolvedPromise = { ok: true; promiseId: string; task: string; autoSelected: boolean } | { ok: false; message: string };
@@ -434,12 +566,14 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     {
       description:
         "Ask the human to pre-authorize a task with a budget, via World ID — the World-ID-native replacement " +
-        "for a wallet-signed mandate. Requires a connected account (call connect first if this fails). Binds the " +
-        "promise to one merchant (store) origin — pay_x402 can only ever spend it on a resource at that exact " +
-        "origin, never a different store, even a clean/in-budget one. Shows the human a summary (task, budget, " +
-        "categories, expiry, merchant) to approve in World App; once approved, pay_x402 can spend against it " +
-        "with zero further taps until it runs out or expires. Waits briefly for approval; if the human hasn't " +
-        "responded yet, returns 'pending' and the promiseId to pass to check_promise.",
+        "for a wallet-signed mandate. With NO credential at all yet, this creates the human's account AND this " +
+        "promise together under a SINGLE World ID approval (no separate connect step needed). With an already-" +
+        "connected account, asks for a promise on it as usual. Binds the promise to one merchant (store) origin — " +
+        "pay_x402 can only ever spend it on a resource at that exact origin, never a different store, even a " +
+        "clean/in-budget one. Shows the human a summary (task, budget, categories, expiry, merchant) to approve " +
+        "in World App; once approved, pay_x402 can spend against it with zero further taps until it runs out or " +
+        "expires. Waits briefly for approval; if the human hasn't responded yet, returns 'pending' and the " +
+        "promiseId to pass to check_promise.",
       inputSchema: {
         task: z.string().min(1).describe("what this promise authorizes, in plain language (e.g. 'buy a $1 Amazon gift card')"),
         budgetUsdc: z.number().positive().describe("maximum total USDC this promise may spend, across all purchases"),
@@ -455,14 +589,35 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     },
     async ({ task, budgetUsdc, categories, expiresInMinutes, merchant }) => {
       try {
-        if (!session.hasAgentKey() || credentialKind(session.getAgentKey()) !== "account") {
-          return fail("request_promise needs a connected World ID account — call connect first (the legacy wallet mandate path doesn't use promises).");
+        if (session.hasAgentKey() && credentialKind(session.getAgentKey()) === "wallet") {
+          return fail("request_promise needs a connected World ID account — the legacy wallet mandate path doesn't use promises.");
         }
+
+        const expiresInSeconds = Math.round(expiresInMinutes * 60);
+
+        // P9.6 — no credential at all yet: create the account AND this
+        // promise together under one World ID approval, instead of asking
+        // for connect first.
+        if (!session.hasAgentKey()) {
+          const res = await fetch(`${config.firewallUrl}/promises/first`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ task, budgetUsdc, categories, expiresInSeconds, merchant }),
+          });
+          const body = (await res.json().catch(() => undefined)) as (FirstPromiseStartResponse & { error?: string }) | undefined;
+          if (!res.ok || !body?.promiseId || !body.pollSecret) {
+            return fail(`firewall POST /promises/first failed: HTTP ${res.status} ${JSON.stringify(body)}`);
+          }
+          session.pendingFirstPromise = body;
+          sendUrlElicitationBestEffort(server, `${body.summary} Code: ${body.userCode}.`, body.verificationUriComplete ?? body.verificationUri);
+          return await waitForFirstPromiseOutcome(session, config.firewallUrl);
+        }
+
         const accountKey = session.getAgentKey();
         const res = await fetch(`${config.firewallUrl}/promises`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${accountKey}` },
-          body: JSON.stringify({ task, budgetUsdc, categories, expiresInSeconds: Math.round(expiresInMinutes * 60), merchant }),
+          body: JSON.stringify({ task, budgetUsdc, categories, expiresInSeconds, merchant }),
         });
         const body = (await res.json().catch(() => undefined)) as (CreatePromiseResponse & { error?: string }) | undefined;
         if (!res.ok || !body?.promiseId) {
@@ -484,10 +639,48 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     },
     async ({ promiseId }) => {
       try {
+        // P9.6 — resuming the no-credential single-approval flow: this
+        // session has no account key yet, so it can only be checked through
+        // the pending first-promise state `request_promise` left behind.
+        if (session.pendingFirstPromise && session.pendingFirstPromise.promiseId === promiseId) {
+          return await waitForFirstPromiseOutcome(session, config.firewallUrl);
+        }
         if (!session.hasAgentKey() || credentialKind(session.getAgentKey()) !== "account") {
           return fail("check_promise needs a connected World ID account — call connect first.");
         }
         return await waitForPromiseOutcome(config.firewallUrl, session.getAgentKey(), promiseId);
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  );
+
+  // --- setup_account (P11.3a) --------------------------------------------------
+
+  server.registerTool(
+    "setup_account",
+    {
+      description:
+        "Get a link for the human to open in a browser, link their own wallet as this account's owner, and fund " +
+        "it with USDC — deploys the smart account (OmamorisanAccount) that actually holds and pays from the " +
+        "money. Call this whenever connect/check_connection/request_promise/get_mandate mentions the account " +
+        "still needs setup, or whenever the human asks how to fund their account. Requires a connected World ID " +
+        "account (call connect first if this fails).",
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        if (!session.hasAgentKey() || credentialKind(session.getAgentKey()) !== "account") {
+          return fail("setup_account needs a connected World ID account — call connect first.");
+        }
+        const accountKey = session.getAgentKey();
+        const link = await fetchSetupLink(config.firewallUrl, accountKey);
+        sendUrlElicitationBestEffort(server, "Open this link to link your wallet and fund your Omamorisan account.", link.setupUrl);
+        return ok({
+          setupUrl: link.setupUrl,
+          expiresAt: link.expiresAt,
+          message: `Open ${link.setupUrl} in a browser to link your wallet as this account's owner and fund it with USDC.`,
+        });
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
