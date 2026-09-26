@@ -1,6 +1,6 @@
-# AI usage in Omamorisan
+# AI usage in Omamori
 
-Omamorisan was built by a team of four during ETHGlobal Tokyo 2026 with supervised AI assistance. This folder records **how AI was used, what it was asked to do, and how its output was verified**. The work-unit history below describes the AI-assisted implementation workflow; it is not a complete attribution of every teammate's contribution.
+Omamori was built by a team of four during ETHGlobal Tokyo 2026 with supervised AI assistance. This folder records **how AI was used, what it was asked to do, and how its output was verified**. The work-unit history below describes the AI-assisted implementation workflow; it is not a complete attribution of every teammate's contribution.
 
 ## Who did what
 
@@ -27,7 +27,7 @@ A second session extended the build past the original 15 work units (P0–P7): r
 
 - **Orchestration:** unchanged in shape from Phase 1 — one Claude Code orchestrator session working through P0–P7, delegating each to a bounded writer sub-agent with a written brief and exact verification commands, reviewing the diff, re-running checks itself, and committing.
 - **Design:** Codex's image-generation tool, invoked via Orca, produced the landing page's seven illustrations and several logo concepts (`apps/site/ILLUSTRATIONS.md`); the team selected the final logo — a pen-nib-plus-checkmark mark, "signed, then verified" — from those concepts, and it was redrawn as a vector (`apps/site/BRAND.md`). A fresh-context design-finish reviewer checked the built site against its direction brief before sign-off.
-- **Notable human decisions:** the product name (Omamorisan), the warm-paper-notebook visual reference and its "no Japanese aesthetic" constraint (`DESIGN.md`), the final logo, the "promise" wording, and the agent-first positioning. The current World ID account path requires approval for each new promise and account setup before payment; the older wallet mandate path remains available.
+- **Notable human decisions:** the product name (Omamori), the warm-paper-notebook visual reference and its "no Japanese aesthetic" constraint (`DESIGN.md`), the final logo, the "intent" wording, and the agent-first positioning. The current World ID account path requires approval for each new intent and account setup before payment; the older wallet mandate path remains available.
 
 ## What review caught (AI output was not accepted blindly)
 
@@ -56,7 +56,7 @@ A second session extended the build past the original 15 work units (P0–P7): r
 | WU7 | Intercepta (Web3 Antivirus) address + token screening, fail-closed. | Unit tests with stubbed `fetch`; live check pending the sandbox key. |
 | WU8 | TypeSafe Jev with the calibrated question set; rules in code. | Live case runner: key case refused, no attack pays. |
 | WU9 | SQLite persistence, per-stage receipt timeline, SSE event stream, settlement reports. | Live SSE capture; state survives a restart. |
-| WU10 | Minimal two-lane dashboard ("without Omamorisan" vs "with Omamorisan"). | Browser screenshots; live row without reload. |
+| WU10 | Minimal two-lane dashboard ("without Omamori" vs "with Omamori"). | Browser screenshots; live row without reload. |
 | WU11 | World ID for Agents human-approval gate (device flow, JWKS validation, deny/expire). | Real sandbox device authorization; expiry refuses and releases budget. |
 | HARDEN | Refuse dominance, 13-scenario e2e suite, cheap trap SKU, disclosed attack script. | `bun run scenarios` → 13/13 pass. |
 | WU13 | Dashboard/firewall pause-resume kill switch and per-intent revoke, loopback + admin-header guarded. | `bun run scenarios` → 15/15 pass (adds pause/revoke scenarios); pause without the admin header → 403. |

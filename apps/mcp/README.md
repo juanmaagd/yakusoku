@@ -1,6 +1,6 @@
-# @yakusoku/mcp — Omamorisan MCP server
+# @yakusoku/mcp — Omamori MCP server
 
-Exposes the Omamorisan payment firewall to **any** MCP-speaking agent (Claude
+Exposes the Omamori payment firewall to **any** MCP-speaking agent (Claude
 Code, Claude Desktop, Codex, Cursor, a custom agent, ...). This process never
 holds a signing key — every payment still goes through the firewall's
 `/sign`, exactly like `apps/agent`'s `buy` tool.
@@ -12,9 +12,9 @@ Two credential paths, both usable from the same server:
   the agent calls `request_promise` directly with the human's spending rules
   (what, budget, categories, expiry, and the one merchant/store origin it may
   pay): with no credential at all yet, this creates the account AND that
-  first promise together under a SINGLE World ID approval (P9.6) — never a
+  first intent together under a SINGLE World ID approval (P9.6) — never a
   separate `connect` step for a new user. Once active, `pay_x402` reuses that
-  same promise across every later purchase that fits — only on that exact
+  same intent across every later purchase that fits — only on that exact
   origin — with zero further human taps until it runs out, expires, or is
   widened (`replaces`), or until a doubtful payment needs a fresh approval.
   `connect` exists separately, only to link this agent to an account the
@@ -33,13 +33,13 @@ Two credential paths, both usable from the same server:
 |---|---|---|---|
 | `connect` | _(none)_ | none yet | Links this agent to a human's EXISTING account via World ID — it does not set any spending rules. For a brand-new user, call `request_promise` instead: it sets the human's spending rules and creates the account together in a single approval. No-op ("already_connected") if this session already has a credential. Starts a World ID device flow, waits briefly (≤~30s) for approval, and returns `{status: "connected", accountId, setupUrl?}` or `{status: "pending", connectId, verificationUri, userCode, expiresAt}` — call `check_connection` again if still pending. `setupUrl` (and a "Next: open ... " note in `message`) appears only while this account still has no deployed smart account (P11.3a). |
 | `check_connection` | _(none)_ | none yet | Resumes waiting on the pending `connect()` request. Same response shapes as `connect`. |
-| `request_promise` | `{ task, budgetUsdc, categories[1-5], expiresInMinutes, merchant, replaces? }` | none yet, or account | Asks the human to set (or widen) their standing spending rules, bound to one merchant (store) origin — the World-ID-native replacement for a signed mandate. Call it ONCE to cover many purchases, not once per item or task: `task` should state the full scope approved (e.g. `"Any Amazon or Steam gift card for personal gifts"`), and every later purchase that fits reuses this same rule via `list_promises`/`pay_x402`. **With no credential at all yet**, this creates the account AND these rules together under a SINGLE World ID approval (P9.6) — never call `connect` first for a new user. `merchant` is the store's base URL (e.g. `http://localhost:4000`); the resulting rules can only ever pay a resource on that exact origin, never a different store. **Widening the rules:** when a purchase doesn't fit (something outside what was approved, or a different budget/store), tell the human why and, only if they agree, pass `replaces` as the CURRENT promiseId — the human approves the widened rules in World App, and once approved the old promise is revoked. `replaces` requires an already-connected account (refused on the first-time no-credential path). Waits briefly for approval; returns `{status: "active", promiseId, summary, remainingBudget, replaces?, setupUrl?}` or `{status: "pending", promiseId, verificationUri, userCode, expiresAt, summary}` (call `check_promise`) or a terminal `{status: "denied"\|"expired", reason}`. `setupUrl` appears on the first-time (no-credential) path only, same P11.3a condition as `connect`. |
-| `check_promise` | `{ promiseId }` | none yet (if resuming a first-time `request_promise`), or account | Resumes waiting on a pending promise, or reports the current status of any promise on the account. Once active, the response names the promise it replaced (`replaces`) if any. |
-| `list_promises` | _(none)_ | account | Lists every promise (spending rule) on the account (pending, active, or resolved) with remaining budget, categories, expiry, and replacement lineage (`replaces`/`replacedBy`). Call this before every purchase to check whether an active promise already covers it, so `pay_x402` can reuse it instead of asking for a new one. |
+| `request_promise` | `{ task, budgetUsdc, categories[1-5], expiresInMinutes, merchant, replaces? }` | none yet, or account | Asks the human to set (or widen) their standing spending rules, bound to one merchant (store) origin — the World-ID-native replacement for a signed mandate. Call it ONCE to cover many purchases, not once per item or task: `task` should state the full scope approved (e.g. `"Any Amazon or Steam gift card for personal gifts"`), and every later purchase that fits reuses this same rule via `list_promises`/`pay_x402`. **With no credential at all yet**, this creates the account AND these rules together under a SINGLE World ID approval (P9.6) — never call `connect` first for a new user. `merchant` is the store's base URL (e.g. `http://localhost:4000`); the resulting rules can only ever pay a resource on that exact origin, never a different store. **Widening the rules:** when a purchase doesn't fit (something outside what was approved, or a different budget/store), tell the human why and, only if they agree, pass `replaces` as the CURRENT promiseId — the human approves the widened rules in World App, and once approved the old intent is revoked. `replaces` requires an already-connected account (refused on the first-time no-credential path). Waits briefly for approval; returns `{status: "active", promiseId, summary, remainingBudget, replaces?, setupUrl?}` or `{status: "pending", promiseId, verificationUri, userCode, expiresAt, summary}` (call `check_promise`) or a terminal `{status: "denied"\|"expired", reason}`. `setupUrl` appears on the first-time (no-credential) path only, same P11.3a condition as `connect`. |
+| `check_promise` | `{ promiseId }` | none yet (if resuming a first-time `request_promise`), or account | Resumes waiting on a pending intent, or reports the current status of any intent on the account. Once active, the response names the intent it replaced (`replaces`) if any. |
+| `list_promises` | _(none)_ | account | Lists every intent (spending rule) on the account (pending, active, or resolved) with remaining budget, categories, expiry, and replacement lineage (`replaces`/`replacedBy`). Call this before every purchase to check whether an active intent already covers it, so `pay_x402` can reuse it instead of asking for a new one. |
 | `get_mandate` | _(none)_ | either | With an account: `{accountId, createdAt, promises, smartAccount?, owner?, balanceUsdc?, perPaymentLimitUsdc?, recipients?}` — the last five only once the smart account is deployed (`balanceUsdc`/`perPaymentLimitUsdc` are decimal USDC strings, e.g. `"25"`, never atomic units). With a wallet mandate: `{id, task, budget, remainingBudget, categories, expiry, revoked}`. |
 | `setup_account` | _(none)_ | account | P11.3a — mints a fresh `${setupUrl}` (a browser link, valid 30 minutes) for the human to link their own wallet as this account's owner and fund it with USDC, deploying the `OmamorisanAccount` smart account that actually holds and pays the money. Call it any time another tool mentions setup is still needed, or whenever asked how to fund the account. |
 | `fetch_url` | `{ url }` | either | GETs an http(s) URL (10s timeout, 200 KB cap) and returns its body (JSON-parsed when possible). Every fetched body is recorded in this session's untrusted-content log, so `pay_x402` can hand it to the firewall's provenance/Jev checks. Demo tool — no host allowlist. |
-| `pay_x402` | `{ url, justification, promiseId?, purchaseRef? }` | either | Runs the full x402 flow through the firewall, reusing the human's existing spending rules — call `list_promises` first and pay under whichever active promise already covers the purchase, without asking the human again. With an account, `promiseId` says which promise to spend from — omit it only when the account has exactly one active promise (the response then carries `autoSelectedPromise: true`). `purchaseRef` (1-64 chars of `[A-Za-z0-9_-]`) gives each distinct purchase of the same item under one promise its own identity — e.g. buying two `$1` gift cards needs two different `purchaseRef`s (`"amazon-1-first"`, `"amazon-1-second"`), or the second call just replays the first's outcome; reuse the SAME `purchaseRef` only to retry that exact purchase (after a timeout, or while waiting on `check_approval`) — a refusal is final for that item under that promise no matter the `purchaseRef`. Omit it for a one-off purchase (unchanged behavior). GETs `url`; if not a 402, returns the body as-is; if 402, asks `/sign` (with this session's untrusted-content log as context) and either pays immediately (`{status: "paid", resource, txHash, explorerUrl, receiptId, revealUrl?}`), refuses (`{status: "refused", reason, receiptId, actionableHint?}`, never retried — `actionableHint` appears for a funding refusal, or for a Jev refusal specifically because the purchase no longer matches the approved promise, in which case it points at `request_promise`'s `replaces`), or starts a World ID approval (`{status: "needs_human_approval", verificationUri, userCode, expiresAt, receiptId, instructions}`). | For a paid gift card, give the human `revealUrl`; its code is available only after signing in to the owner dashboard and clicking **Reveal code**, and is never returned to the agent.
+| `pay_x402` | `{ url, justification, promiseId?, purchaseRef? }` | either | Runs the full x402 flow through the firewall, reusing the human's existing spending rules — call `list_promises` first and pay under whichever active intent already covers the purchase, without asking the human again. With an account, `promiseId` says which intent to spend from — omit it only when the account has exactly one active intent (the response then carries `autoSelectedPromise: true`). `purchaseRef` (1-64 chars of `[A-Za-z0-9_-]`) gives each distinct purchase of the same item under one intent its own identity — e.g. buying two `$1` gift cards needs two different `purchaseRef`s (`"amazon-1-first"`, `"amazon-1-second"`), or the second call just replays the first's outcome; reuse the SAME `purchaseRef` only to retry that exact purchase (after a timeout, or while waiting on `check_approval`) — a refusal is final for that item under that intent no matter the `purchaseRef`. Omit it for a one-off purchase (unchanged behavior). GETs `url`; if not a 402, returns the body as-is; if 402, asks `/sign` (with this session's untrusted-content log as context) and either pays immediately (`{status: "paid", resource, txHash, explorerUrl, receiptId, revealUrl?}`), refuses (`{status: "refused", reason, receiptId, actionableHint?}`, never retried — `actionableHint` appears for a funding refusal, or for a Jev refusal specifically because the purchase no longer matches the approved intent, in which case it points at `request_promise`'s `replaces`), or starts a World ID approval (`{status: "needs_human_approval", verificationUri, userCode, expiresAt, receiptId, instructions}`). | For a paid gift card, give the human `revealUrl`; its code is available only after signing in to the owner dashboard and clicking **Reveal code**, and is never returned to the agent.
 | `check_approval` | `{ receiptId }` | either | Polls a pending World ID payment approval once. Still pending → `{status: "pending", ...}`. Approved → completes the purchase, same `paid` shape as `pay_x402`. Denied/expired → `{status: "refused", reason}`. |
 
 ## Configuration
@@ -62,7 +62,7 @@ Two credential paths, both usable from the same server:
 3. The credentials file, for this exact `OMAMORISAN_FIREWALL_URL`.
 4. None of the above — the session starts with no credential. It should call
    `request_promise` to set the human's spending rules, creating the account
-   and its first promise together in one approval (`check_promise` resumes
+   and its first intent together in one approval (`check_promise` resumes
    it); `connect`/`check_connection` remain available for linking to an
    account the human already has. Other account and payment tools require a
    credential.
@@ -145,13 +145,13 @@ categories, how long the rules stay valid (up to 7 days), and the one
 merchant (store) origin it may pay — `task` should state the full approved
 scope (e.g. "any Amazon or Steam gift card for personal gifts"), not a single
 item. `check_promise` resumes a pending request exactly like an ordinary
-pending promise.
+pending intent.
 
 Once active, the agent calls `list_promises` before every purchase and pays
-with `pay_x402` (with that promise's id, or letting it auto-select the
-account's one active promise) under whichever active promise already covers
+with `pay_x402` (with that intent's id, or letting it auto-select the
+account's one active intent) under whichever active intent already covers
 it — as many times as needed, against that same origin, with zero further
-human taps, never asking for a new promise per item or per task, until the
+human taps, never asking for a new intent per item or per task, until the
 rules' budget or expiry is reached. A doubtful payment (one the firewall's
 pipeline can't clear on its own) still triggers a fresh World ID approval via
 `pay_x402`'s `needs_human_approval` response, exactly like the legacy path.
@@ -163,8 +163,8 @@ pay under them. Instead it explains why to the human and, only if they agree,
 calls `request_promise` again with `replaces` set to the current promiseId,
 describing exactly what they now want; the human approves that specific
 change (old rules → new rules) in World App, and only on approval does the
-old promise stop working — a denied or expired replacement leaves it
-untouched. Jev still checks every payment against whichever promise is
+old intent stop working — a denied or expired replacement leaves it
+untouched. Jev still checks every payment against whichever intent is
 currently approved, never the conversation, so a payment that no longer
 matches the (old) rules is refused with an `actionableHint` pointing the
 agent at `request_promise`'s `replaces` — but only for that specific refusal
@@ -220,7 +220,7 @@ well-formed request, e.g. for `connect`:
 ```json
 {
   "mode": "url",
-  "message": "Approve connecting this AI agent to your Omamorisan account in World App. Code: JBRDP-5UXKJ.",
+  "message": "Approve connecting this AI agent to your Omamori account in World App. Code: JBRDP-5UXKJ.",
   "elicitationId": "0a5ca7a3-...",
   "url": "https://sandbox.auth.world.org/authorize?transaction_id=..."
 }

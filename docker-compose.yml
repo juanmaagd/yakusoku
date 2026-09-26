@@ -1,4 +1,4 @@
-# Omamorisan — Dokploy Docker Compose deployment (T3, odd/tasks/dokploy-deploy.md).
+# Omamori — Dokploy Docker Compose deployment (T3, odd/tasks/dokploy-deploy.md).
 #
 # Four services: firewall, store, mcp (Streamable HTTP), site. See
 # docs/deploy.md for the step-by-step Dokploy UI walkthrough (domains,
@@ -20,7 +20,7 @@
 # IMPORTANT — merchant self-fetch hairpin (see docs/deploy.md's networking
 # caveat): the firewall's `merchant` pipeline stage (apps/firewall/merchant.ts)
 # independently re-fetches a payment's resourceUrl, which for a world_id
-# promise MUST be the exact PUBLIC store origin the human approved
+# intent MUST be the exact PUBLIC store origin the human approved
 # (never weakened to an internal service name — that would defeat the
 # security property this stage exists for). That means the firewall
 # container calls back out to its own VPS's public domain through Traefik.
@@ -88,7 +88,7 @@ services:
       start_period: 10s
 
   # Three stores (gift cards, data & APIs, cloud credits), one process, three
-  # ports (odd/tasks/multi-store.md) — a promise binds one exact merchant
+  # ports (odd/tasks/multi-store.md) — an intent binds one exact merchant
   # ORIGIN, so each needs its own Dokploy domain pointed at its own exposed
   # port below.
   store:

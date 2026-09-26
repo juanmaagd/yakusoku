@@ -1,4 +1,4 @@
-# Deploying Omamorisan on Dokploy
+# Deploying Omamori on Dokploy
 
 A shared team-testing instance: all four services (firewall, store, MCP over HTTP, site) as one Docker Compose app on your Dokploy VPS, with Dokploy-generated domains (no custom domain needed). This is a step-by-step guide for the Dokploy UI — you don't need to read the code to deploy.
 
@@ -126,9 +126,9 @@ Open an issue (or message the team) with:
 
 ## Networking caveat: merchant self-fetch
 
-The firewall's `merchant` pipeline stage (`apps/firewall/merchant.ts`) independently re-fetches a payment's `resourceUrl` before signing — for a World ID promise, this **must** be the exact public store origin the human approved (never substituted for an internal service name; doing so would defeat the security property this stage exists for — see H1 in the main README). In this compose deployment, that means the `firewall` container calls back out through the public internet to its own VPS's `store` domain, which round-trips through Traefik.
+The firewall's `merchant` pipeline stage (`apps/firewall/merchant.ts`) independently re-fetches a payment's `resourceUrl` before signing — for a World ID intent, this **must** be the exact public store origin the human approved (never substituted for an internal service name; doing so would defeat the security property this stage exists for — see H1 in the main README). In this compose deployment, that means the `firewall` container calls back out through the public internet to its own VPS's `store` domain, which round-trips through Traefik.
 
-This needs the Docker host to support NAT hairpin/loopback — a container reaching the VPS's own public IP from the inside. Most Linux Docker hosts support this by default; some cloud providers' network setups (certain security-group/VPC configurations) don't. If `/health` and `/catalog` work fine from outside but a real promise payment refuses with `merchant_unreachable`, check this first:
+This needs the Docker host to support NAT hairpin/loopback — a container reaching the VPS's own public IP from the inside. Most Linux Docker hosts support this by default; some cloud providers' network setups (certain security-group/VPC configurations) don't. If `/health` and `/catalog` work fine from outside but a real intent payment refuses with `merchant_unreachable`, check this first:
 
 ```bash
 docker compose exec firewall bun -e "fetch('https://<store-domain>/catalog').then(r=>console.log(r.status)).catch(e=>console.error(e))"
