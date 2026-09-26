@@ -40,3 +40,21 @@ transparency; saturated blue accent pixels kept as `#1f5bff`), upscaled 2x
 nearest-neighbour and encoded as lossless WebP. Script:
 `/Users/juanma/Desktop/eth-global/assets/art-v2/dither.py` (outside the repo). Each
 sidecar records it under `postProcess`.
+
+## App set
+
+Three more images added to the same set, same shared style prefix, same source
+directory (`/Users/juanma/Desktop/eth-global/assets/art-v2/`) and model (OpenAI
+image generation via the Codex CLI, built-in `image_gen` tool).
+
+| File | Used for | Prompt summary |
+|---|---|---|
+| `wallet.webp` | Sign-in gate | Compact black hardware wallet / folded billfold lying at an angle, one blue indicator light |
+| `pass.webp` | The agent's scoped credential | Black access pass badge card on a lanyard clip, blank face with an embossed chip (not a key) |
+| `pause.webp` | Kill switch: all agents paused | Heavy industrial breaker lever switch on a small block, lever down/off |
+
+`public/art/app/` holds small-display variants (96-180px usage) for six images —
+the three above plus `intent`, `agent`, and `approval` — dithered at a working
+size of 256px (vs. 512px for the landing set) and upscaled 4x nearest-neighbour,
+so the stipple stays legible at small sizes instead of smoothing into grey mush.
+Each has its own `<file>.webp.json` sidecar under `public/art/app/`.
