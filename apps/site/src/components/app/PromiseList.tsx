@@ -143,10 +143,11 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
   );
 }
 
-type PromiseStatus = "active" | "revoked" | "expired";
+type PromiseStatus = "active" | "revoked" | "expired" | "exhausted";
 
 function promiseStatus(mandate: SerializedMandate): PromiseStatus {
   if (mandate.revoked) return "revoked";
+  if (BigInt(mandate.remainingBudget) <= 0n) return "exhausted";
   return Number(mandate.message.expiry) * 1000 <= Date.now() ? "expired" : "active";
 }
 
@@ -158,13 +159,14 @@ function sortPromises(mandates: SerializedMandate[]): SerializedMandate[] {
   });
 }
 
-type WorldIdStatus = "active" | "pending" | "expired" | "revoked" | "denied" | "error";
+type WorldIdStatus = "active" | "pending" | "expired" | "revoked" | "denied" | "error" | "exhausted";
 
 /** The firewall only flips `status` to `expired` lazily, so an `active`
  * promise past its expiry is shown as expired here. */
 function worldIdStatus(p: OwnerPromise): WorldIdStatus {
   if (p.status === "pending_approval") return "pending";
   if (p.status !== "active") return p.status;
+  if (BigInt(p.remainingBudget) <= 0n) return "exhausted";
   return Number(p.expiry) * 1000 <= Date.now() ? "expired" : "active";
 }
 
@@ -200,6 +202,7 @@ function WorldIdPromiseCard({ promise, onRevoke }: { promise: OwnerPromise; onRe
     <li className="flex flex-col rounded-card border border-hairline bg-surface p-5">
       <div className="flex items-center justify-between gap-3">
         {status === "active" && <StatusPill tone="neutral">Active</StatusPill>}
+        {status === "exhausted" && <StatusPill tone="muted">Budget used</StatusPill>}
         {status === "pending" && <StatusPill tone="ask">Pending approval</StatusPill>}
         {status === "expired" && <StatusPill tone="muted">Expired</StatusPill>}
         {(status === "revoked" || status === "denied" || status === "error") && (
@@ -224,14 +227,14 @@ function WorldIdPromiseCard({ promise, onRevoke }: { promise: OwnerPromise; onRe
             <span>{host}</span>
           </>
         )}
-        <span aria-hidden="true">·</span>
+        {status !== "exhausted" && <span aria-hidden="true">·</span>}
         {status === "active" && <span title={absolute}>Expires in {formatRemaining(expiryMs - Date.now())}</span>}
-        {status !== "active" && <span>Expires {absolute}</span>}
+        {status !== "active" && status !== "exhausted" && <span>Expires {absolute}</span>}
       </p>
 
       <div className="mt-auto pt-5">
         <div className="border-t border-hairline pt-4">
-          {confirming ? (
+          {confirming && live ? (
             <ConfirmInline
               message="Revoke this intent? Your agent can't spend from it anymore."
               confirmLabel="Revoke"
@@ -245,7 +248,7 @@ function WorldIdPromiseCard({ promise, onRevoke }: { promise: OwnerPromise; onRe
           ) : (
             <div className="flex items-center justify-between gap-3">
               <a href={`${SITE.dashboardRoute}?promise=${encodeURIComponent(promise.id)}`} className={textButton}>
-                Watch live
+                {status === "exhausted" ? "View activity" : "Watch live"}
                 <IconArrowRight size={14} />
               </a>
               {live ? (
@@ -278,6 +281,7 @@ function PromiseCard({ mandate, onRevoke }: { mandate: SerializedMandate; onRevo
     <li className="flex flex-col rounded-card border border-hairline bg-surface p-5">
       <div className="flex items-center justify-between gap-3">
         {status === "active" && <StatusPill tone="neutral">Active</StatusPill>}
+        {status === "exhausted" && <StatusPill tone="muted">Budget used</StatusPill>}
         {status === "revoked" && <StatusPill tone="refuse">Revoked</StatusPill>}
         {status === "expired" && <StatusPill tone="muted">Expired</StatusPill>}
         <PromiseIdRef id={mandate.id} />
@@ -293,7 +297,7 @@ function PromiseCard({ mandate, onRevoke }: { mandate: SerializedMandate; onRevo
             {categoryLabel(c)}
           </span>
         ))}
-        <span aria-hidden="true">·</span>
+        {status !== "exhausted" && <span aria-hidden="true">·</span>}
         {status === "active" && <span title={absolute}>Expires in {formatRemaining(expiryMs - Date.now())}</span>}
         {status === "expired" && <span>Expired {absolute}</span>}
         {status === "revoked" && (
@@ -308,7 +312,7 @@ function PromiseCard({ mandate, onRevoke }: { mandate: SerializedMandate; onRevo
 
       <div className="mt-auto pt-5">
         <div className="border-t border-hairline pt-4">
-          {confirming ? (
+          {confirming && live ? (
             <ConfirmInline
               message="Revoke this intent? Its agent key stops working immediately."
               confirmLabel="Revoke"
@@ -322,7 +326,7 @@ function PromiseCard({ mandate, onRevoke }: { mandate: SerializedMandate; onRevo
           ) : (
             <div className="flex items-center justify-between gap-3">
               <a href={`${SITE.dashboardRoute}?promise=${encodeURIComponent(mandate.id)}`} className={textButton}>
-                Watch live
+                {status === "exhausted" ? "View activity" : "Watch live"}
                 <IconArrowRight size={14} />
               </a>
               {live && (
@@ -369,10 +373,10 @@ function PromiseIdRef({ id }: { id: string }) {
 }
 
 function BudgetMeter({ remaining, total }: { remaining: string; total: string }) {
+  if (BigInt(remaining) <= 0n) return null;
   const totalN = Number(total);
   const remainingN = Number(remaining);
   const pct = totalN > 0 ? Math.min(Math.max(remainingN / totalN, 0), 1) * 100 : 0;
-  const exhausted = remainingN <= 0;
   return (
     <div className="mt-4">
       <p className="text-body-sm text-graphite">
@@ -387,7 +391,7 @@ function BudgetMeter({ remaining, total }: { remaining: string; total: string })
         aria-valuenow={remainingN}
         className="mt-2 h-1 w-full overflow-hidden rounded-full bg-hairline"
       >
-        <div className={`h-full rounded-full ${exhausted ? "bg-graphite" : "bg-ink"}`} style={{ width: `${pct}%` }} />
+        <div className="h-full rounded-full bg-ink" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
