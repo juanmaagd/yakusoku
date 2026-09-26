@@ -30,7 +30,7 @@ For each of the four services, in the Compose app's **Domains** tab: **Add Domai
 | `mcp` | 4010 | `omamorisan-mcp.<random>.traefik.me` |
 | `store` | 4000 | `omamorisan-store.<random>.traefik.me` |
 
-Enable HTTPS on each domain (Let's Encrypt, one click in the same tab). Write down all four URLs — you need them for Step 3.
+Free `traefik.me` domains are **HTTP only** out of the box: Let's Encrypt can't issue certificates for them. Either use the `http://` URLs as they are (enough for a first test), or enable HTTPS by pasting the traefik.me wildcard certificate (Settings → Certificates, provider `None`, valid about 30 days), or point a subdomain you own at the VPS and use Let's Encrypt. If the browser steps (wallet connect, `/setup`) misbehave over plain HTTP, switch to HTTPS first. Write down all four URLs, with the scheme you actually use (the `https://` examples below assume HTTPS). You need them for Step 3.
 
 `docker-compose.yml` already attaches every service to the shared `dokploy-network` and uses `expose` (not `ports`), which is what Dokploy's Domains tab expects to route to ([Docker Compose overview][dokploy-compose-overview], [Domains guide][dokploy-domains]). If you'd rather have Dokploy manage an app-scoped network instead of the shared one, turn on **Isolated Deployments** in the Compose app's Advanced settings and remove the `networks: dokploy-network` lines from `docker-compose.yml` — Dokploy then creates the network and connects Traefik to it for you ([Isolated Deployments][dokploy-utilities]).
 
@@ -51,7 +51,7 @@ curl https://<firewall-domain>/health    # {"ok":true}
 curl https://<store-domain>/health       # {"ok":true}
 curl https://<mcp-domain>/health         # {"ok":true}
 curl https://<store-domain>/catalog      # product list
-curl -i https://<store-domain>/giftcard/amazon-1   # 402 Payment Required
+curl -i https://<store-domain>/giftcard/amazon-1-rehearsal   # 402 Payment Required
 curl -i https://<site-domain>/           # 200
 ```
 
@@ -63,15 +63,15 @@ Names and where to get them — **never paste actual values into this file or a 
 
 | Variable | Service(s) | Example / where to get it |
 |---|---|---|
-| `FIREWALL_PRIVATE_KEY` | firewall | Base Sepolia private key, funded with test USDC ([faucet.circle.com](https://faucet.circle.com)) |
+| `FIREWALL_PRIVATE_KEY` | firewall | Base Sepolia private key of the operator EOA. It needs **Base Sepolia ETH for gas**, because it deploys every tester's smart account. Test USDC ([faucet.circle.com](https://faucet.circle.com)) is only needed for the legacy wallet-mandate path |
 | `MERCHANT_KEY` | store, firewall | A separate Base Sepolia private key (the store's `payTo`) |
 | `MERCHANT_ADDRESS` | store, firewall | Alternative to `MERCHANT_KEY` — just the address, if you'd rather not give the store a key |
 | `TYPESAFE_API_KEY` | firewall | TypeSafe AI dashboard (Jev) |
 | `INTERCEPTA_API_KEY` | firewall | Intercepta sandbox key |
 | `WORLD_CLIENT_ID` | firewall | World ID for Agents sandbox app |
 | `WORLD_CLIENT_SECRET` | firewall | World ID for Agents sandbox app |
-| `WORLD_ID_ISSUER` | firewall | World ID sandbox OIDC issuer URL |
-| `BASE_SEPOLIA_RPC_URL` | firewall | Any Base Sepolia RPC (e.g. a free Alchemy/Infura endpoint) |
+| `WORLD_ID_ISSUER` | firewall | Optional — defaults to `https://sandbox.auth.world.org` |
+| `BASE_SEPOLIA_RPC_URL` | firewall | Optional — defaults to the public Base Sepolia RPC; set a dedicated endpoint (Alchemy/Infura) if you hit rate limits |
 | `OMAMORISAN_SITE_ORIGINS` | firewall | `https://<site-domain>` (Step 2) — CORS allow-list |
 | `OMAMORISAN_SIWE_DOMAINS` | firewall | `<site-domain>` (Step 2, **no scheme**) — SIWE sign-in allow-list |
 | `OMAMORISAN_SITE_URL` | firewall | `https://<site-domain>` (Step 2) — used in setup-link emails/URLs |
