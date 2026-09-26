@@ -87,6 +87,10 @@ services:
       retries: 5
       start_period: 10s
 
+  # Three stores (gift cards, data & APIs, cloud credits), one process, three
+  # ports (odd/tasks/multi-store.md) — a promise binds one exact merchant
+  # ORIGIN, so each needs its own Dokploy domain pointed at its own exposed
+  # port below.
   store:
     build:
       context: .
@@ -96,10 +100,16 @@ services:
     restart: unless-stopped
     expose:
       - "4000"
+      - "4002"
+      - "4003"
     environment:
       - PORT=4000
       - MERCHANT_ADDRESS=${MERCHANT_ADDRESS}
       - MERCHANT_KEY=${MERCHANT_KEY}
+      - PORT_DATA=4002
+      - MERCHANT_ADDRESS_DATA=${MERCHANT_ADDRESS_DATA}
+      - PORT_CLOUD=4003
+      - MERCHANT_ADDRESS_CLOUD=${MERCHANT_ADDRESS_CLOUD}
     networks:
       - default
       - dokploy-network
