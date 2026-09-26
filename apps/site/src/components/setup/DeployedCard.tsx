@@ -8,7 +8,7 @@ import type { SetupInfo } from "../../lib/setupApi";
 import { depositUsdc, readAccountPaused, readUsdcBalance, setAccountPaused, withdrawFromAccount } from "../../lib/setupAccount";
 import { useSetupWallet } from "../../lib/useSetupWallet";
 import { describeWalletError, getInjectedProvider } from "../../lib/wallet";
-import { errorText, inputBase, outlinedButton, primaryButton, smallButton } from "../../lib/ui";
+import { errorText, helpText, inputBase, outlinedButton, primaryButton, smallButton } from "../../lib/ui";
 import CopyButton from "../ui/CopyButton";
 import { IconExternal, IconPause, IconPlay } from "../ui/Icons";
 import InlineError from "../ui/InlineError";
@@ -34,6 +34,11 @@ export default function DeployedCard({ info, justDeployedTxHash }: Props) {
   const isOwner = !!address && address.toLowerCase() === info.owner.toLowerCase();
 
   const [balance, setBalance] = useState<Balance>({ kind: "loading" });
+  // The owner's own wallet, not the connected one: `info.owner` is known from
+  // the setup status regardless of whether a wallet is connected yet, and a
+  // public Base Sepolia client reads it (never the connected wallet's own
+  // provider), so it works no matter which network that wallet is on.
+  const [ownerBalance, setOwnerBalance] = useState<Balance>({ kind: "loading" });
   const [paused, setPaused] = useState<Paused>({ kind: "loading" });
 
   const refreshBalance = useCallback(async () => {
@@ -46,6 +51,16 @@ export default function DeployedCard({ info, justDeployedTxHash }: Props) {
     }
   }, [info.usdc, info.smartAccount]);
 
+  const refreshOwnerBalance = useCallback(async () => {
+    setOwnerBalance({ kind: "loading" });
+    try {
+      const atomic = await readUsdcBalance(info.usdc, info.owner);
+      setOwnerBalance({ kind: "loaded", atomic });
+    } catch {
+      setOwnerBalance({ kind: "error" });
+    }
+  }, [info.usdc, info.owner]);
+
   const refreshPaused = useCallback(async () => {
     setPaused({ kind: "loading" });
     try {
@@ -56,10 +71,17 @@ export default function DeployedCard({ info, justDeployedTxHash }: Props) {
     }
   }, [info.smartAccount]);
 
+  // One entry point for "everything this page shows might have changed":
+  // the initial load and every owner transaction (deposit, withdraw, pause,
+  // unpause) refresh both balances and the paused flag together, so the page
+  // never needs a manual reload.
+  const refreshAll = useCallback(async () => {
+    await Promise.all([refreshBalance(), refreshOwnerBalance(), refreshPaused()]);
+  }, [refreshBalance, refreshOwnerBalance, refreshPaused]);
+
   useEffect(() => {
-    void refreshBalance();
-    void refreshPaused();
-  }, [refreshBalance, refreshPaused]);
+    void refreshAll();
+  }, [refreshAll]);
 
   return (
     <div className="mx-auto max-w-[640px]">
@@ -114,14 +136,33 @@ export default function DeployedCard({ info, justDeployedTxHash }: Props) {
       <section className="mt-6 rounded-card border border-hairline bg-surface p-5 md:p-6">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-subheading font-medium">Balance</h2>
-          <button type="button" onClick={() => void refreshBalance()} className={smallButton}>
+          <button type="button" onClick={() => void refreshAll()} className={smallButton}>
             Refresh
           </button>
         </div>
-        <p className="mt-3 font-mono text-heading-sm">
-          {balance.kind === "loading" ? <Skeleton className="h-8 w-32" /> : balance.kind === "loaded" ? `${formatUsdc(balance.atomic)} USDC` : "—"}
-        </p>
-        {balance.kind === "error" && <InlineError title="Couldn't read your balance from the chain." onRetry={() => void refreshBalance()} />}
+        <dl className="mt-3 grid gap-4 sm:grid-cols-2">
+          <div>
+            <dt className="text-caption text-graphite">{isOwner ? "Your wallet" : "Owner's wallet"}</dt>
+            <dd className="mt-1 font-mono text-heading-sm">
+              {ownerBalance.kind === "loading" ? (
+                <Skeleton className="h-8 w-32" />
+              ) : ownerBalance.kind === "loaded" ? (
+                `${formatUsdc(ownerBalance.atomic)} USDC`
+              ) : (
+                "—"
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-caption text-graphite">{SITE.name} account</dt>
+            <dd className="mt-1 font-mono text-heading-sm">
+              {balance.kind === "loading" ? <Skeleton className="h-8 w-32" /> : balance.kind === "loaded" ? `${formatUsdc(balance.atomic)} USDC` : "—"}
+            </dd>
+          </div>
+        </dl>
+        {(balance.kind === "error" || ownerBalance.kind === "error") && (
+          <InlineError title="Couldn't read a balance from the chain." onRetry={() => void refreshAll()} />
+        )}
       </section>
 
       {!address && (
@@ -147,11 +188,11 @@ export default function DeployedCard({ info, justDeployedTxHash }: Props) {
         </section>
       )}
 
-      {address && isOwner && <DepositSection usdc={info.usdc} smartAccount={info.smartAccount} from={address} onDeposited={refreshBalance} />}
-
       {address && isOwner && (
-        <OwnerControls smartAccount={info.smartAccount} owner={address} paused={paused} onPausedChange={setPaused} onWithdrawn={refreshBalance} />
+        <DepositSection usdc={info.usdc} smartAccount={info.smartAccount} from={address} ownerBalance={ownerBalance} onDeposited={refreshAll} />
       )}
+
+      {address && isOwner && <OwnerControls smartAccount={info.smartAccount} owner={address} paused={paused} onChanged={refreshAll} />}
     </div>
   );
 }
@@ -177,7 +218,19 @@ function parsePositiveUsdc(input: string): bigint | undefined {
 
 // --- Deposit (owner) -------------------------------------------------------
 
-function DepositSection({ usdc, smartAccount, from, onDeposited }: { usdc: Address; smartAccount: Address; from: Address; onDeposited: () => void }) {
+function DepositSection({
+  usdc,
+  smartAccount,
+  from,
+  ownerBalance,
+  onDeposited,
+}: {
+  usdc: Address;
+  smartAccount: Address;
+  from: Address;
+  ownerBalance: Balance;
+  onDeposited: () => Promise<void>;
+}) {
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -194,7 +247,10 @@ function DepositSection({ usdc, smartAccount, from, onDeposited }: { usdc: Addre
       const hash = await depositUsdc(provider, from, usdc, smartAccount, parsedAmount);
       setTxHash(hash);
       setAmount("");
-      onDeposited();
+      // Wait for both balances (and the paused flag) to refresh before
+      // clearing "Depositing…", so the new figures are already on screen —
+      // never a stale balance the owner has to manually reload for.
+      await onDeposited();
     } catch (err) {
       setError(describeWalletError(err, "Could not send this deposit. Check your USDC balance and try again."));
     } finally {
@@ -210,6 +266,9 @@ function DepositSection({ usdc, smartAccount, from, onDeposited }: { usdc: Addre
         <a className="underline" href={SITE.circleFaucetUrl} target="_blank" rel="noreferrer">
           Need testnet USDC? <IconExternal size={12} className="inline" />
         </a>
+      </p>
+      <p className={helpText}>
+        Available: {ownerBalance.kind === "loaded" ? `${formatUsdc(ownerBalance.atomic)} USDC` : "—"}
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <input
@@ -247,14 +306,12 @@ function OwnerControls({
   smartAccount,
   owner,
   paused,
-  onPausedChange,
-  onWithdrawn,
+  onChanged,
 }: {
   smartAccount: Address;
   owner: Address;
   paused: Paused;
-  onPausedChange: (p: Paused) => void;
-  onWithdrawn: () => void;
+  onChanged: () => Promise<void>;
 }) {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawBusy, setWithdrawBusy] = useState(false);
@@ -262,6 +319,12 @@ function OwnerControls({
   const [withdrawTx, setWithdrawTx] = useState<Hex | undefined>();
   const [pauseBusy, setPauseBusy] = useState(false);
   const [pauseError, setPauseError] = useState<string | undefined>();
+  // Which way `togglePause` is heading, held only while it's in flight. Its
+  // on-chain refresh (`onChanged`) briefly reports `paused.kind === "loading"`
+  // partway through — without this, the pause/resume button would flash to
+  // its *other* state (wrong icon and label) for that instant.
+  const [pendingAction, setPendingAction] = useState<"pause" | "resume" | undefined>();
+  const isPaused = pendingAction ? pendingAction === "resume" : paused.kind === "loaded" && paused.value;
   const parsedWithdraw = parsePositiveUsdc(withdrawAmount);
 
   async function withdraw() {
@@ -274,7 +337,9 @@ function OwnerControls({
       const hash = await withdrawFromAccount(provider, owner, smartAccount, owner, parsedWithdraw);
       setWithdrawTx(hash);
       setWithdrawAmount("");
-      onWithdrawn();
+      // Withdrawals pay out to the owner's own wallet, so its balance moves
+      // too — wait for both balances to refresh before clearing "Withdrawing…".
+      await onChanged();
     } catch (err) {
       setWithdrawError(describeWalletError(err, "Could not withdraw. Check the account's balance and try again."));
     } finally {
@@ -285,15 +350,20 @@ function OwnerControls({
   async function togglePause() {
     const provider = getInjectedProvider();
     if (!provider || paused.kind !== "loaded") return;
+    setPendingAction(paused.value ? "resume" : "pause");
     setPauseBusy(true);
     setPauseError(undefined);
     try {
       await setAccountPaused(provider, owner, smartAccount, !paused.value);
-      onPausedChange({ kind: "loaded", value: !paused.value });
+      // Re-read the paused flag from the chain rather than optimistically
+      // flipping it locally, so this stays true even if the transaction did
+      // something unexpected.
+      await onChanged();
     } catch (err) {
       setPauseError(describeWalletError(err, "Could not update the pause state. Try again."));
     } finally {
       setPauseBusy(false);
+      setPendingAction(undefined);
     }
   }
 
@@ -332,13 +402,13 @@ function OwnerControls({
       </div>
 
       <div className="mt-6 border-t border-hairline pt-4">
-        <p className="text-body-sm font-medium text-ink">{paused.kind === "loaded" && paused.value ? "Payments are paused" : "Payments are active"}</p>
+        <p className="text-body-sm font-medium text-ink">{isPaused ? "Payments are paused" : "Payments are active"}</p>
         <p className="mt-1 text-body-sm text-graphite">
-          {paused.kind === "loaded" && paused.value
+          {isPaused
             ? "The firewall cannot pay from this account until you resume it."
             : "The firewall can pay registered merchants up to your per-payment limit."}
         </p>
-        {paused.kind === "loaded" && paused.value ? (
+        {isPaused ? (
           // Mirrors AppShell.tsx's PauseControl "Paused · Resume" treatment for consistency.
           <button
             type="button"
