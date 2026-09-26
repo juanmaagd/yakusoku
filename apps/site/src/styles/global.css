@@ -193,15 +193,6 @@
     transform: translateX(3px);
   }
 
-  /* Dark code panel body (app snippets). Numbers and code stay mono. */
-  .code-block {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-stretch: 87.5%;
-    line-height: 1.7;
-    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
-  }
-
   /* A new live decision slides in at the top of the feed. */
   .row-in {
     animation: row-in 240ms var(--ease-out-soft);

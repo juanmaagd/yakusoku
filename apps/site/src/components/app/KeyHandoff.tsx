@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { agentCliCommand, mcpHttpSnippet, mcpStdioConfigSnippet, SITE } from "../../config";
+import { SITE } from "../../config";
 import { ghostButton, label, primaryButton } from "../../lib/ui";
-import CodePanel from "../ui/CodePanel";
 import CopyButton from "../ui/CopyButton";
 import { IconArrowRight, IconCheck } from "../ui/Icons";
 import type { CreatedPromise } from "./PromiseComposer";
@@ -47,16 +46,14 @@ export default function KeyHandoff({ created, onDone }: KeyHandoffProps) {
         <img src="/art/app/pass.webp" alt="" width={1024} height={1024} decoding="async" className="hidden size-32 shrink-0 sm:block md:size-36" />
       </div>
 
-      <div className="mt-8 space-y-5">
-        <SecretField fieldLabel="Agent key" value={created.agentKey} large />
-        <SecretField fieldLabel="Promise id" value={created.id} />
+      <div className="mt-8">
+        <SecretField fieldLabel="Agent key" value={created.agentKey} />
+        <p className="mt-3 max-w-[64ch] text-body-sm text-graphite">
+          The agent key is a scoped credential: it can only ask the firewall to sign payments for this promise. It can&rsquo;t move funds.
+        </p>
       </div>
 
-      <p className="mt-4 max-w-[64ch] text-body-sm text-graphite">
-        The agent key is a scoped credential: it can only ask the firewall to sign payments for this promise. It can&rsquo;t move funds.
-      </p>
-
-      <SetupTabs created={created} />
+      <ConnectionDetails created={created} />
 
       <div className="mt-10 border-t border-hairline pt-6">
         <label className="flex cursor-pointer items-start gap-3">
@@ -82,81 +79,40 @@ export default function KeyHandoff({ created, onDone }: KeyHandoffProps) {
   );
 }
 
-function SecretField({ fieldLabel, value, large = false }: { fieldLabel: string; value: string; large?: boolean }) {
+function SecretField({ fieldLabel, value }: { fieldLabel: string; value: string }) {
   return (
     <div>
       <div className="mb-2 flex items-center justify-between gap-3">
         <span className={label}>{fieldLabel}</span>
-        <CopyButton value={value} />
+        <CopyButton value={value} ariaLabel={`Copy ${fieldLabel.toLowerCase()}`} />
       </div>
-      <p
-        className={`break-all rounded-btn border border-hairline-strong bg-fog px-4 font-mono text-ink ${
-          large ? "py-4 text-body" : "py-3 text-body-sm"
-        }`}
-      >
-        {value}
-      </p>
+      <p className="break-all rounded-btn border border-hairline-strong bg-fog px-4 py-4 font-mono text-body text-ink">{value}</p>
     </div>
   );
 }
 
-type SetupId = "mcp" | "http" | "cli";
-
-function SetupTabs({ created }: { created: CreatedPromise }) {
-  const [active, setActive] = useState<SetupId>("mcp");
-  const tabs: { id: SetupId; label: string; hint: string; title: string; code: string }[] = [
-    {
-      id: "mcp",
-      label: "Claude Desktop / Cursor",
-      hint: "Add this server to your MCP client config, with the path pointing at your checkout of the repo.",
-      title: "MCP config (stdio)",
-      code: mcpStdioConfigSnippet(created.agentKey),
-    },
-    {
-      id: "http",
-      label: "HTTP (MCP)",
-      hint: "Start the MCP server over HTTP, then send the agent key as a bearer token.",
-      title: "MCP over Streamable HTTP",
-      code: mcpHttpSnippet(created.agentKey),
-    },
-    {
-      id: "cli",
-      label: "Command line",
-      hint: "Run the demo agent against this promise.",
-      title: "Agent CLI",
-      code: agentCliCommand(created.id, created.agentKey),
-    },
+/** Everything an MCP client needs, as copyable values rather than commands. */
+function ConnectionDetails({ created }: { created: CreatedPromise }) {
+  const fields: { term: string; shown: string; copy: string }[] = [
+    { term: "Promise ID", shown: created.id, copy: created.id },
+    { term: "MCP server URL", shown: SITE.mcpUrl, copy: SITE.mcpUrl },
+    { term: "Auth header", shown: "Authorization: Bearer <agent key>", copy: `Authorization: Bearer ${created.agentKey}` },
   ];
-  const current = tabs.find((t) => t.id === active)!;
-
   return (
     <div className="mt-10">
       <h2 className="text-subheading font-medium text-ink">Connect your agent</h2>
-      <div role="tablist" aria-label="Agent setup" className="mt-4 flex gap-6 overflow-x-auto border-b border-hairline">
-        {tabs.map((tab) => {
-          const selected = tab.id === active;
-          return (
-            <button
-              key={tab.id}
-              id={`setup-tab-${tab.id}`}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              aria-controls="setup-panel"
-              onClick={() => setActive(tab.id)}
-              className={`relative shrink-0 whitespace-nowrap pb-3 text-body-sm transition-colors duration-200 ease-out ${
-                selected ? "font-medium text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-ink" : "text-graphite hover:text-ink"
-              }`}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-      <div id="setup-panel" role="tabpanel" aria-labelledby={`setup-tab-${current.id}`} className="pt-4">
-        <p className="mb-3 text-body-sm text-graphite">{current.hint}</p>
-        <CodePanel title={current.title} code={current.code} />
-      </div>
+      <p className="mt-1.5 text-body-sm text-graphite">Point any MCP client at this URL and send the agent key as a bearer token.</p>
+      <dl className="mt-4 divide-y divide-hairline rounded-card border border-hairline">
+        {fields.map((field) => (
+          <div key={field.term} className="grid gap-2 px-4 py-3.5 sm:grid-cols-[150px_minmax(0,1fr)_auto] sm:items-center sm:gap-4">
+            <dt className="label text-graphite">{field.term}</dt>
+            <dd className="min-w-0 break-all font-mono text-body-sm text-ink">{field.shown}</dd>
+            <dd className="sm:justify-self-end">
+              <CopyButton value={field.copy} ariaLabel={`Copy ${field.term}`} />
+            </dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }

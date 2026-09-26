@@ -5,7 +5,7 @@ import { formatRemaining, formatUsdcFixed, shortHex } from "../../lib/format";
 import { dangerOutlinedButton, primaryButton, textButton } from "../../lib/ui";
 import ConfirmInline from "../ui/ConfirmInline";
 import EmptyState from "../ui/EmptyState";
-import { IconArrowRight, IconPlus } from "../ui/Icons";
+import { IconArrowRight, IconCheck, IconCopy, IconPlus } from "../ui/Icons";
 import InlineError from "../ui/InlineError";
 import Skeleton from "../ui/Skeleton";
 import StatusPill from "../ui/StatusPill";
@@ -147,9 +147,7 @@ function PromiseCard({ mandate, onRevoke }: { mandate: SerializedMandate; onRevo
         {status === "active" && <StatusPill tone="neutral">Active</StatusPill>}
         {status === "revoked" && <StatusPill tone="refuse">Revoked</StatusPill>}
         {status === "expired" && <StatusPill tone="muted">Expired</StatusPill>}
-        <span className="font-mono text-caption text-graphite" title={mandate.id}>
-          {shortHex(mandate.id, 8, 4)}
-        </span>
+        <PromiseIdRef id={mandate.id} />
       </div>
 
       <h2 className={`mt-3 text-body-lg font-medium text-pretty ${live ? "text-ink" : "text-graphite"}`}>{mandate.message.task}</h2>
@@ -201,6 +199,36 @@ function PromiseCard({ mandate, onRevoke }: { mandate: SerializedMandate; onRevo
         </div>
       </div>
     </li>
+  );
+}
+
+/** The promise's reference, labeled and short (`5fcb…2252`); copies the full id. */
+function PromiseIdRef({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const short = shortHex(id.replace(/^intent_/, ""), 4, 4);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      title={id}
+      aria-label={copied ? "Promise ID copied" : `Copy promise ID ${short}`}
+      className="inline-flex items-center gap-2 rounded-sm px-1.5 py-1 text-graphite transition-colors duration-200 ease-out hover:bg-fog hover:text-ink"
+    >
+      <span className="label">Promise ID</span>
+      <span className="font-mono text-caption text-ink">{short}</span>
+      {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
+    </button>
   );
 }
 

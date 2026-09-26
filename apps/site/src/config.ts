@@ -17,6 +17,9 @@ export const SITE = {
    * sign-in, mandate creation/listing/revocation. Astro only exposes
    * `PUBLIC_`-prefixed env vars to client code. */
   firewallUrl: (import.meta.env.PUBLIC_FIREWALL_URL as string | undefined) ?? "http://localhost:4001",
+  /** The MCP server's Streamable HTTP endpoint (apps/mcp/README.md: port 4010,
+   * `/mcp` path, agent key as a Bearer token), shown on the key handoff. */
+  mcpUrl: (import.meta.env.PUBLIC_MCP_URL as string | undefined) ?? "http://localhost:4010/mcp",
 } as const;
 
 /**
@@ -37,12 +40,9 @@ export const MANDATE_EXPIRY_PRESETS = [
   { label: "7 days", seconds: 7 * 24 * 60 * 60 },
 ] as const;
 
-/** Ready-to-paste agent CLI one-liner (apps/agent/index.ts's `parseArgs` usage line). */
-export function agentCliCommand(intentId: string, agentKey: string): string {
-  return `bun run agent -- --intent ${intentId} --key ${agentKey} "Buy a $25 Amazon gift card"`;
-}
-
-/** Mirrors apps/mcp/README.md's "Claude Desktop / Cursor (mcpServers JSON)" stdio config exactly. */
+/** Mirrors apps/mcp/README.md's "Claude Desktop / Cursor (mcpServers JSON)" stdio config exactly.
+ * Not rendered in the app (the UI shows connection details, never commands);
+ * kept because README.md and docs/ai cite it as the canonical config shape. */
 export function mcpStdioConfigSnippet(agentKey: string): string {
   return JSON.stringify(
     {
@@ -57,15 +57,6 @@ export function mcpStdioConfigSnippet(agentKey: string): string {
     null,
     2,
   );
-}
-
-/** Mirrors apps/mcp/README.md's Streamable HTTP section exactly (port 4010, `/mcp` path, Bearer header). */
-export function mcpHttpSnippet(agentKey: string): string {
-  return [
-    "bun run --filter @yakusoku/mcp http",
-    "# MCP endpoint: http://localhost:4010/mcp",
-    `# Header: Authorization: Bearer ${agentKey}`,
-  ].join("\n");
 }
 
 export function basescanTx(hash: string): string {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { DecisionReceipt } from "@yakusoku/shared";
-import { agentCliCommand, SITE } from "../../config";
+import { SITE } from "../../config";
 import {
   getApprovalStatus,
   listMandates,
@@ -11,13 +11,12 @@ import {
   type SerializedMandate,
 } from "../../lib/api";
 import { connectSseWithRetry, type SseConnectionStatus } from "../../lib/sse";
-import { inputBase, primaryButton } from "../../lib/ui";
+import { inputBase, primaryButton, textButton } from "../../lib/ui";
 import { useWalletSession } from "../../lib/useWalletSession";
 import SignInGate from "../app/SignInGate";
 import AppShell, { useOwnerControl } from "../ui/AppShell";
-import CodePanel from "../ui/CodePanel";
 import EmptyState from "../ui/EmptyState";
-import { IconChevronDown, IconCross, IconPlay, IconPlus } from "../ui/Icons";
+import { IconArrowRight, IconChevronDown, IconCross, IconPlay, IconPlus } from "../ui/Icons";
 import InlineError from "../ui/InlineError";
 import Skeleton from "../ui/Skeleton";
 import ApprovalBanner, { ApprovalResolved, type ApprovalOutcome } from "./ApprovalBanner";
@@ -237,7 +236,6 @@ function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps)
   }
 
   const selectedReceipt = selectedReceiptId ? state.receipts.get(selectedReceiptId) : undefined;
-  const selectedMandate = selectedMandateId ? state.mandates.get(selectedMandateId) : undefined;
 
   return (
     <section>
@@ -299,9 +297,11 @@ function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps)
               title="No payments yet."
               body="When your agent asks the firewall to pay, every decision shows up here in real time."
             >
-              <div className="w-full text-left">
-                <CodePanel title="Run the demo agent" code={agentCliCommand(selectedMandate?.id ?? "<promise-id>", "<your-agent-key>")} />
-              </div>
+              <p className="max-w-[46ch] text-body-sm text-graphite">Connect your agent with the key you got when you signed a promise.</p>
+              <a href={SITE.appRoute} className={textButton}>
+                Go to promises
+                <IconArrowRight size={14} />
+              </a>
             </EmptyState>
           </div>
         )}
