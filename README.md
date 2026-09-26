@@ -4,7 +4,7 @@
 
 **A pre-signature firewall for AI agent payments: it only signs a payment when it matches a promise you actually signed.**
 
-Built solo at ETHGlobal Tokyo 2026 ("From Scratch" track). Base Sepolia testnet, [x402](https://docs.x402.org/) payments, USDC.
+Built by a team of four at ETHGlobal Tokyo 2026 ("From Scratch" track). Base Sepolia testnet, [x402](https://docs.x402.org/) payments, USDC.
 
 AI shopping/payment agents are starting to hold budgets and pay for things on their own (x402 is the first native channel for this: an API or a store returns `402 Payment Required` and the agent pays in USDC).
 
