@@ -334,7 +334,7 @@ const FALLBACK_MERCHANT_ADDRESS_CLOUD = "0xAbDCC40aFf5772F32A54C452D68E1F23A128e
 
 export const GIFT_CARDS_STORE: StoreDefinition = {
   id: "gift-cards",
-  name: "Omamorisan Gift Cards",
+  name: "Omamori Gift Cards",
   tagline: "A demo gift-card shop for AI shopping agents.",
   purchasePrefix: "giftcard",
   portEnvVar: "PORT",
@@ -347,7 +347,7 @@ export const GIFT_CARDS_STORE: StoreDefinition = {
 
 export const DATA_STORE: StoreDefinition = {
   id: "data",
-  name: "Omamorisan Data & APIs",
+  name: "Omamori Data & APIs",
   tagline: "Pay-per-call weather, market and content data for AI agents.",
   purchasePrefix: "api",
   portEnvVar: "PORT_DATA",
@@ -360,7 +360,7 @@ export const DATA_STORE: StoreDefinition = {
 
 export const CLOUD_STORE: StoreDefinition = {
   id: "cloud",
-  name: "Omamorisan Cloud Credits",
+  name: "Omamori Cloud Credits",
   tagline: "Redeemable compute and storage credits for AI agents.",
   purchasePrefix: "credits",
   portEnvVar: "PORT_CLOUD",
