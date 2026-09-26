@@ -1,22 +1,22 @@
 # AI usage in Omamorisan
 
-Omamorisan was built during ETHGlobal Tokyo 2026 by a solo builder with heavy, supervised AI assistance. This folder records **how AI was used, what it was asked to do, and how its output was verified**, so judges can see which parts are human decisions and which parts were AI-generated.
+Omamorisan was built by a team of four during ETHGlobal Tokyo 2026 with supervised AI assistance. This folder records **how AI was used, what it was asked to do, and how its output was verified**. The work-unit history below describes the AI-assisted implementation workflow; it is not a complete attribution of every teammate's contribution.
 
 ## Who did what
 
 | Role | Who | Responsibilities |
 |---|---|---|
-| Product owner | Human (solo participant) | Idea, product spec, sponsor tracks, every product decision (e.g. Jev calibration policy, agent model, demo scope), wallet signing with MetaMask, World App approvals, demo recording. |
+| Human team | Four ETHGlobal participants | Product and technical decisions, sponsor tracks, review, wallet signing with MetaMask, World App approvals, and demo preparation. The work-unit log records specific decisions and checks without assigning all of them to one person. |
 | Orchestrator | Claude Code (Claude Opus 5.5) | Turned the roadmap into one work unit (WU) at a time, wrote each writer brief, reviewed diffs, re-ran every acceptance check itself, fixed issues it found in review, committed and pushed. |
 | Writers | Claude Code sub-agents (Claude Sonnet) | Implemented one WU each from a written brief, with the official docs / verified references listed in the brief. |
 | Runtime AI | Vercel AI Gateway (`openai/gpt-6-luna` by default) | The shopping agent under test (`apps/agent`). |
 | Runtime AI | TypeSafe Jev (`jev-1.13.0`) | Calibrated semantic judgment inside the firewall (`apps/firewall/jev.ts`). |
 
-The human set the rules the AI had to follow: the repo started empty at kickoff, no pre-hackathon spike code was copied (everything was re-implemented from official docs), one Conventional Commit per work unit, fail-closed everywhere, and no mocks in the demo path (mocks only in unit tests).
+The team set the rules the AI had to follow: the repo started empty at kickoff, no pre-hackathon spike code was copied (everything was re-implemented from official docs), Conventional Commits for work units, fail-closed behavior, and no mocks in the demo path (mocks only in tests).
 
 ## Workflow
 
-1. **Planning (before kickoff, human + AI):** product spec, technical plan, attack library, Jev calibration spike and verified API references were prepared outside this repo. The execution roadmap lists 16 work units, each with an acceptance check.
+1. **Planning (before kickoff, team + AI):** product spec, technical plan, attack library, Jev calibration spike and verified API references were prepared outside this repo. The execution roadmap lists the initial work units and their acceptance checks. Some planning documents retain assumptions from before the team and product evolved; see [planning artifacts](planning/README.md).
 2. **Per work unit:** the orchestrator wrote a brief (context, docs to read, deliverables, constraints, exact verification commands) and delegated it to a writer sub-agent.
 3. **Independent verification:** the orchestrator never trusted the writer's report alone. It re-ran tests and typechecks, re-ran live checks, and audited every real payment on-chain (Base Sepolia).
 4. **Commit and push:** one or more Conventional Commits per WU, pushed right away.
@@ -26,8 +26,8 @@ The human set the rules the AI had to follow: the repo started empty at kickoff,
 A second session extended the build past the original 15 work units (P0–P7): retiring the legacy Next.js signing app for an Astro site, adding an MCP server so any MCP-speaking agent can drive the firewall directly, and validating that path with a real MCP client.
 
 - **Orchestration:** unchanged in shape from Phase 1 — one Claude Code orchestrator session working through P0–P7, delegating each to a bounded writer sub-agent with a written brief and exact verification commands, reviewing the diff, re-running checks itself, and committing.
-- **Design:** Codex's image-generation tool, invoked via Orca, produced the landing page's seven illustrations and several logo concepts (`apps/site/ILLUSTRATIONS.md`); the human builder picked the final logo — a pen-nib-plus-checkmark mark, "signed, then verified" — from those concepts, and it was hand-redrawn as a vector (`apps/site/BRAND.md`). A fresh-context design-finish reviewer checked the built site against its direction brief before sign-off.
-- **Notable human decisions:** the product name (Omamorisan), the warm-paper-notebook visual reference and its "no Japanese aesthetic" constraint (`DESIGN.md`), the final logo pick, the "promise" wording for the user-facing mandate, and the agent-first positioning — the agent is the primary interface; a human only signs once, approves doubtful payments via World ID, and supervises from the dashboard.
+- **Design:** Codex's image-generation tool, invoked via Orca, produced the landing page's seven illustrations and several logo concepts (`apps/site/ILLUSTRATIONS.md`); the team selected the final logo — a pen-nib-plus-checkmark mark, "signed, then verified" — from those concepts, and it was redrawn as a vector (`apps/site/BRAND.md`). A fresh-context design-finish reviewer checked the built site against its direction brief before sign-off.
+- **Notable human decisions:** the product name (Omamorisan), the warm-paper-notebook visual reference and its "no Japanese aesthetic" constraint (`DESIGN.md`), the final logo, the "promise" wording, and the agent-first positioning. The current World ID account path requires approval for each new promise and account setup before payment; the older wallet mandate path remains available.
 
 ## What review caught (AI output was not accepted blindly)
 
@@ -38,7 +38,7 @@ A second session extended the build past the original 15 work units (P0–P7): r
 | WU4 | Writer reported 1 USDC spent; the on-chain balance audit showed 2. | Traced to a second legitimate test intent; balance audits became mandatory after every settling WU. |
 | WU6 | The provenance layer made the older round-trip check fail (it sent no context). | Updated the check to send the agent's context shape. |
 | WU8 | The key case (#9) came out `ask_human` instead of `refuse` because of rule order. | Direct refusal on intent mismatch now runs first (matches the product spec). |
-| WU8 | With the spike thresholds no legitimate purchase could ever auto-pay. | Human chose to follow the product-spec pay gate; re-validated live: no attack pays. |
+| WU8 | With the spike thresholds no legitimate purchase could ever auto-pay. | The team followed the product-spec pay gate; re-validated live: no attack pays. |
 | WU11 | An `ask_human` from one layer skipped the later layers, sending the key case to a human instead of refusing it. | Refuse dominance: every layer runs; any refusal wins. Covered by the e2e suite. |
 | WU14 | The verifier's `refused_with_payment` rule (a refused receipt with a settlement anyway) matched any nearby transfer, which could false-positive on an unrelated payment. | Writer added a 10-minute proximity window between the refusal and the transfer before flagging it `CRITICAL`. |
 

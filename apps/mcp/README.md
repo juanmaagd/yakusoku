@@ -58,13 +58,15 @@ Two credential paths, both usable from the same server:
    (Streamable HTTP transport only).
 2. `OMAMORISAN_AGENT_KEY`.
 3. The credentials file, for this exact `OMAMORISAN_FIREWALL_URL`.
-4. None of the above — the session starts with no credential. Every tool
-   except `connect`/`check_connection` fails with a clear "call connect
-   first" message until one is established.
+4. None of the above — the session starts with no credential. It can call
+   `connect`/`check_connection`, or start its first account and promise in one
+   approval with `request_promise`/`check_promise`. Other account and payment
+   tools require a credential.
 
-A key is **never** returned in any tool's output — the LLM never sees it,
-only `connect`/`check_connection` see it (to store it) and every other tool
-sees it only as an `Authorization` header value it sends to the firewall.
+A key is **never** returned in any tool's output — the LLM never sees it.
+`connect`/`check_connection` and the first-time `request_promise`/`check_promise`
+path store a newly issued key; later tools use it as an `Authorization` header
+value sent to the firewall.
 
 ## Running
 

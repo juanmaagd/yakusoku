@@ -2,7 +2,7 @@
 
 # Omamorisan
 
-**A pre-signature firewall for AI agent payments: it only signs a payment when it matches a promise you actually signed.**
+**A pre-signature firewall for AI agent payments: it only signs a payment when it matches a promise a human authorized.**
 
 Built by a team of four at ETHGlobal Tokyo 2026 ("From Scratch" track). Base Sepolia testnet, [x402](https://docs.x402.org/) payments, USDC.
 
@@ -12,25 +12,21 @@ A prompt injection — hidden text in a page, a product description, or an API r
 
 Every existing guard is deterministic: spend caps, address allowlists/denylists, network/asset checks. They all miss the same case: **a payment to a clean address, within budget, for something you never requested.**
 
-Omamorisan's agent never holds a private key — it asks the firewall to sign — and the firewall only signs a payment that matches a **promise you signed** (an EIP-712 `TaskIntent`), stored outside the agent's context, checked by a live semantic layer (TypeSafe Jev) alongside deterministic provenance and address/token screening (Intercepta), with a fresh human check (World ID) as the last line of defense.
+Omamorisan's agent never holds a private key — it asks the firewall to sign. The firewall checks payments against a human-authorized task and budget stored outside the agent's context, using TypeSafe Jev for semantic matching, deterministic provenance checks, Intercepta screening, and World ID for payments that need a fresh human decision. Authorization can come from a World ID account promise or a legacy EIP-712 wallet mandate.
 
 ## Give your agent a firewall
 
-The main way to use Omamorisan is **through your agent**, over MCP. A human only signs once, approves the occasional doubtful payment, and supervises.
+The main way to use Omamorisan is **through your agent**, over MCP. The current account flow uses World ID to approve each task and budget; the older wallet mandate flow is still supported.
 
-**1. Sign a promise at `/app`.**
+**1. Run the services and add the MCP server to your client.**
 
 ```
-bun run site   # apps/site on :4321
+bun run store      # :4000
+bun run firewall   # :4001
+bun run site       # :4321
 ```
 
-Open `http://localhost:4321/app`, connect a wallet, and sign a promise — an EIP-712 mandate — with what your agent may buy, its budget in USDC, and when it expires.
-
-This never costs gas and is the only thing that ever authorizes spending.
-
-**2. Connect your agent.**
-
-The result screen shows your agent key exactly once, with the promise ID, the MCP server URL and the auth header to copy. For a stdio MCP client (Claude Desktop, Cursor), use this config (`apps/site/src/config.ts`, `mcpStdioConfigSnippet`):
+For a stdio MCP client, add this config without a key:
 
 ```json
 {
@@ -39,7 +35,6 @@ The result screen shows your agent key exactly once, with the promise ID, the MC
       "command": "bun",
       "args": ["/absolute/path/to/yakusoku/apps/mcp/index.ts"],
       "env": {
-        "OMAMORISAN_AGENT_KEY": "yk_your_key_here",
         "OMAMORISAN_FIREWALL_URL": "http://localhost:4001"
       }
     }
@@ -47,26 +42,32 @@ The result screen shows your agent key exactly once, with the promise ID, the MC
 }
 ```
 
-Drop that into Claude Code, Claude Desktop, Cursor, or any MCP-speaking client (see `apps/mcp/README.md` for `claude mcp add` and Streamable HTTP variants).
+See [`apps/mcp/README.md`](apps/mcp/README.md) for client-specific commands and Streamable HTTP.
 
-Your agent now has four tools — `get_mandate`, `fetch_url`, `pay_x402`, `check_approval` — and never sees a private key; every payment still goes through the firewall's pipeline before it's signed.
+**2. Authorize a task.** Ask the agent to call `request_promise` with a task, USDC budget, categories, expiry, and one merchant origin. With no existing account, one World ID approval creates the account and its first promise. `check_promise` resumes a pending request. The credential is stored by the MCP server and is never returned to the model.
 
-**3. CLI alternative**, no MCP client needed:
+**3. Set up the payer account.** Follow the `setupUrl` returned on first use, or ask the agent to call `setup_account`. The human links a wallet as owner and funds the deployed `OmamorisanAccount` with Base Sepolia USDC. Account payments require this setup; the account's owner controls recipients and payment limits.
+
+**4. Pay through the agent.** The agent calls `pay_x402` against the promise's merchant origin. It can use `get_mandate` and `fetch_url` for context, and `check_approval` when a payment needs a separate World ID approval. Every payment goes through the firewall before signing.
+
+**Legacy wallet path:** Open `http://localhost:4321/app` and sign an EIP-712 `TaskIntent`. The page gives you a `yk_...` key for `OMAMORISAN_AGENT_KEY`; [`apps/mcp/README.md`](apps/mcp/README.md) has the configuration. This path uses the firewall-funded wallet instead of a user-owned smart account.
+
+**Legacy CLI alternative**, no MCP client needed:
 
 ```
 bun run agent -- --intent <intentId> --key <agentKey> "Buy me a $25 Amazon gift card"
 ```
 
-## The three human moments
+## Human approvals and supervision
 
-1. **Sign once** — a promise (EIP-712 mandate) at `/app`: what the agent may buy, its budget, and its expiry. Nothing else ever authorizes spending.
-2. **Approve on your phone** — when the pipeline can't decide on its own, or the amount crosses `HUMAN_APPROVAL_OVER_USDC`, the firewall asks a live human via World ID; approve or deny from the World App, right then.
-3. **Supervise** — `/app/dashboard` shows every mandate and decision live, with the reason; pause a mandate or revoke it at any time.
+1. **Authorize a task** — approve each account promise in World App, or sign a legacy wallet mandate at `/app`.
+2. **Approve a doubtful payment** — when the pipeline cannot decide or the amount crosses `HUMAN_APPROVAL_OVER_USDC`, approve or deny it in World App.
+3. **Supervise** — `/app/dashboard` shows decisions for a connected wallet; the loopback operator dashboard at `:4001/dashboard` serves the demo operator.
 
 ## How it works
 
 ```
-You ──sign a promise (EIP-712 TaskIntent)──▶ Firewall (holds the funded signing key)
+Human ──World ID promise or wallet-signed TaskIntent──▶ Firewall (holds the operator signing key)
 Agent (no private key, talks over MCP or the CLI)
   │ requests a resource ──▶ Store (x402) ──▶ 402 Payment Required
   │ decodes the header, sends it to the Firewall
@@ -79,7 +80,7 @@ FIREWALL PIPELINE (every stage runs, before signing, fail-closed):
   5. Intercepta    — is the destination address / token flagged (sanctions, scams, drainers)?
   6. Jev           — does the payment semantically match what you asked for?
   7. World ID      — if anything above is undecided, or the amount is large: ask a live human
-  ──▶ sign from the firewall's OWN fetched requirement, or refuse, with a reason
+  ──▶ sign for the funded smart account or legacy firewall wallet, or refuse, with a reason
 Agent retries with the signature ──▶ Store ──▶ facilitator (x402.org) ──▶ Base Sepolia
 Dashboard: every decision, live, with its reason (/app/dashboard, or the loopback operator view at :4001/dashboard)
 ```
@@ -98,23 +99,24 @@ This was a real bug found in review (see `docs/ai/README.md`): without it, the k
 
 It is independently re-verifiable (`packages/shared/step-up.ts#verifyStepUpAttestation`) without trusting the firewall's own database, and is served on its own at `GET /receipts/:id/attestation`.
 
-**Independent verifier:** `apps/verifier` never trusts the firewall's own receipts. It reads Base Sepolia directly for every outgoing USDC transfer from the firewall's wallet, cross-checks each one against the receipt history over HTTP, and — for receipts carrying a StepUp attestation — re-verifies the EIP-712 signature itself.
+**Independent verifier:** `apps/verifier` checks outgoing USDC transfers from a specified wallet against firewall receipt history over HTTP and re-verifies StepUp attestations when present. Its default wallet is the legacy firewall wallet; pass `--wallet` to inspect a deployed smart account separately.
 
 It flags unexplained transfers, mismatched amounts/recipients, and refused payments that settled anyway as `CRITICAL`.
 
 ## Architecture
 
-Bun workspaces monorepo, 7 packages.
+Bun workspaces monorepo, 7 TypeScript packages plus a standalone Foundry project in `contracts/`.
 
 | App/package | Purpose | Port |
 |---|---|---|
-| `apps/mcp` | MCP server exposing the firewall to any MCP client (Claude Code, Claude Desktop, Cursor, a custom agent, ...) as four tools; never holds a key | `:4010` (Streamable HTTP), or stdio |
+| `apps/mcp` | MCP server with account connection, promises, account setup, payment, and legacy mandate tools; never holds a signing key | `:4010` (Streamable HTTP), or stdio |
 | `apps/firewall` | Hono service holding the signing key; the pipeline, receipts, SSE events, World ID gate, and a loopback-only plain operator dashboard | `:4001` |
-| `apps/site` | Astro + Tailwind site: landing (`/`), the mandate wizard (`/app`), the live owner dashboard (`/app/dashboard`) | `:4321` |
+| `apps/site` | Astro + Tailwind site: landing (`/`), legacy mandate wizard (`/app`), owner dashboard (`/app/dashboard`), account setup (`/setup`) | `:4321` |
 | `apps/store` | Express x402 gift-card store (legit SKUs + a promo endpoint serving prompt-injection trap copy) | `:4000` |
 | `apps/agent` | LLM shopping agent (AI SDK v7 + Vercel AI Gateway) — browses the catalog, asks the firewall to sign, never touches a key | — (CLI) |
-| `apps/verifier` | Independent post-hoc on-chain verifier — CLI, read-only | — (CLI) |
+| `apps/verifier` | Independent post-hoc on-chain verifier for a selected payer wallet — CLI, read-only | — (CLI) |
 | `packages/shared` | Shared zod schemas/types: `TaskIntent`, `PaymentRequirement`, `DecisionReceipt`, `StepUpAttestation`, network constants | — |
+| `contracts/` | Foundry smart account and factory for World ID account funding and on-chain spend controls | — |
 
 Key files:
 
@@ -127,6 +129,7 @@ Key files:
 - StepUp signing `apps/firewall/step-up.ts` (types in `packages/shared/step-up.ts`)
 - persistence `apps/firewall/store.ts` (`bun:sqlite`)
 - MCP tools `apps/mcp/tools.ts`.
+- account setup and funding checks `apps/firewall/account-setup.ts` and `apps/firewall/funding.ts`.
 
 ### The loopback operator dashboard
 
@@ -174,7 +177,7 @@ Every payment is screened **live**, before the firewall signs it, as stage 4 of 
 
 **MultiBaas:** not used. This project talks to Base Sepolia directly through `viem` (RPC calls, EIP-712 signing/verification) and to the x402 facilitator (`x402.org`) for settlement; no MultiBaas integration was built.
 
-**Team:** Juan Manuel Gomez Dagum, solo builder (background in AI agents and product; new to web3/Solidity this weekend). `TODO(human): add X/Twitter and GitHub handles`.
+**Team:** Four ETHGlobal Tokyo 2026 participants. Individual credits and social handles are not documented here; do not infer sole ownership from the earlier planning notes.
 
 **Setup and testing:** see [Setup & testing](#setup--testing) below.
 
@@ -183,14 +186,14 @@ Every payment is screened **live**, before the firewall signs it, as stage 4 of 
 ### Prerequisites
 
 - [Bun](https://bun.sh) 1.3+ (this repo does not support `npm`/`pnpm`/`yarn` — `@x402/*`'s `esbuild` build scripts do not run under `pnpm`/`tsx`).
-- A Base Sepolia wallet funded with test USDC for the firewall (`FIREWALL_PRIVATE_KEY`) — get some from [faucet.circle.com](https://faucet.circle.com). The payer wallet needs no ETH (the facilitator sponsors gas).
+- A Base Sepolia operator wallet (`FIREWALL_PRIVATE_KEY`) with ETH for account deployment. The legacy mandate path also needs test USDC in this wallet; the account path needs test USDC in each user's deployed smart account. See [Circle's faucet](https://faucet.circle.com) for test USDC.
 - A separate Base Sepolia address for the store's `payTo` (`MERCHANT_KEY`).
 - API keys:
   - TypeSafe (`TYPESAFE_API_KEY`, Jev semantic judgment).
   - Intercepta sandbox (`INTERCEPTA_API_KEY`, free at [intercepta.io/ethglobal](https://intercepta.io/ethglobal)).
   - World ID for Agents sandbox app (`WORLD_CLIENT_ID`/`WORLD_CLIENT_SECRET`).
   - Vercel AI Gateway (`AI_GATEWAY_API_KEY`, for the shopping agent).
-- A browser wallet (e.g. MetaMask) to sign a promise at `/app`, and the World App on a phone for human-approval checks.
+- World App for account and payment approvals. A browser wallet (e.g. MetaMask) is needed to own and fund an account or to sign a legacy mandate at `/app`.
 
 ### Environment
 
@@ -228,10 +231,10 @@ bun install
 ```
 bun run store       # apps/store on :4000
 bun run firewall    # apps/firewall on :4001 (dashboard at :4001/dashboard)
-bun run site        # apps/site on :4321 (sign a promise at /app, supervise at /app/dashboard)
+bun run site        # apps/site on :4321 (legacy /app, account /setup, wallet dashboard)
 ```
 
-Then give an agent a mandate the "Give your agent a firewall" way above (`/app` → MCP config, or CLI), or use the dev helpers directly:
+Then follow the MCP account flow above, use the legacy `/app` mandate flow, or use the legacy dev helpers directly:
 
 ```
 bun run dev-intent -- "Buy a $1 Amazon gift card (rehearsal)" 1 gift_card:amazon
@@ -242,10 +245,10 @@ bun run agent -- --intent <intentId> --key <agentKey> "Buy me a $1 Amazon gift c
 
 | Command | What it proves | Spends testnet USDC? |
 |---|---|---|
-| `bun test` | 194 unit tests across firewall/shared (idempotency, policy, merchant self-fetch/origin-binding, provenance obfuscation cases, Intercepta/Jev/World ID logic with stubbed network calls, StepUp signature tampering, SIWE) | No |
+| `bun test` | Unit tests across firewall/shared (policy, provenance, merchant, World ID, account setup, signing, and attestations) | No |
 | `bun run typecheck` | All 7 workspaces compile with no type errors | No |
-| `bun run scenarios` | Self-contained 38-scenario end-to-end suite (own store `:4020` + firewall `:4021`, real Jev + real World ID sandbox) covering legit purchase, the key attack case, provenance traps, budget/expiry, tampered network/asset, tampered payee (H1), promise merchant binding (H1), idempotent replay, concurrency, World ID expiry, pause/revoke, SIWE sign-in/replay, and owner-scoped access control across `/intents`, `/receipts`, `/approvals`, `/events` | No — never sends a payment signature back to the store |
-| `bun run --filter @yakusoku/mcp smoke` | Drives the MCP server as a real client would over stdio: mints its own mandate, calls all four tools against the live store/firewall | No |
+| `bun run scenarios` | Isolated end-to-end suite (own store `:4020` + firewall `:4021`) covering legacy mandates, World ID accounts/promises, smart account funding rules, provenance, policy, merchant binding, and owner access | No — never sends a payment signature back to the store |
+| `bun run --filter @yakusoku/mcp smoke` | Drives the legacy mandate tools over stdio against the live store/firewall | No |
 | `bun run jev-cases` | Runs the calibration-critical cases live against the real Jev API (key case refuses, legit purchases pass/escalate as calibrated) | No |
 | `bun run intercepta-check` | Live Intercepta calls through the real pipeline stage: a clean address passes, a known-risk (OFAC-sanctioned) address blocks, an unreachable endpoint escalates | No |
 | `bun run world-id-check` | Starts a real sandbox device-authorization flow and polls it; `-- --wait` waits for a real phone approval/denial and validates the resulting ID token | No |
@@ -256,7 +259,7 @@ bun run agent -- --intent <intentId> --key <agentKey> "Buy me a $1 Amazon gift c
 
 ## Evidence on hand
 
-- `bun run scenarios`: **29/29** end-to-end scenarios pass.
+- The scenario suite includes the original 29 checks and later account, promise, and funding checks. Run `bun run scenarios` for the current total and result.
 - First firewall-signed payment on Base Sepolia: [`0xa6e1d2e08390e47654e3c64523f1fc16695633ce9bdeaf5f90b8e5f4acc26ac6`](https://sepolia.basescan.org/tx/0xa6e1d2e08390e47654e3c64523f1fc16695633ce9bdeaf5f90b8e5f4acc26ac6).
 - Human-signed promise → agent purchase with Jev live: [`0xc85d39e616d1dbbd97d66606f12418c92d13843b2a73d5815b841fdd60e2059e`](https://sepolia.basescan.org/tx/0xc85d39e616d1dbbd97d66606f12418c92d13843b2a73d5815b841fdd60e2059e).
 - World ID approval → payment with a valid StepUp attestation: [`0xbc77ac5b547301ade87d09651f15f550a2f5b5b3003befa310d5eab9d9280897`](https://sepolia.basescan.org/tx/0xbc77ac5b547301ade87d09651f15f550a2f5b5b3003befa310d5eab9d9280897); a denied approval refused and restored the budget.
@@ -278,8 +281,9 @@ bun run agent -- --intent <intentId> --key <agentKey> "Buy me a $1 Amazon gift c
 
 ## Honest limitations
 
-- **The demo firewall wallet is custodial.** `FIREWALL_PRIVATE_KEY` funds the wallet that actually signs and pays every x402 payment; non-custodial funding (a smart-contract wallet, a spend-permission delegation) is future work, not built here.
-- **Intercepta live screening is pending the sandbox key.** The pipeline stage is real and wired in (`apps/firewall/intercepta.ts`, no runtime mocks), but without `INTERCEPTA_API_KEY` every payment escalates to `ask_human` instead of getting a real pass/refuse verdict — see `bun run intercepta-check`.
+- **The legacy wallet path is custodial.** Its payments use the firewall wallet. The World ID account path instead pays from a user-owned `OmamorisanAccount`, but the firewall operator still signs the payment authorization and can initiate payments within that account's on-chain controls.
+- **Intercepta needs a valid API key for live screening.** Without `INTERCEPTA_API_KEY`, the stage escalates to `ask_human` instead of getting a live pass/refuse verdict. Use `bun run intercepta-check` to verify the configured key.
+- **The verifier defaults to the legacy payer wallet.** To audit a deployed smart account, select its address with `bun run verify -- --wallet <smartAccountAddress> --from-block <n>`.
 - **Jev calibration margins are thin.** The legitimate demo purchase's `matches_intent`/risk scores sit close to the pay-gate thresholds (see `docs/ai/README.md` and the pre-hackathon calibration notes) — re-run `bun run jev-cases` before relying on a specific outcome.
 - **No wallet `accountsChanged`/`chainChanged` handling.** `/app` reads the injected provider once per action; switching accounts or networks in the wallet mid-session isn't detected — reload the page after switching.
 - **The demo's attacker is a disclosed script**, not a real prompt-injected LLM: in testing, current models (`openai/gpt-6-luna`, `gpt-4.1-mini`) were not reliably fooled by the injected promo text on cue.
@@ -289,7 +293,6 @@ bun run agent -- --intent <intentId> --key <agentKey> "Buy me a $1 Amazon gift c
 - **The wallet-signed `TaskIntent` path has no merchant binding.** Its EIP-712 schema is unchanged by the H1 fix, so a wallet mandate only gets the generic self-fetch protection (the merchant stage still refuses a `payTo`/`amount`/`asset`/`network` mismatch against the store's own 402) — it cannot, by itself, refuse "right item, right price, but a different store's origin" the way a World-ID promise's bound `merchant` can. Binding a merchant origin into the `TaskIntent` struct is future work.
 - **The merchant self-fetch is a blind GET with no redirects, not a full SSRF defense.** `apps/firewall/merchant.ts` only restricts the scheme to http/https and refuses to follow a redirect; it does not block a `resourceUrl` that resolves to a private/loopback/link-local address, so a malicious or compromised store could still point the firewall at internal infrastructure on its own network. Fine for this hackathon's single-operator, testnet-only demo; a production deployment would need an egress allowlist or an IP-range check before fetching.
 - **Testnet only.** Base Sepolia, testnet USDC; Intercepta's risk data is mainnet-only, so screening uses a Sepolia→mainnet token address mapping.
-- **Pending (human, after this WU):** a real Intercepta sandbox key + `bun run intercepta-check` live results; a real World App approve/deny pass inside a full demo run; the demo video.
 
 ## Starters and public code used
 
@@ -308,11 +311,11 @@ bun run agent -- --intent <intentId> --key <agentKey> "Buy me a $1 Amazon gift c
 
 ## AI usage
 
-See [`docs/ai/`](docs/ai/README.md) for the full log: who did what, the per-work-unit briefs, and every issue the human/orchestrator review caught in AI-generated code before it shipped.
+See [`docs/ai/`](docs/ai/README.md) for the AI-assisted work-unit log, verification, and issues caught in review. It is not a complete account of individual team contributions.
 
 ## Sponsor feedback
 
-*Draft — to be reviewed by the builder.*
+*Draft sponsor feedback from the hackathon build.*
 
 **Intercepta:**
 

@@ -4,8 +4,8 @@ Foundry project (`forge` 1.8.3+) for `OmamorisanAccount` + `OmamorisanAccountFac
 minimal, view-only-rules smart account that IS the x402 USDC payer for one user, validated
 via ERC-1271 when USDC's `transferWithAuthorization` (EIP-3009) settles a payment.
 
-See `src/OmamorisanAccount.sol` for the full trust-model NatSpec, and the project root
-`CLAUDE.md` (P11.0) for the design rationale.
+See `src/OmamorisanAccount.sol` for the trust-model NatSpec, and the project root
+[`README.md`](../README.md) for the current account and legacy payment flows.
 
 ## Setup
 
@@ -44,9 +44,10 @@ forge test -vv          # includes fork tests against REAL Base Sepolia USDC —
 It reads `FIREWALL_PRIVATE_KEY` from `.env.hackathon`, checks the deployer's ETH balance
 FIRST, and refuses to deploy if it is zero.
 
-Run from the `yakusoku/` repo root, after `cd contracts && forge build`:
+From the repo root, build the contracts, then run the deploy script:
 
 ```shell
+cd contracts && forge build && cd ..
 bun --env-file=../.env.hackathon run contracts/script/deploy.ts
 ```
 
@@ -61,12 +62,13 @@ Deploys **only** `OmamorisanAccountFactory` (constructor arg: `USDC_SEPOLIA_ADDR
 
 Verified on-chain (not just from the deploy script's own output): `cast receipt` shows
 `status: 1 (success)`, and `cast call ... "token()(address)"` on the deployed factory returns
-the expected `0x036CbD53842c5426634e7929541eC2318f3dCF7e`. No user accounts have been created
-and no USDC has moved — only the factory itself is deployed.
+the expected `0x036CbD53842c5426634e7929541eC2318f3dCF7e`. That transaction deployed
+only the factory; user account creation and funding are separate actions in the setup flow.
 
 ## Known limitations / open questions for review
 
-See the P11.0 report for the full list (cached `domainSeparator`/typehash bricking risk if
-Circle ever renames the token via proxy upgrade, `OmamorisanAccountFactory.createAccount`'s
-event-after-external-call linter warning, `abi.encodePacked` collision warning on init-code
-construction — both reviewed and considered non-issues for this design, see report).
+The account caches USDC's EIP-712 domain separator and type hash. A future token proxy
+upgrade that changes either value could prevent new authorizations from validating.
+The factory also emits an event after the account-creation call and uses
+`abi.encodePacked` to construct init code; review those choices before adapting the
+contracts for another token or deployment environment.
