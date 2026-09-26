@@ -67,7 +67,7 @@ export default function NeedsOwnerCard({ token, info, onDeployed }: Props) {
             {SITE.name} can pay <strong className="text-ink">only the merchants listed below</strong>, up to{" "}
             <strong className="text-ink">{info.perPaymentLimitUsdc} USDC</strong> per payment.
           </li>
-          <li>You can pause every payment or withdraw your balance at any time — nothing here is irreversible.</li>
+          <li>You can pause payments or withdraw your balance at any time. Payments already made are final.</li>
           <li>This runs on {SITE.network}, a testnet. No real funds are at risk.</li>
         </ul>
       </section>
