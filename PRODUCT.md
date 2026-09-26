@@ -45,7 +45,7 @@ All verified, nothing else may be claimed:
 - Human-signed intent (MetaMask) → agent purchase with Jev live: `0xc85d39e616d1dbbd97d66606f12418c92d13843b2a73d5815b841fdd60e2059e`.
 - World ID approval → payment with a valid StepUp attestation: `0xbc77ac5b547301ade87d09651f15f550a2f5b5b3003befa310d5eab9d9280897`; a denied approval refused and restored the budget.
 - Jev live results: key case (clean address, within budget, never requested) refused with matches_intent 0.02; legitimate demo purchase pays; no attack fixture ever paid across repeated runs.
-- `bun run scenarios`: 15/15 end-to-end scenarios pass (legit purchase, key case, provenance and zero-width injection, over budget, expired intent, tampered 402, unknown intent, bad signature, idempotent replay, concurrency, missing context, World ID expiry, pause, revoked intent).
+- `bun run scenarios`: 19/19 end-to-end scenarios pass (legit purchase, key case, provenance and zero-width injection, over budget, expired intent, tampered 402, unknown intent, bad signature, idempotent replay, concurrency, missing context, World ID expiry, pause, revoked intent, and per-mandate agent credentials: missing key, cross-mandate key, revoked key, approval polling).
 - Independent verifier: every on-chain payment traces back to a firewall `pay` receipt.
 - No customers, testimonials, benchmarks, pricing or production deployments exist; never fabricate them.
 
