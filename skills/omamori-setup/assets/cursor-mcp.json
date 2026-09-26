@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "omamorisan": {
+      "url": "https://omamorisan-mcp-8e4dca-91-98-199-240.sslip.io/mcp",
+      "headers": {
+        "Authorization": "Bearer <YOUR_AGENT_KEY>"
+      }
+    }
+  }
+}

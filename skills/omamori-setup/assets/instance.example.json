@@ -1,0 +1,11 @@
+{
+  "mcpUrl": "https://omamorisan-mcp-8e4dca-91-98-199-240.sslip.io/mcp",
+  "services": {
+    "mcp": "https://omamorisan-mcp-8e4dca-91-98-199-240.sslip.io",
+    "site": "https://omamorisan-site-074960-91-98-199-240.sslip.io",
+    "firewall": "https://omamorisan-firewall-e25869-91-98-199-240.sslip.io",
+    "store-giftcards": "https://omamorisan-store-1135aa-91-98-199-240.sslip.io",
+    "store-data": "https://omamorisan-data-da00c3-91-98-199-240.sslip.io",
+    "store-cloud": "https://omamorisan-cloud-ead900-91-98-199-240.sslip.io"
+  }
+}

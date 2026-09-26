@@ -1,0 +1,9 @@
+# Add this block to ~/.codex/config.toml.
+# The token itself never goes in this file: export the env var below in your
+# own shell profile (e.g. ~/.zshrc), then restart Codex.
+[mcp_servers.omamorisan]
+url = "https://omamorisan-mcp-8e4dca-91-98-199-240.sslip.io/mcp"
+bearer_token_env_var = "OMAMORI_AGENT_KEY"
+
+# In your shell profile (not in this file):
+#   export OMAMORI_AGENT_KEY="Bearer <YOUR_AGENT_KEY>"
