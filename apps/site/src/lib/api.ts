@@ -69,8 +69,12 @@ export async function verifySiwe(message: string, signature: Hex): Promise<Verif
   return body;
 }
 
+/** Throws `UnauthorizedError` only when the firewall rejects the token (401);
+ * any other failure (network, 5xx during a redeploy) is a plain `Error`, so
+ * callers can keep the session instead of signing the owner out. */
 export async function fetchMe(sessionToken: string): Promise<{ address: Address; expiresAt: string }> {
   const res = await request("/auth/me", { headers: { authorization: `Bearer ${sessionToken}` } });
+  if (res.status === 401) throw new UnauthorizedError();
   const body = await parseJson<{ address: Address; expiresAt: string }>(res);
   if (!res.ok || !body?.address) throw new Error("session_invalid");
   return body;

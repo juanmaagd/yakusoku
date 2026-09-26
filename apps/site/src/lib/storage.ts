@@ -1,13 +1,16 @@
-// Session-token persistence (P5). `sessionStorage` is a per-viewer convenience
-// only — every access is wrapped in try/catch (private windows, blocked site
-// data, etc. can all throw or silently no-op) so the app still works without
-// it, just asking the signer to sign in again after a refresh.
+// Session-token persistence (P5). `localStorage`, not `sessionStorage`: a
+// session must survive new tabs, links opened from the agent and browser
+// restarts, or every visit asks for a fresh wallet signature. The firewall
+// stays the authority (8h TTL, revocable via logout), so this is only a
+// cache of the bearer token. Every access is wrapped in try/catch (private
+// windows, blocked site data, etc. can all throw or silently no-op) so the
+// app still works without it, just asking the signer to sign in again.
 
-const SESSION_TOKEN_KEY = "omamorisan.sessionToken";
+export const SESSION_TOKEN_KEY = "omamorisan.sessionToken";
 
 export function readSessionToken(): string | undefined {
   try {
-    return sessionStorage.getItem(SESSION_TOKEN_KEY) ?? undefined;
+    return localStorage.getItem(SESSION_TOKEN_KEY) ?? undefined;
   } catch {
     return undefined;
   }
@@ -15,7 +18,7 @@ export function readSessionToken(): string | undefined {
 
 export function writeSessionToken(token: string): void {
   try {
-    sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+    localStorage.setItem(SESSION_TOKEN_KEY, token);
   } catch {
     // Best-effort only — see file header.
   }
@@ -23,7 +26,7 @@ export function writeSessionToken(token: string): void {
 
 export function clearSessionToken(): void {
   try {
-    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    localStorage.removeItem(SESSION_TOKEN_KEY);
   } catch {
     // Best-effort only — see file header.
   }

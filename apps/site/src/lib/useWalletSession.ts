@@ -10,8 +10,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { Address } from "viem";
 import { createSiweMessage } from "viem/siwe";
 import { SITE } from "../config";
-import { fetchMe, fetchNonce, logoutSession, verifySiwe } from "./api";
-import { clearSessionToken, readSessionToken, writeSessionToken } from "./storage";
+import { fetchMe, fetchNonce, logoutSession, UnauthorizedError, verifySiwe } from "./api";
+import { clearSessionToken, readSessionToken, SESSION_TOKEN_KEY, writeSessionToken } from "./storage";
 import { createTargetWalletClient, describeWalletError, ensureTargetChain, getInjectedProvider, TARGET_CHAIN } from "./wallet";
 
 export type WalletSessionStage =
@@ -57,18 +57,39 @@ export function useWalletSession(): WalletSession {
     }
     const storedToken = readSessionToken();
     if (storedToken) {
-      const me = await fetchMe(storedToken).catch(() => undefined);
-      if (me && me.address.toLowerCase() === address.toLowerCase()) {
-        setStage({ kind: "signed-in", address, sessionToken: storedToken });
-        return;
+      try {
+        const me = await fetchMe(storedToken);
+        if (me.address.toLowerCase() === address.toLowerCase()) {
+          setStage({ kind: "signed-in", address, sessionToken: storedToken });
+          return;
+        }
+        // The wallet switched to another account: that one signs in on its own.
+        clearSessionToken();
+      } catch (err) {
+        if (!(err instanceof UnauthorizedError)) {
+          // Firewall unreachable (e.g. mid-redeploy), not a rejected token:
+          // keep the session. A real 401 from any owner-scoped call still
+          // routes back here through `handleUnauthorized`.
+          setStage({ kind: "signed-in", address, sessionToken: storedToken });
+          return;
+        }
+        clearSessionToken();
       }
-      clearSessionToken();
     }
     setStage({ kind: "sign-in", address });
   }, []);
 
   useEffect(() => {
     void evaluate();
+  }, [evaluate]);
+
+  // Keep tabs in step: signing in or out in one tab re-evaluates the others.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === SESSION_TOKEN_KEY || event.key === null) void evaluate();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, [evaluate]);
 
   const connect = useCallback(async () => {
