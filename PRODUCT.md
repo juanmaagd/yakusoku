@@ -32,13 +32,13 @@ Existing guards are deterministic (spend caps, allow/deny lists, network/asset c
 - Testnet only; no mainnet funds. Control endpoints are localhost-guarded, not authenticated.
 - The key-case attack in the demo is a disclosed scripted compromised agent (`bun run attack`), because current LLMs are not fooled on cue.
 - Intercepta live screening pending the sandbox key; without it every payment escalates to World ID.
-- **Product name: "Omamorisan"** (decided Sat Sep 26, "for now"; may still change). Replaces the working name "Yakusoku". User-facing surfaces (site, dashboard, EIP-712 signing domain, agent output, README) use it; internal identifiers (package scope `@yakusoku/*`, repo and folder name) stay until the name is final. Logo: a pen nib with a checkmark ("signed, then verified"), see `apps/site/BRAND.md`.
+- **Product name: "Omamorisan"** (decided Sat Sep 26, "for now"; may still change). Replaces the working name "Yakusoku". User-facing surfaces (site, dashboard, EIP-712 signing domain, agent output, README) use it; internal identifiers (package scope `@yakusoku/*`, repo and folder name) stay until the name is final. Logo: a split circle with a centered vertical slot (the gate); the shipped files in `apps/site/public/brand/` still carry the previous pen-nib mark until the new SVG lands (see `apps/site/BRAND.md`).
 
 ## Brand Commitments
 - Name: Omamorisan (working name, may change).
 - **No Japanese aesthetic**, even though the name is Japanese: no kanji, torii, washi, seals, vermilion-as-Japan, cherry blossoms or similar motifs.
 - **Visual world (decided Sat Sep 26, replaces the warm paper-notebook reference):** sober, modern, security-grade. The builder pinned three reference products as the craft bar: clutch.security (leads: white gallery canvas, hairline-framed column, mixed-weight grotesk headlines, monochrome dithered 3D objects), base.org (technical line diagrams, mono uppercase labels) and neverhack.com (split hero with the live product, trust/evidence rows). Borrow grammar only: never their logos, fonts, exact brand colors or copy. Color is rationed and means state. DESIGN.md records the built system.
-- Use only the existing pen-nib + check mark; never invent another mark or one that implies an existing brand.
+- **Mark (chosen Sat Sep 26, replaces the pen nib + check):** a solid circle split by one centered vertical slot (slot width 10% of the diameter): a gate that only lets the right payment through, and the "o" of omamorisan. Source concept `assets/logo-v2/01-slot.png` (Codex), exact geometry `assets/logo-v2/01-slot.svg` (outside the repo). Never invent another mark or one that implies an existing brand.
 
 ## Evidence on Hand
 All verified, nothing else may be claimed:
