@@ -11,8 +11,8 @@ const links = [
 
 <header class="sticky top-0 z-50 h-16 border-b border-black/[0.08] bg-canvas shadow-nav">
   <div class="mx-auto grid h-16 max-w-[1440px] grid-cols-[auto_1fr_auto] items-center gap-4 px-6 md:px-10">
-    <a href="/" class="text-body font-semibold tracking-[-0.242px] text-ink">
-      {SITE.name}
+    <a href="/" class="flex items-center" aria-label={SITE.name}>
+      <img src="/brand/logo.svg" alt={SITE.name} width="116" height="24" class="h-6 w-auto" />
     </a>
 
     <nav aria-label="Primary" class="hidden justify-center md:flex">

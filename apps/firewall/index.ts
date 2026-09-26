@@ -71,6 +71,7 @@ const DASHBOARD_ASSETS: Record<string, { file: string; contentType: string }> = 
   "/dashboard": { file: "dashboard.html", contentType: "text/html; charset=utf-8" },
   "/dashboard.css": { file: "dashboard.css", contentType: "text/css; charset=utf-8" },
   "/dashboard.js": { file: "dashboard.js", contentType: "application/javascript; charset=utf-8" },
+  "/favicon.svg": { file: "favicon.svg", contentType: "image/svg+xml" },
 };
 
 for (const [route, asset] of Object.entries(DASHBOARD_ASSETS)) {

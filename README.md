@@ -1,3 +1,5 @@
+<img src="docs/brand/logo.svg" alt="Omamorisan" width="280">
+
 # Omamorisan
 
 **A pre-signature firewall for AI agent payments: it only signs a payment when it matches an intent the user actually signed.**
