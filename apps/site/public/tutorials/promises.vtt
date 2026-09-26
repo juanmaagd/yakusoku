@@ -1,0 +1,17 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:13.000
+1. Read the promise list
+Each promise records an authorized task, remaining budget, and expiry. An empty list is normal on a fresh setup. Click New promise to authorize your first task.
+
+00:00:13.000 --> 00:00:26.000
+2. Open its activity
+Choose a promise's Live link to see the decisions for that promise. A remaining budget is permission to spend up to that amount, not money deposited into the firewall wallet.
+
+00:00:26.000 --> 00:00:41.000
+3. Revoke when you are done
+Revoke permanently disables this promise's agent key. Confirm only when you want that agent to stop using it. To temporarily stop all your promises, use Pause all instead. Signing out does not revoke promises.
+
+00:00:41.000 --> 00:00:55.000
+4. If you lost the agent key
+The key is shown only immediately after creation. It cannot be recovered from this list. Revoke the old promise and create a replacement, then update your client's configuration with the new key.

@@ -1,0 +1,133 @@
+From a promise to a protected purchase
+
+Choose how to begin
+On the landing page, use Set up with Claude for the agent-first World ID route. Your agent connects through MCP, and you approve its first connection on your phone. The wallet route remains available through Launch app.
+
+Agent-first setup
+The landing page gives Claude Code a prompt and other clients an MCP URL. Connect once in World App, then approve each task and budget before the agent spends. No agent key needs to be pasted into chat.
+
+Wallet-signed alternative
+At /app, sign in with your browser wallet and create a promise with a task, budget, categories, and expiry. This creates a one-time key for an existing wallet mandate.
+
+Hand the wallet promise to your client
+On the signed-promise screen choose your MCP client, then save its generated configuration in the location shown. This configuration passes the key to MCP without putting it in a model prompt.
+
+Supervise decisions
+The Live page shows payment attempts and reasons. Approve a human check only when the request matches your purchase. Pause all signing or revoke an individual promise to stop future requests.
+
+---
+
+Connect your wallet and sign in
+
+1. Open the app
+Open localhost:4321/app. Have a browser wallet installed and unlocked. Click Connect wallet and choose your account in the wallet popup. Your private key stays in the wallet.
+
+2. Use Base Sepolia
+If the app asks, click Switch network and confirm Base Sepolia in your wallet. This is the test network used here. Return to this tab after approving the switch.
+
+3. Sign the login message
+Click Sign in with wallet and review the message in your wallet. Confirm only the expected localhost domain and account. This signature costs no gas and does not authorize a purchase. The wallet popup is not shown in this example.
+
+4. You should see Promises
+Successful login opens your promises. If you see Could not reach the firewall, start the firewall on port 4001 first. If you reject the wallet prompt, try Sign in with wallet again. Reload after switching wallet accounts.
+
+---
+
+Manage your promises
+
+1. Read the promise list
+Each promise records an authorized task, remaining budget, and expiry. An empty list is normal on a fresh setup. Click New promise to authorize your first task.
+
+2. Open its activity
+Choose a promise's Live link to see the decisions for that promise. A remaining budget is permission to spend up to that amount, not money deposited into the firewall wallet.
+
+3. Revoke when you are done
+Revoke permanently disables this promise's agent key. Confirm only when you want that agent to stop using it. To temporarily stop all your promises, use Pause all instead. Signing out does not revoke promises.
+
+4. If you lost the agent key
+The key is shown only immediately after creation. It cannot be recovered from this list. Revoke the old promise and create a replacement, then update your client's configuration with the new key.
+
+---
+
+Write and sign a promise
+
+1. Describe the purchase
+Click New promise. Write exactly what the agent may buy, for example one 1 USDC Amazon gift card. Be specific about the product and quantity; the firewall compares purchases with this instruction.
+
+2. Set the limits
+Enter the maximum budget in USDC, select Amazon gift cards, and choose an expiry. The example uses 1 USDC and 1 hour. These values limit authorization; they do not fund the payment wallet.
+
+3. Review and sign
+Check the promise preview, then click Sign promise. Your wallet asks you to sign structured TaskIntent data. Unlike login, this signature authorizes purchases under those limits. It does not immediately send a payment.
+
+4. Keep the result screen open
+The firewall returns a Promise ID and a one-time agent key. Follow Connect your agent on this screen before leaving. A lost key cannot be shown again; you would need a replacement promise.
+
+---
+
+Connect your agent without guessing
+
+1. Understand this key
+The agent key lets MCP request payments under this promise. It is not your wallet private key, but it is a secret. Store it in the client configuration, not in a chat message. The example key in this video is deliberately invalid.
+
+2. Choose your agent app
+Select Claude Desktop, Claude Code, Cursor, Codex, VS Code/Copilot, Windsurf/Cascade, or Gemini CLI. Choose the application you use, not the model provider. Instructions and file format change with your selection.
+
+3. Check the local file path
+Confirm the full path to yakusoku/apps/mcp/index.ts. If Bun cannot be found, use command -v bun in Terminal and put that full executable path into Bun executable. Windows PowerShell equivalents appear below the fields.
+
+4. Download the configuration
+Click Download. The generated file already includes this promise's key. Your browser saves it to Downloads; that does not install it. Open the downloaded file in a text editor. Keep it private and out of Git.
+
+5. Save in your client's settings
+For Claude Desktop, open Settings, Developer, Edit Config. On Mac the destination is Library/Application Support/Claude in your home folder; Windows uses APPDATA/Claude. Merge the omamorisan entry into claude_desktop_config.json, then save.
+
+Cursor and Claude Code
+Cursor uses your home folder's .cursor/mcp.json. Claude Code can use .mcp.json in the project folder where you run claude. Each selector option gives the exact destination. Keep other server entries when merging. Do not commit a file containing this key.
+
+Codex uses TOML
+Select Codex to download a TOML section. Merge that section into ~/.codex/config.toml. Do not replace your whole settings file. VS Code has a different JSON shape too: always generate the file for the client you actually use.
+
+VS Code, Gemini, and Cascade
+VS Code: run MCP: Open User Configuration from the Command Palette. Gemini: merge into ~/.gemini/settings.json. Cascade: open its raw MCP configuration from the MCP settings. Follow the selected client's instructions, then restart or refresh it.
+
+6. Check before buying
+Ask your agent to call Omamorisan get_mandate and report the task and remaining budget without buying. Confirm the answer matches this wallet promise. The server also has World ID connection and promise tools; this example uses your existing wallet-signed promise.
+
+Why bun index.ts failed before
+A stdio client launches MCP and passes the key in its environment. You do not start it separately or put the key in .env.local for that setup. For HTTP instead, run bun index.ts --http and configure the client with the URL and Authorization header.
+
+7. Finish the handoff
+After saving and checking the configuration, confirm that you stored the key and choose Open Live. A new promise needs its own key. Restart the MCP client after changing the key so it uses the right promise.
+
+---
+
+Follow decisions and stop an agent
+
+1. Open Live
+After connecting MCP, ask your agent to read the mandate, then request the authorized purchase. Keep this page open. No decisions is normal until a payment request reaches the firewall.
+
+2. Inspect each decision
+Select a decision to inspect its reason and checks. A refusal means no payment was signed. A signed payment is not necessarily settled; look for settlement details and a transaction link when available.
+
+3. Handle a human check
+If the firewall needs you, a World ID approval appears with a code, link, and expiry. Open the link on your phone or scan the QR code. Review and approve or deny there. The agent checks the result before completing the purchase.
+
+4. Stop future signing
+Click Pause all and confirm to pause signing for all your promises. Resume when ready. To permanently disable just one promise, return to Promises and revoke it. These actions do not undo payments that already settled.
+
+5. If purchases cannot proceed
+Fresh wallets need testnet USDC. Jev and Intercepta need API credentials. Missing checks escalate to human approval; that requires World ID credentials too. Local servers running does not mean the full payment flow is configured.
+
+---
+
+Approve or deny a World ID request
+
+1. Review the request
+Check the task, amount, and reason before proceeding. This example shows a simulated approval request, not a real World ID session. Never approve an unexpected purchase.
+
+2. Use your phone
+For a real request, open the displayed verification link or scan its QR code. Enter the code if prompted. Complete the World ID flow and approve or deny the request on that service. Do this before the timer expires.
+
+3. Return to Live
+The dashboard updates as the firewall processes the outcome. Your agent must call check_approval to finish an approved purchase. Denial or expiry prevents that pending purchase; approval alone is not proof of settlement.

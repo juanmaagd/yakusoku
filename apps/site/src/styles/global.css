@@ -4,6 +4,13 @@
 @import "@fontsource-variable/mona-sans/standard.css";
 @import "@fontsource-variable/martian-mono/standard.css";
 
+/* The expanded walkthrough owns the right side, leaving the active page visible. */
+@media (min-width: 1024px) {
+  body.tutorial-side-open {
+    padding-right: min(700px, 48vw);
+  }
+}
+
 @theme {
   /* --- Neutrals --- */
   --color-canvas: #ffffff;

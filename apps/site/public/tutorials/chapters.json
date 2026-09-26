@@ -1,0 +1,217 @@
+{
+  "overview": {
+    "duration": 71,
+    "chapters": [
+      {
+        "title": "Choose how to begin",
+        "start": 0,
+        "duration": 16
+      },
+      {
+        "title": "Agent-first setup",
+        "start": 16,
+        "duration": 16
+      },
+      {
+        "title": "Wallet-signed alternative",
+        "start": 32,
+        "duration": 13
+      },
+      {
+        "title": "Hand the wallet promise to your client",
+        "start": 45,
+        "duration": 13
+      },
+      {
+        "title": "Supervise decisions",
+        "start": 58,
+        "duration": 13
+      }
+    ]
+  },
+  "signin": {
+    "duration": 59,
+    "chapters": [
+      {
+        "title": "1. Open the app",
+        "start": 0,
+        "duration": 13
+      },
+      {
+        "title": "2. Use Base Sepolia",
+        "start": 13,
+        "duration": 13
+      },
+      {
+        "title": "3. Sign the login message",
+        "start": 26,
+        "duration": 17
+      },
+      {
+        "title": "4. You should see Promises",
+        "start": 43,
+        "duration": 16
+      }
+    ]
+  },
+  "promises": {
+    "duration": 55,
+    "chapters": [
+      {
+        "title": "1. Read the promise list",
+        "start": 0,
+        "duration": 13
+      },
+      {
+        "title": "2. Open its activity",
+        "start": 13,
+        "duration": 13
+      },
+      {
+        "title": "3. Revoke when you are done",
+        "start": 26,
+        "duration": 15
+      },
+      {
+        "title": "4. If you lost the agent key",
+        "start": 41,
+        "duration": 14
+      }
+    ]
+  },
+  "create": {
+    "duration": 56,
+    "chapters": [
+      {
+        "title": "1. Describe the purchase",
+        "start": 0,
+        "duration": 14
+      },
+      {
+        "title": "2. Set the limits",
+        "start": 14,
+        "duration": 14
+      },
+      {
+        "title": "3. Review and sign",
+        "start": 28,
+        "duration": 14
+      },
+      {
+        "title": "4. Keep the result screen open",
+        "start": 42,
+        "duration": 14
+      }
+    ]
+  },
+  "connect": {
+    "duration": 173,
+    "chapters": [
+      {
+        "title": "1. Understand this key",
+        "start": 0,
+        "duration": 18
+      },
+      {
+        "title": "2. Choose your agent app",
+        "start": 18,
+        "duration": 13
+      },
+      {
+        "title": "3. Check the local file path",
+        "start": 31,
+        "duration": 14
+      },
+      {
+        "title": "4. Download the configuration",
+        "start": 45,
+        "duration": 15
+      },
+      {
+        "title": "5. Save in your client's settings",
+        "start": 60,
+        "duration": 13
+      },
+      {
+        "title": "Cursor and Claude Code",
+        "start": 73,
+        "duration": 17
+      },
+      {
+        "title": "Codex uses TOML",
+        "start": 90,
+        "duration": 16
+      },
+      {
+        "title": "VS Code, Gemini, and Cascade",
+        "start": 106,
+        "duration": 15
+      },
+      {
+        "title": "6. Check before buying",
+        "start": 121,
+        "duration": 17
+      },
+      {
+        "title": "Why bun index.ts failed before",
+        "start": 138,
+        "duration": 19
+      },
+      {
+        "title": "7. Finish the handoff",
+        "start": 157,
+        "duration": 16
+      }
+    ]
+  },
+  "live": {
+    "duration": 75,
+    "chapters": [
+      {
+        "title": "1. Open Live",
+        "start": 0,
+        "duration": 13
+      },
+      {
+        "title": "2. Inspect each decision",
+        "start": 13,
+        "duration": 14
+      },
+      {
+        "title": "3. Handle a human check",
+        "start": 27,
+        "duration": 18
+      },
+      {
+        "title": "4. Stop future signing",
+        "start": 45,
+        "duration": 15
+      },
+      {
+        "title": "5. If purchases cannot proceed",
+        "start": 60,
+        "duration": 15
+      }
+    ]
+  },
+  "approval": {
+    "duration": 44,
+    "chapters": [
+      {
+        "title": "1. Review the request",
+        "start": 0,
+        "duration": 13
+      },
+      {
+        "title": "2. Use your phone",
+        "start": 13,
+        "duration": 17
+      },
+      {
+        "title": "3. Return to Live",
+        "start": 30,
+        "duration": 14
+      }
+    ]
+  }
+}

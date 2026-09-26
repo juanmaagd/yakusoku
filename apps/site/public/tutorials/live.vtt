@@ -1,0 +1,21 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:13.000
+1. Open Live
+After connecting MCP, ask your agent to read the mandate, then request the authorized purchase. Keep this page open. No decisions is normal until a payment request reaches the firewall.
+
+00:00:13.000 --> 00:00:27.000
+2. Inspect each decision
+Select a decision to inspect its reason and checks. A refusal means no payment was signed. A signed payment is not necessarily settled; look for settlement details and a transaction link when available.
+
+00:00:27.000 --> 00:00:45.000
+3. Handle a human check
+If the firewall needs you, a World ID approval appears with a code, link, and expiry. Open the link on your phone or scan the QR code. Review and approve or deny there. The agent checks the result before completing the purchase.
+
+00:00:45.000 --> 00:01:00.000
+4. Stop future signing
+Click Pause all and confirm to pause signing for all your promises. Resume when ready. To permanently disable just one promise, return to Promises and revoke it. These actions do not undo payments that already settled.
+
+00:01:00.000 --> 00:01:15.000
+5. If purchases cannot proceed
+Fresh wallets need testnet USDC. Jev and Intercepta need API credentials. Missing checks escalate to human approval; that requires World ID credentials too. Local servers running does not mean the full payment flow is configured.
