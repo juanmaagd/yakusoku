@@ -13,5 +13,5 @@ If the app asks, click Switch network and confirm Base Sepolia in your wallet. T
 Click Sign in with wallet and review the message in your wallet. Confirm only the expected localhost domain and account. This signature costs no gas and does not authorize a purchase. The wallet popup is not shown in this example.
 
 00:00:44.000 --> 00:01:00.000
-4. You should see Promises
-Successful login opens your promises. If you see Could not reach the firewall, start the firewall on port 4001 first. If you reject the wallet prompt, try Sign in with wallet again. Reload after switching wallet accounts.
+4. You should see Intents
+Successful login opens your intents. If you see Could not reach the firewall, start the firewall on port 4001 first. If you reject the wallet prompt, try Sign in with wallet again. Reload after switching wallet accounts.

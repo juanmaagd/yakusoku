@@ -6,8 +6,8 @@ The tutorials live on the screens they explain, not on a separate help page.
 | --- | --- |
 | Landing page, after How it works | `overview.mp4` |
 | Wallet sign-in on either app route | `signin.mp4` |
-| Promises list | `promises.mp4` |
-| New promise form | `create.mp4` |
+| Intents list | `promises.mp4` |
+| New intent form | `create.mp4` |
 | One-time agent key handoff | `connect.mp4` |
 | Live dashboard | `live.mp4` |
 | Pending World ID approval | `approval.mp4` |

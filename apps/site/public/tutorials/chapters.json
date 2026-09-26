@@ -18,7 +18,7 @@
         "duration": 13
       },
       {
-        "title": "Hand the wallet promise to your client",
+        "title": "Hand the wallet intent to your client",
         "start": 45,
         "duration": 14
       },
@@ -48,7 +48,7 @@
         "duration": 18
       },
       {
-        "title": "4. You should see Promises",
+        "title": "4. You should see Intents",
         "start": 44,
         "duration": 16
       }
@@ -58,7 +58,7 @@
     "duration": 55,
     "chapters": [
       {
-        "title": "1. Read the promise list",
+        "title": "1. Read the intent list",
         "start": 0,
         "duration": 13
       },

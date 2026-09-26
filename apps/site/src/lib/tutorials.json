@@ -1,6 +1,6 @@
 {
   "overview": {
-    "title": "From a promise to a protected purchase",
+    "title": "From an intent to a protected purchase",
     "steps": [
       {
         "scene": "home",
@@ -15,17 +15,17 @@
       {
         "scene": "signin",
         "title": "Wallet-signed alternative",
-        "text": "At /app, sign in with your browser wallet and create a promise with a task, budget, categories, and expiry. This creates a one-time key for an existing wallet mandate."
+        "text": "At /app, sign in with your browser wallet and create an intent with a task, budget, categories, and expiry. This creates a one-time key for an existing wallet mandate."
       },
       {
         "scene": "connect",
-        "title": "Hand the wallet promise to your client",
-        "text": "On the signed-promise screen choose your MCP client, then save its generated configuration in the location shown. This configuration passes the key to MCP without putting it in a model prompt."
+        "title": "Hand the wallet intent to your client",
+        "text": "On the signed-intent screen choose your MCP client, then save its generated configuration in the location shown. This configuration passes the key to MCP without putting it in a model prompt."
       },
       {
         "scene": "live",
         "title": "Supervise decisions",
-        "text": "The Live page shows payment attempts and reasons. Approve a human check only when the request matches your purchase. Pause all signing or revoke an individual promise to stop future requests."
+        "text": "The Live page shows payment attempts and reasons. Approve a human check only when the request matches your purchase. Pause all signing or revoke an individual intent to stop future requests."
       }
     ]
   },
@@ -49,43 +49,43 @@
       },
       {
         "scene": "promises",
-        "title": "4. You should see Promises",
-        "text": "Successful login opens your promises. If you see Could not reach the firewall, start the firewall on port 4001 first. If you reject the wallet prompt, try Sign in with wallet again. Reload after switching wallet accounts."
+        "title": "4. You should see Intents",
+        "text": "Successful login opens your intents. If you see Could not reach the firewall, start the firewall on port 4001 first. If you reject the wallet prompt, try Sign in with wallet again. Reload after switching wallet accounts."
       }
     ]
   },
   "promises": {
-    "title": "Manage your promises",
+    "title": "Manage your intents",
     "steps": [
       {
         "scene": "promises",
-        "title": "1. Read the promise list",
-        "text": "Each promise records an authorized task, remaining budget, and expiry. An empty list is normal on a fresh setup. Click New promise to authorize your first task."
+        "title": "1. Read the intent list",
+        "text": "Each intent records an authorized task, remaining budget, and expiry. An empty list is normal on a fresh setup. Click New intent to authorize your first task."
       },
       {
         "scene": "promise-list",
         "title": "2. Open its activity",
-        "text": "Choose a promise's Live link to see the decisions for that promise. A remaining budget is permission to spend up to that amount, not money deposited into the firewall wallet."
+        "text": "Choose an intent's Live link to see the decisions for that intent. A remaining budget is permission to spend up to that amount, not money deposited into the firewall wallet."
       },
       {
         "scene": "revoke",
         "title": "3. Revoke when you are done",
-        "text": "Revoke permanently disables this promise's agent key. Confirm only when you want that agent to stop using it. To temporarily stop all your promises, use Pause all instead. Signing out does not revoke promises."
+        "text": "Revoke permanently disables this intent's agent key. Confirm only when you want that agent to stop using it. To temporarily stop all your intents, use Pause all instead. Signing out does not revoke intents."
       },
       {
         "scene": "promise-list",
         "title": "4. If you lost the agent key",
-        "text": "The key is shown only immediately after creation. It cannot be recovered from this list. Revoke the old promise and create a replacement, then update your client's configuration with the new key."
+        "text": "The key is shown only immediately after creation. It cannot be recovered from this list. Revoke the old intent and create a replacement, then update your client's configuration with the new key."
       }
     ]
   },
   "create": {
-    "title": "Write and sign a promise",
+    "title": "Write and sign an intent",
     "steps": [
       {
         "scene": "compose-empty",
         "title": "1. Describe the purchase",
-        "text": "Click New promise. Write exactly what the agent may buy, for example one 1 USDC Amazon gift card. Be specific about the product and quantity; the firewall compares purchases with this instruction."
+        "text": "Click New intent. Write exactly what the agent may buy, for example one 1 USDC Amazon gift card. Be specific about the product and quantity; the firewall compares purchases with this instruction."
       },
       {
         "scene": "compose-filled",
@@ -95,12 +95,12 @@
       {
         "scene": "compose-preview",
         "title": "3. Review and sign",
-        "text": "Check the promise preview, then click Sign promise. Your wallet asks you to sign structured TaskIntent data. Unlike login, this signature authorizes purchases under those limits. It does not immediately send a payment."
+        "text": "Check the intent preview, then click Sign intent. Your wallet asks you to sign structured TaskIntent data. Unlike login, this signature authorizes purchases under those limits. It does not immediately send a payment."
       },
       {
         "scene": "handoff",
         "title": "4. Keep the result screen open",
-        "text": "The firewall returns a Promise ID and a one-time agent key. Follow Connect your agent on this screen before leaving. A lost key cannot be shown again; you would need a replacement promise."
+        "text": "The firewall returns an Intent ID and a one-time agent key. Follow Connect your agent on this screen before leaving. A lost key cannot be shown again; you would need a replacement intent."
       }
     ]
   },
@@ -110,7 +110,7 @@
       {
         "scene": "handoff",
         "title": "1. Understand this key",
-        "text": "The agent key lets MCP request payments under this promise. It is not your wallet private key, but it is a secret. Store it in the client configuration, not in a chat message. The example key in this video is deliberately invalid."
+        "text": "The agent key lets MCP request payments under this intent. It is not your wallet private key, but it is a secret. Store it in the client configuration, not in a chat message. The example key in this video is deliberately invalid."
       },
       {
         "scene": "connect",
@@ -125,7 +125,7 @@
       {
         "scene": "connect-save",
         "title": "4. Download the configuration",
-        "text": "Click Download. The generated file already includes this promise's key. Your browser saves it to Downloads; that does not install it. Open the downloaded file in a text editor. Keep it private and out of Git."
+        "text": "Click Download. The generated file already includes this intent's key. Your browser saves it to Downloads; that does not install it. Open the downloaded file in a text editor. Keep it private and out of Git."
       },
       {
         "scene": "connect-desktop",
@@ -150,7 +150,7 @@
       {
         "scene": "connect-verify",
         "title": "6. Check before buying",
-        "text": "Ask your agent to call Omamorisan get_mandate and report the task and remaining budget without buying. Confirm the answer matches this wallet promise. The server also has World ID connection and promise tools; this example uses your existing wallet-signed promise."
+        "text": "Ask your agent to call Omamori get_mandate and report the task and remaining budget without buying. Confirm the answer matches this wallet intent. The server also has World ID connection and intent tools; this example uses your existing wallet-signed intent."
       },
       {
         "scene": "connect-http",
@@ -160,7 +160,7 @@
       {
         "scene": "handoff-done",
         "title": "7. Finish the handoff",
-        "text": "After saving and checking the configuration, confirm that you stored the key and choose Open Live. A new promise needs its own key. Restart the MCP client after changing the key so it uses the right promise."
+        "text": "After saving and checking the configuration, confirm that you stored the key and choose Open Live. A new intent needs its own key. Restart the MCP client after changing the key so it uses the right intent."
       }
     ]
   },
@@ -185,7 +185,7 @@
       {
         "scene": "pause",
         "title": "4. Stop future signing",
-        "text": "Click Pause all and confirm to pause signing for all your promises. Resume when ready. To permanently disable just one promise, return to Promises and revoke it. These actions do not undo payments that already settled."
+        "text": "Click Pause all and confirm to pause signing for all your intents. Resume when ready. To permanently disable just one intent, return to Intents and revoke it. These actions do not undo payments that already settled."
       },
       {
         "scene": "live",

@@ -2,7 +2,7 @@ WEBVTT
 
 00:00:00.000 --> 00:00:18.000
 1. Understand this key
-The agent key lets MCP request payments under this promise. It is not your wallet private key, but it is a secret. Store it in the client configuration, not in a chat message. The example key in this video is deliberately invalid.
+The agent key lets MCP request payments under this intent. It is not your wallet private key, but it is a secret. Store it in the client configuration, not in a chat message. The example key in this video is deliberately invalid.
 
 00:00:18.000 --> 00:00:32.000
 2. Choose your agent app
@@ -14,7 +14,7 @@ Confirm the full path to yakusoku/apps/mcp/index.ts. If Bun cannot be found, use
 
 00:00:47.000 --> 00:01:03.000
 4. Download the configuration
-Click Download. The generated file already includes this promise's key. Your browser saves it to Downloads; that does not install it. Open the downloaded file in a text editor. Keep it private and out of Git.
+Click Download. The generated file already includes this intent's key. Your browser saves it to Downloads; that does not install it. Open the downloaded file in a text editor. Keep it private and out of Git.
 
 00:01:03.000 --> 00:01:16.000
 5. Save in your client's settings
@@ -34,7 +34,7 @@ VS Code: run MCP: Open User Configuration from the Command Palette. Gemini: merg
 
 00:02:04.000 --> 00:02:21.000
 6. Check before buying
-Ask your agent to call Omamorisan get_mandate and report the task and remaining budget without buying. Confirm the answer matches this wallet promise. The server also has World ID connection and promise tools; this example uses your existing wallet-signed promise.
+Ask your agent to call Omamori get_mandate and report the task and remaining budget without buying. Confirm the answer matches this wallet intent. The server also has World ID connection and intent tools; this example uses your existing wallet-signed intent.
 
 00:02:21.000 --> 00:02:39.000
 Why bun index.ts failed before
@@ -42,4 +42,4 @@ A stdio client launches MCP and passes the key in its environment. You do not st
 
 00:02:39.000 --> 00:02:55.000
 7. Finish the handoff
-After saving and checking the configuration, confirm that you stored the key and choose Open Live. A new promise needs its own key. Restart the MCP client after changing the key so it uses the right promise.
+After saving and checking the configuration, confirm that you stored the key and choose Open Live. A new intent needs its own key. Restart the MCP client after changing the key so it uses the right intent.
