@@ -40,8 +40,10 @@ const SERVER_INSTRUCTIONS =
   "budget, and how long (up to 7 days) — then call request_promise ONCE with them; that single World ID " +
   "approval also connects a new account, so never call connect first. Show the World ID link and code, and any " +
   "setup link, so they can fund the account. Before every purchase, call list_promises and pay with pay_x402 " +
-  "under an active promise that covers it — never request a new promise per item or per task. If nothing " +
-  "covers it, tell the human why and only call request_promise with replaces if they agree to widen the rules. " +
+  "under a promise with usableNow true that covers it (trust its expiresInMinutes and remainingUsdc; never " +
+  "compare dates yourself) — never request a new promise per item or per task. Judge each purchase on its own: " +
+  "buy what fits, and for what does not, tell the human why and only call request_promise with replaces if " +
+  "they agree to widen the rules. " +
   "If pay_x402 returns needs_human_approval, show the link and code and wait, then call check_approval. A " +
   "refusal is final: never retry with different wording.";
 

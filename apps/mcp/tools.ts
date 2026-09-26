@@ -348,6 +348,21 @@ async function fetchPromises(firewallUrl: string, accountKey: string): Promise<P
   return body as PromiseDetail[];
 }
 
+/** Precomputed, timezone-free fields for the agent: a live agent read a UTC
+ * expiry against its own local date and wrongly concluded an active promise
+ * had expired, and atomic `remainingBudget` ("1000000") is easy to misread.
+ * `usableNow` is advisory — the firewall still enforces every rule at /sign. */
+export function withAgentView(promise: PromiseDetail, nowMs = Date.now()) {
+  const expiresInMinutes = Math.max(0, Math.floor((Number(promise.expiry) * 1000 - nowMs) / 60_000));
+  const remainingUsdc = (Number(promise.remainingBudget) / 1_000_000).toFixed(2);
+  return {
+    ...promise,
+    remainingUsdc,
+    expiresInMinutes,
+    usableNow: promise.status === "active" && expiresInMinutes > 0 && Number(promise.remainingBudget) > 0,
+  };
+}
+
 /** Retries the original resource with a firewall-issued signature — shared by
  * `pay_x402`'s immediate `pay` verdict and `check_approval`'s resolved
  * World ID approval. Reports settlement to the firewall best-effort, exactly
@@ -897,8 +912,10 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     {
       description:
         "List every promise (spending rule) on this account (pending, active, or resolved), with remaining " +
-        "budget, categories, and expiry. Check this before every purchase to see whether an active promise " +
-        "already covers it, so pay_x402 can reuse it instead of asking the human for a new one.",
+        "budget, categories, and expiry. Each promise also carries precomputed remainingUsdc, expiresInMinutes " +
+        "and usableNow — trust these instead of comparing dates yourself. Check this before every purchase to " +
+        "see whether a usable promise already covers it, so pay_x402 can reuse it instead of asking the human " +
+        "for a new one. Judge each purchase on its own: buy what fits, then report what does not.",
       inputSchema: {},
     },
     async () => {
@@ -909,7 +926,8 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
               "rules and create the account (or connect if the human already has one).",
           );
         }
-        return ok(await fetchPromises(config.firewallUrl, session.getAgentKey()));
+        const promises = await fetchPromises(config.firewallUrl, session.getAgentKey());
+        return ok(promises.map((promise) => withAgentView(promise)));
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }

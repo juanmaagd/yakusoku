@@ -9,7 +9,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createSessionState, noCredentialMessage, type CredentialRef } from "./session";
-import { noPendingPurchaseMessage, registerTools } from "./tools";
+import { noPendingPurchaseMessage, registerTools, withAgentView } from "./tools";
 
 const ORIGINAL_FETCH = globalThis.fetch;
 afterEach(() => {
@@ -313,5 +313,32 @@ describe("pay_x402 — Jev intent-mismatch refusal hint (promise-replacement fix
     const body = await payAndRefuseWithReason("funding: insufficient_funds: balance too low");
     expect(body.actionableHint).toBeDefined();
     expect(body.actionableHint).not.toContain("request_promise");
+  });
+});
+
+describe("withAgentView — timezone-free fields for list_promises", () => {
+  const base = {
+    id: "promise_1",
+    task: "Amazon gift cards only",
+    status: "active",
+    budget: "3000000",
+    remainingBudget: "2000000",
+    categories: ["gift_card:amazon"],
+    createdAt: "2026-09-26T15:00:00.000Z",
+    summary: "Approve ...",
+  };
+  const now = Date.UTC(2026, 8, 26, 16, 0, 0);
+
+  test("reports minutes left and decimal USDC for a live promise", () => {
+    const view = withAgentView({ ...base, expiry: String(now / 1000 + 42 * 60) }, now);
+    expect(view.expiresInMinutes).toBe(42);
+    expect(view.remainingUsdc).toBe("2.00");
+    expect(view.usableNow).toBe(true);
+  });
+
+  test("marks an expired or exhausted promise as not usable", () => {
+    expect(withAgentView({ ...base, expiry: String(now / 1000 - 60) }, now).usableNow).toBe(false);
+    expect(withAgentView({ ...base, expiry: String(now / 1000 + 600), remainingBudget: "0" }, now).usableNow).toBe(false);
+    expect(withAgentView({ ...base, status: "revoked", expiry: String(now / 1000 + 600) }, now).usableNow).toBe(false);
   });
 });
