@@ -1,48 +1,23 @@
 ---
-// The hero's signature artifact: one purchase, told end to end — the
-// request the human made, the agent's own attempt refused mid-story, and
-// the purchase that actually matches. This owns the landing's one
+// The hero's signature artifact, kept to two lines so the key art stays
+// visible: the item the agent was talked into, refused, and the item you
+// asked for, paid. This owns the landing's one
 // authored motion sequence (DESIGN.md's One-Shadow / one-sequence rule) —
 // the Security section reuses the diff technique below in its final,
 // unanimated state, never a second sequence.
 ---
 
-<figure id="errand" class="errand rounded-card border border-hairline bg-surface shadow-console" aria-label="One purchase, from request to receipt">
-  <dl class="e-row e-request border-b border-hairline px-5 pt-4 pb-3">
-    <dt class="label text-stone">You asked</dt>
-    <dd class="mt-1.5 text-body text-ink">A 25&nbsp;USDC Amazon gift card for my sister's birthday.</dd>
-  </dl>
-
+<figure id="errand" class="errand rounded-card border border-hairline bg-surface shadow-console" aria-label="Your agent's purchase: the wrong item refused, the right one paid">
   <ol class="divide-y divide-hairline">
-    <li class="e-row e-step px-5 py-3" style="--i: 0">
-      <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-        <span class="state-tag bg-verified-wash text-verified">approved</span>
-        <p class="text-body text-ink">Intent · Amazon gift card · 25&nbsp;USDC · 24&nbsp;h</p>
-      </div>
-      <p class="mt-1.5 text-body-sm text-graphite">One tap in World App</p>
+    <li class="e-row e-step e-step-refuse flex items-center gap-2.5 px-4 py-3" style="--i: 0">
+      <span class="state-tag bg-refuse-wash text-refuse-ink">refused</span>
+      <p class="text-body text-ink"><mark class="p-diff">Steam</mark> gift card · 25&nbsp;USDC</p>
     </li>
-
-    <li class="e-row e-step e-step-refuse px-5 py-3" style="--i: 1">
-      <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-        <span class="state-tag bg-refuse-wash text-refuse-ink">refused</span>
-        <p class="text-body text-ink"><mark class="p-diff">Steam</mark> gift card · 25&nbsp;USDC</p>
-      </div>
-      <p class="mt-1.5 text-body-sm text-graphite">Suggested by the store's promo copy — not what you asked. Nothing paid.</p>
-    </li>
-
-    <li class="e-row e-step px-5 py-3" style="--i: 2">
-      <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-        <span class="state-tag bg-verified-wash text-verified">paid</span>
-        <p class="text-body text-ink">Amazon gift card · 25&nbsp;USDC</p>
-      </div>
-      <p class="mt-1.5 text-body-sm text-graphite">Receipt sent · code delivered to you</p>
+    <li class="e-row e-step flex items-center gap-2.5 px-4 py-3" style="--i: 1">
+      <span class="state-tag bg-verified-wash text-verified">paid</span>
+      <p class="text-body text-ink">Amazon gift card · 25&nbsp;USDC</p>
     </li>
   </ol>
-
-  <div class="e-row e-footer flex items-center justify-between border-t border-hairline px-5 py-3">
-    <span class="label text-stone">Budget left</span>
-    <span class="font-mono text-body text-ink tabular-nums">0&nbsp;USDC</span>
-  </div>
 </figure>
 
 <button type="button" id="errand-replay" class="replay label mt-3 inline-flex items-center gap-1.5 rounded-sm px-1.5 py-1 text-graphite">
@@ -61,6 +36,7 @@
     padding: 0 2px;
     margin: 0 -2px;
     color: inherit;
+    background-color: transparent;
     background-image:
       linear-gradient(var(--color-refuse), var(--color-refuse)),
       linear-gradient(var(--color-refuse-wash), var(--color-refuse-wash));
@@ -90,17 +66,11 @@
       opacity 380ms var(--ease-out-soft),
       transform 380ms var(--ease-out-soft);
   }
-  :global(.js) .errand .e-request {
-    transition-delay: 0ms;
-  }
   :global(.js) .errand .e-step {
     transition-delay: calc(300ms + var(--i) * 380ms);
   }
   :global(.js) .errand .e-step-refuse .p-diff {
     transition: background-size 420ms var(--ease-out-soft) calc(300ms + var(--i) * 380ms + 260ms);
-  }
-  :global(.js) .errand .e-footer {
-    transition-delay: 1450ms;
   }
 
   :global(.js) .errand:not(.is-played) .e-row {
