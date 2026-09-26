@@ -1,16 +1,24 @@
-// Mandate credential — the agent's bearer key (Phase 2, WU-P1). `POST
-// /intents` mints one per intent (`generateAgentKey`) and returns it exactly
-// once in its 201 response; the firewall only ever persists its SHA-256
-// hash (`hashAgentKey`, store.ts's `intents.agent_key_hash` column), never
-// the raw value. Every later `Authorization: Bearer <agentKey>` request
-// re-hashes the presented key and compares it against stored hashes with
-// `hashesEqual`, a constant-time comparison, so a timing side-channel can't
-// help an attacker narrow down a valid key.
+// Bearer tokens — two distinct kinds share this file's crypto primitives but
+// never share a prefix or a store table:
+//  - the agent's mandate credential (Phase 2, WU-P1), `yk_...`. `POST
+//    /intents` mints one per intent (`generateAgentKey`) and returns it
+//    exactly once in its 201 response.
+//  - a SIWE session token (WU-P3), `ys_...`. `POST /auth/verify` mints one
+//    per successful sign-in (`generateSessionToken`) and returns it exactly
+//    once too.
+// Either way, the firewall only ever persists the SHA-256 hash (store.ts's
+// `intents.agent_key_hash` / `sessions.token_hash` columns), never the raw
+// value. Every later `Authorization: Bearer <token>` request re-hashes the
+// presented token and compares it against stored hashes with `hashesEqual`,
+// a constant-time comparison, so a timing side-channel can't help an
+// attacker narrow down a valid token.
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 const AGENT_KEY_PREFIX = "yk_";
 const AGENT_KEY_RANDOM_BYTES = 32;
+const SESSION_TOKEN_PREFIX = "ys_";
+const SESSION_TOKEN_RANDOM_BYTES = 32;
 
 /** Generates a fresh mandate credential: `yk_` + 32 random bytes, base64url
  * encoded. Never logged or persisted in plaintext — see the file header. */
@@ -22,6 +30,20 @@ export function generateAgentKey(): string {
  * compared against on every authenticated request. Not reversible. */
 export function hashAgentKey(key: string): string {
   return createHash("sha256").update(key).digest("hex");
+}
+
+/** Generates a fresh SIWE session token: `ys_` + 32 random bytes, base64url
+ * encoded — distinct prefix from `yk_` agent keys so the two token kinds are
+ * never mistaken for one another even before either is hashed or looked up. */
+export function generateSessionToken(): string {
+  return `${SESSION_TOKEN_PREFIX}${randomBytes(SESSION_TOKEN_RANDOM_BYTES).toString("base64url")}`;
+}
+
+/** SHA-256 hex digest of a session token — same algorithm as `hashAgentKey`,
+ * kept as its own named function so the two token kinds stay conceptually
+ * distinct in every call site that hashes one. */
+export function hashSessionToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 /** Constant-time comparison of two hex-encoded SHA-256 hashes. Different

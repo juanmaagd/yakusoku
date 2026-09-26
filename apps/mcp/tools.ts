@@ -72,6 +72,7 @@ async function fetchMandate(firewallUrl: string, agentKey: string): Promise<Mand
  * either way. */
 async function completePayment(
   firewallUrl: string,
+  agentKey: string,
   resourceUrl: string,
   paymentSignature: string,
   receiptId: string,
@@ -108,12 +109,13 @@ async function completePayment(
  * finish the purchase later; `refuse` is terminal — never retried around. */
 async function handleSignVerdict(
   firewallUrl: string,
+  agentKey: string,
   resourceUrl: string,
   sign: SignResponse,
 ): Promise<Record<string, unknown>> {
   if (sign.verdict === "pay") {
     if (!sign.paymentSignature) throw new Error("firewall verdict was pay but returned no signature");
-    return completePayment(firewallUrl, resourceUrl, sign.paymentSignature, sign.receiptId);
+    return completePayment(firewallUrl, agentKey, resourceUrl, sign.paymentSignature, sign.receiptId);
   }
   if (sign.verdict === "ask_human") {
     pendingPayments.set(sign.receiptId, { url: resourceUrl });
@@ -229,7 +231,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         if (!signRes.ok || !signBody) {
           return fail(`firewall /sign failed: HTTP ${signRes.status} ${JSON.stringify(signBody)}`);
         }
-        return ok(await handleSignVerdict(config.firewallUrl, url, signBody));
+        return ok(await handleSignVerdict(config.firewallUrl, agentKey, url, signBody));
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
@@ -272,7 +274,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
                 "it (pay_x402 must have started it in this same process).",
             );
           }
-          const result = await completePayment(config.firewallUrl, pending.url, body.paymentSignature, receiptId);
+          const result = await completePayment(config.firewallUrl, agentKey, pending.url, body.paymentSignature, receiptId);
           pendingPayments.delete(receiptId);
           return ok(result);
         }

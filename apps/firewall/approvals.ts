@@ -33,6 +33,7 @@ import { signStepUpAttestation } from "./step-up";
 import {
   getControlState,
   getIntent,
+  getOwnerControl,
   getPendingApprovalByReceiptId,
   getReceipt,
   listPendingApprovalsByStatus,
@@ -350,6 +351,14 @@ export async function settleApproved(approval: PendingApproval, claims: FreshApp
   }
   if (intent.revoked) {
     await settleRefused(approval, "revoked", "intent revoked", "world_id_denied");
+    return;
+  }
+  // WU-P3: same re-check for a per-owner pause landed while this approval was
+  // in flight — independent of the global kill switch above.
+  const ownerControl = getOwnerControl(intent.signer);
+  if (ownerControl.paused) {
+    const reason = ownerControl.reason ? `paused by owner: ${ownerControl.reason}` : "paused by owner";
+    await settleRefused(approval, "paused", reason, "world_id_denied");
     return;
   }
 

@@ -33,7 +33,9 @@ function requireEnv(name: string): string {
 
 const account = privateKeyToAccount(requireEnv("FIREWALL_PRIVATE_KEY") as Hex);
 
-const publicClient = createPublicClient({
+// Exported so siwe.ts can reuse the same RPC-backed client for
+// `verifySiweMessage` (also ERC-6492-aware) instead of standing up a second one.
+export const publicClient = createPublicClient({
   chain: baseSepolia,
   transport: http(process.env.BASE_SEPOLIA_RPC_URL),
 });

@@ -255,7 +255,9 @@ async function checkAttestation(receipt: DecisionReceipt, expectedSigner: Addres
 // --- firewall reads ------------------------------------------------------------
 
 async function fetchReceipts(firewallUrl: string, last: number): Promise<DecisionReceipt[]> {
-  const res = await fetch(`${firewallUrl}/receipts?limit=${last}`);
+  // Operator read: the auditor runs next to the firewall and needs every
+  // owner's receipts (owner sessions only see their own since P3).
+  const res = await fetch(`${firewallUrl}/receipts?limit=${last}`, { headers: { "x-yakusoku-admin": "1" } });
   if (!res.ok) throw new Error(`GET ${firewallUrl}/receipts failed: ${res.status} ${res.statusText}`);
   return (await res.json()) as DecisionReceipt[];
 }

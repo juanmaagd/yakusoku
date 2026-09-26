@@ -66,6 +66,7 @@ import {
   getCachedSignOutcome,
   getControlState,
   getIntent,
+  getOwnerControl,
   getPendingApprovalByPaymentIdentifier,
   recordSpend,
   type StoredIntent,
@@ -148,6 +149,14 @@ function checkPolicy(
   // switch, there's no "unrevoke") — check it here so the refusal is cached
   // like any other policy rejection.
   if (intent.revoked) return { ok: false, reason: "intent revoked" };
+  // WU-P3: per-owner pause — independent of the global kill switch (checked
+  // separately, before this function ever runs). Checked here so it refuses
+  // the same way "intent revoked" does, and is cached like any other policy
+  // rejection.
+  const ownerControl = getOwnerControl(intent.signer);
+  if (ownerControl.paused) {
+    return { ok: false, reason: ownerControl.reason ? `paused by owner: ${ownerControl.reason}` : "paused by owner" };
+  }
   const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
   if (intent.message.expiry <= nowSeconds) return { ok: false, reason: "intent expired" };
   if (requirement.network !== X402_NETWORK) {

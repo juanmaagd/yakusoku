@@ -8,6 +8,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { generateSiweNonce } from "viem/siwe";
 import {
   decisionReceiptSchema,
   stringifyWithBigint,
@@ -16,7 +17,7 @@ import {
   type TaskIntentMessage,
   type Verdict,
 } from "@yakusoku/shared";
-import { generateAgentKey, hashAgentKey, hashesEqual } from "./auth";
+import { generateAgentKey, generateSessionToken, hashAgentKey, hashSessionToken, hashesEqual } from "./auth";
 
 export interface StoredIntent {
   id: string;
@@ -134,6 +135,26 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS pending_approvals_status ON pending_approvals (status);
   CREATE TABLE IF NOT EXISTS control (
     id INTEGER PRIMARY KEY CHECK (id = 1),
+    paused INTEGER NOT NULL DEFAULT 0,
+    paused_at TEXT,
+    reason TEXT
+  );
+  CREATE TABLE IF NOT EXISTS siwe_nonces (
+    nonce TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    address TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS sessions_address ON sessions (address);
+  CREATE TABLE IF NOT EXISTS owner_control (
+    address TEXT PRIMARY KEY,
     paused INTEGER NOT NULL DEFAULT 0,
     paused_at TEXT,
     reason TEXT
@@ -420,4 +441,126 @@ export function setControlState(paused: boolean, reason?: string): ControlState 
     $reason: paused ? (reason ?? null) : null,
   });
   return getControlState();
+}
+
+// --- SIWE nonces (WU-P3) -----------------------------------------------------
+
+const SIWE_NONCE_TTL_MS = 5 * 60_000;
+
+const insertNonceStmt = db.prepare(
+  `INSERT INTO siwe_nonces (nonce, created_at, expires_at, used) VALUES ($nonce, $createdAt, $expiresAt, 0)`,
+);
+const getNonceStmt = db.prepare(`SELECT expires_at, used FROM siwe_nonces WHERE nonce = $nonce`);
+const markNonceUsedStmt = db.prepare(`UPDATE siwe_nonces SET used = 1 WHERE nonce = $nonce`);
+
+/** Mints a single-use SIWE (EIP-4361) nonce, valid for 5 minutes. */
+export function createNonce(): { nonce: string; expiresAt: string } {
+  const nonce = generateSiweNonce();
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + SIWE_NONCE_TTL_MS);
+  insertNonceStmt.run({ $nonce: nonce, $createdAt: createdAt.toISOString(), $expiresAt: expiresAt.toISOString() });
+  return { nonce, expiresAt: expiresAt.toISOString() };
+}
+
+/** Marks a nonce used iff it exists, is unused, and hasn't expired —
+ * synchronous read-then-write, so no `await` can interleave another request
+ * in between (same concurrency model `recordSpend` relies on above). Returns
+ * `false` for an unknown, already-used, or expired nonce, so `POST
+ * /auth/verify` rejects a replay of an already-consumed nonce (S22). */
+export function consumeNonce(nonce: string): boolean {
+  const row = getNonceStmt.get({ $nonce: nonce }) as { expires_at: string; used: number } | null;
+  if (!row || row.used) return false;
+  if (new Date(row.expires_at).getTime() < Date.now()) return false;
+  markNonceUsedStmt.run({ $nonce: nonce });
+  return true;
+}
+
+// --- SIWE sessions (WU-P3) ---------------------------------------------------
+
+const SESSION_TTL_MS = 8 * 60 * 60_000;
+
+const insertSessionStmt = db.prepare(
+  `INSERT INTO sessions (token_hash, address, created_at, expires_at, revoked) VALUES ($tokenHash, $address, $createdAt, $expiresAt, 0)`,
+);
+const getSessionStmt = db.prepare(`SELECT address, expires_at, revoked FROM sessions WHERE token_hash = $tokenHash`);
+const revokeSessionStmt = db.prepare(`UPDATE sessions SET revoked = 1 WHERE token_hash = $tokenHash`);
+
+export interface Session {
+  address: `0x${string}`;
+  expiresAt: string;
+}
+
+/** Mints a fresh SIWE session (8h TTL) for an address that just proved
+ * control of its wallet (`siwe.ts`'s `verifySiweSignIn`). The raw token is
+ * returned exactly once (`POST /auth/verify`'s response); only its SHA-256
+ * hash is persisted — same pattern as the WU-P1 agent key. */
+export function createSession(address: `0x${string}`): { token: string; expiresAt: string } {
+  const token = generateSessionToken();
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + SESSION_TTL_MS);
+  insertSessionStmt.run({
+    $tokenHash: hashSessionToken(token),
+    $address: address,
+    $createdAt: createdAt.toISOString(),
+    $expiresAt: expiresAt.toISOString(),
+  });
+  return { token, expiresAt: expiresAt.toISOString() };
+}
+
+/** Looks up a session by its raw token — hashes it and looks the hash up by
+ * its indexed primary key (sessions are short-lived and per-login, unlike
+ * the small fixed set of mandate keys `findIntentByAgentKey` scans with a
+ * constant-time loop). Returns `undefined` for an unknown, revoked, or
+ * expired session, so every caller gets a single "not a valid session" outcome. */
+export function getSessionByToken(token: string): Session | undefined {
+  const row = getSessionStmt.get({ $tokenHash: hashSessionToken(token) }) as
+    | { address: string; expires_at: string; revoked: number }
+    | null;
+  if (!row || row.revoked) return undefined;
+  if (new Date(row.expires_at).getTime() < Date.now()) return undefined;
+  return { address: row.address as `0x${string}`, expiresAt: row.expires_at };
+}
+
+/** Idempotent: revoking an unknown or already-revoked token is a no-op. */
+export function revokeSession(token: string): void {
+  revokeSessionStmt.run({ $tokenHash: hashSessionToken(token) });
+}
+
+// --- Per-owner pause (WU-P3) --------------------------------------------------
+//
+// Independent of the global kill switch (`getControlState`/`setControlState`
+// above): a paused owner blocks only their own mandates' `/sign` calls
+// (pipeline.ts's `checkPolicy`), while every other owner keeps signing
+// normally. Keyed by lowercased address so a checksum-cased and lowercase
+// lookup for the same wallet always hit the same row.
+
+export interface OwnerControlState {
+  paused: boolean;
+  pausedAt?: string;
+  reason?: string;
+}
+
+const getOwnerControlStmt = db.prepare(`SELECT paused, paused_at, reason FROM owner_control WHERE address = $address`);
+const upsertOwnerControlStmt = db.prepare(
+  `INSERT INTO owner_control (address, paused, paused_at, reason) VALUES ($address, $paused, $pausedAt, $reason)
+   ON CONFLICT(address) DO UPDATE SET paused = excluded.paused, paused_at = excluded.paused_at, reason = excluded.reason`,
+);
+
+/** Defaults to not-paused for an owner with no row yet. */
+export function getOwnerControl(address: string): OwnerControlState {
+  const row = getOwnerControlStmt.get({ $address: address.toLowerCase() }) as
+    | { paused: number; paused_at: string | null; reason: string | null }
+    | null;
+  if (!row) return { paused: false };
+  return { paused: Boolean(row.paused), pausedAt: row.paused_at ?? undefined, reason: row.reason ?? undefined };
+}
+
+export function setOwnerControl(address: string, paused: boolean, reason?: string): OwnerControlState {
+  upsertOwnerControlStmt.run({
+    $address: address.toLowerCase(),
+    $paused: paused ? 1 : 0,
+    $pausedAt: paused ? new Date().toISOString() : null,
+    $reason: paused ? (reason ?? null) : null,
+  });
+  return getOwnerControl(address);
 }

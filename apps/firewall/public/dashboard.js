@@ -404,7 +404,9 @@ async function fetchApproval(receiptId) {
 
 async function refreshIntents() {
   try {
-    const res = await fetch("/intents");
+    // WU-P3: /intents is now owner-scoped — the dashboard identifies itself
+    // as the local operator the same way it already does for pause/resume/revoke.
+    const res = await fetch("/intents", { headers: ADMIN_HEADERS });
     if (!res.ok) return;
     const intents = await res.json();
     state.intents = new Map(intents.map((i) => [i.id, i]));
@@ -415,7 +417,12 @@ async function refreshIntents() {
 }
 
 async function loadInitial() {
-  const [receiptsRes, intentsRes] = await Promise.all([fetch("/receipts?limit=50"), fetch("/intents")]);
+  // WU-P3: /receipts and /intents are now owner-scoped — same local-operator
+  // identification as everywhere else in this file.
+  const [receiptsRes, intentsRes] = await Promise.all([
+    fetch("/receipts?limit=50", { headers: ADMIN_HEADERS }),
+    fetch("/intents", { headers: ADMIN_HEADERS }),
+  ]);
   if (receiptsRes.ok) {
     const receipts = await receiptsRes.json();
     for (const r of receipts) state.receipts.set(r.receiptId, r);
@@ -457,7 +464,10 @@ function connectSSE() {
     reconnectTimer = null;
   }
   setConnStatus("connecting");
-  eventSource = new EventSource("/events");
+  // WU-P3: /events is now split operator-vs-owner; EventSource can't send
+  // headers, so the dashboard identifies itself as the local operator via
+  // this query param instead (still gated on a loopback connection server-side).
+  eventSource = new EventSource("/events?admin=1");
 
   eventSource.addEventListener("open", () => setConnStatus("connected"));
 

@@ -14,30 +14,47 @@ import type { Hex } from "viem";
 import { signedTaskIntentSchema, transition, X402_NETWORK, type DecisionReceipt } from "@yakusoku/shared";
 import {
   createIntent,
+  createNonce,
+  createSession,
   findIntentByAgentKey,
   getControlState,
   getIntent,
+  getOwnerControl,
   getPendingApprovalByReceiptId,
   getReceipt,
+  getSessionByToken,
   listIntents,
   listReceipts,
   remainingBudget,
   revokeIntent,
+  revokeSession,
   saveReceipt,
   setControlState,
+  setOwnerControl,
   type StoredIntent,
 } from "./store";
 import { extractBearerToken } from "./auth";
 import { verifyTaskIntentSignature } from "./signer";
+import { verifySiweSignIn } from "./siwe";
 import { computePaymentIdentifier, runSignPipeline } from "./pipeline";
 import { approvalStatusResponse, resumePendingApprovalsOnBoot } from "./approvals";
-import { publish, subscribe } from "./events-bus";
+import { publish, subscribe, type FirewallEvent } from "./events-bus";
 
 const PORT = Number(process.env.PORT) || 4001;
 const SSE_HEARTBEAT_MS = 15_000;
 
 const app = new Hono();
-app.use("/*", cors());
+
+// --- CORS (WU-P3) ------------------------------------------------------------
+// The site (a separate origin) needs the Authorization header for session
+// Bearer calls; the dashboard is same-origin (served off this same process)
+// so it never goes through CORS at all. Env-configurable so a deployed site
+// origin doesn't require a code change.
+const SITE_ORIGINS = (process.env.OMAMORISAN_SITE_ORIGINS ?? "http://localhost:4321")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+app.use("/*", cors({ origin: SITE_ORIGINS, allowHeaders: ["Content-Type", "Authorization", "x-yakusoku-admin"] }));
 
 app.onError((err, c) => {
   console.error("unhandled error", err);
@@ -63,6 +80,46 @@ for (const [route, asset] of Object.entries(DASHBOARD_ASSETS)) {
     return new Response(file, { headers: { "Content-Type": asset.contentType } });
   });
 }
+
+// --- SIWE sign-in (WU-P3) -----------------------------------------------------
+// The site authenticates a wallet owner (not an agent — see the WU-P1 vs
+// WU-P3 auth note further below) with EIP-4361: fetch a nonce, sign a
+// message embedding it, exchange the signed message for a session token.
+
+app.get("/auth/nonce", (c) => c.json(createNonce()));
+
+const authVerifySchema = z.object({
+  message: z.string().min(1),
+  signature: z.string().regex(/^0x[0-9a-fA-F]+$/, "not a hex signature"),
+});
+
+app.post("/auth/verify", async (c) => {
+  const body = await c.req.json().catch(() => undefined);
+  const parsed = authVerifySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_auth_request", issues: parsed.error.issues }, 400);
+  }
+  const result = await verifySiweSignIn(parsed.data.message, parsed.data.signature as Hex);
+  if (!result.ok) {
+    return c.json({ error: "invalid_signature", message: result.reason }, 401);
+  }
+  const { token, expiresAt } = createSession(result.address);
+  return c.json({ sessionToken: token, address: result.address, expiresAt });
+});
+
+app.post("/auth/logout", (c) => {
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const token = extractBearerToken(c.req.header("authorization"));
+  if (token) revokeSession(token);
+  return c.json({ ok: true });
+});
+
+app.get("/auth/me", (c) => {
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  return c.json({ address: auth.address, expiresAt: auth.expiresAt });
+});
 
 function serializeIntent(intent: StoredIntent) {
   return {
@@ -102,6 +159,36 @@ function requireLocalAdmin(c: Context, next: Next) {
     return c.json({ error: "forbidden" }, 403);
   }
   return next();
+}
+
+/** `GET /events` variant of `isLocalAdminRequest` (WU-P3): `EventSource`
+ * cannot set custom headers, so the operator dashboard's SSE connection is
+ * distinguished by a `?admin=1` query param instead — still gated on the
+ * same loopback check, still not cryptographic, just enough to keep a
+ * random local process from opening the unfiltered stream. */
+function isLocalAdminEventsRequest(c: Context): boolean {
+  const address = getConnInfo(c).remote.address ?? "";
+  const isLoopback = address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1" || address.startsWith("127.");
+  return isLoopback && c.req.query("admin") === "1";
+}
+
+// --- WU-P3 SIWE session auth --------------------------------------------------
+//
+// A session token authenticates the SITE on behalf of one wallet owner — a
+// distinct concept from the WU-P1 agent mandate key (`authenticateAgent`
+// above): a session identifies a human owner across all their mandates,
+// while a mandate key identifies one agent's authority over one intent.
+
+type SessionAuthResult =
+  | { ok: true; address: `0x${string}`; expiresAt: string }
+  | { ok: false; status: 401; body: { error: "unauthorized" } };
+
+function authenticateSession(c: Context): SessionAuthResult {
+  const token = extractBearerToken(c.req.header("authorization"));
+  if (!token) return { ok: false, status: 401, body: { error: "unauthorized" } };
+  const session = getSessionByToken(token);
+  if (!session) return { ok: false, status: 401, body: { error: "unauthorized" } };
+  return { ok: true, address: session.address, expiresAt: session.expiresAt };
 }
 
 // --- WU-P1 mandate credential auth -------------------------------------------
@@ -164,9 +251,22 @@ app.post("/intents", async (c) => {
   return c.json({ id: intent.id, remainingBudget: remainingBudget(intent).toString(), agentKey }, 201);
 });
 
-// --- GET /intents ----------------------------------------------------------
+// --- GET /intents (WU-P3 owner-scoped) --------------------------------------
+// The operator header path (loopback + `x-yakusoku-admin`) keeps full
+// visibility for the legacy `/dashboard`; every other caller needs a valid
+// SIWE session and only ever sees intents it signed.
 
-app.get("/intents", (c) => c.json(listIntents().map(serializeIntent)));
+app.get("/intents", (c) => {
+  if (isLocalAdminRequest(c)) return c.json(listIntents().map(serializeIntent));
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const owner = auth.address.toLowerCase();
+  return c.json(
+    listIntents()
+      .filter((i) => i.signer.toLowerCase() === owner)
+      .map(serializeIntent),
+  );
+});
 
 // --- GET /intents/:id ----------------------------------------------------
 
@@ -176,19 +276,31 @@ app.get("/intents/:id", (c) => {
   return c.json(serializeIntent(intent));
 });
 
-// --- POST /intents/:id/revoke (WU13) ----------------------------------------
+// --- POST /intents/:id/revoke (WU13, WU-P3 owner path) ----------------------
 // Permanent: no "unrevoke". Future `/sign` for this intent refuses through
 // the existing `policy` check (pipeline.ts's `checkPolicy`) with reason
 // "intent revoked"; a World ID approval already in flight for it is
 // re-checked right before signing (approvals.ts) instead of slipping
-// through late.
+// through late. Two ways in: the operator (loopback + admin header, full
+// authority, unchanged since WU13) or the mandate's own owner via a SIWE
+// session — which may only ever revoke a mandate it signed itself (403
+// otherwise).
 
-app.post("/intents/:id/revoke", requireLocalAdmin, (c) => {
-  // The untyped `Context` in `requireLocalAdmin`'s signature widens Hono's
-  // route-param inference here, so `param("id")` types as possibly
-  // undefined even though the route can't match without it.
+app.post("/intents/:id/revoke", async (c) => {
   const id = c.req.param("id");
-  const intent = id ? revokeIntent(id) : undefined;
+  if (!id) return c.json({ error: "intent_not_found" }, 404);
+
+  if (!isLocalAdminRequest(c)) {
+    const auth = authenticateSession(c);
+    if (!auth.ok) return c.json(auth.body, auth.status);
+    const target = getIntent(id);
+    if (!target) return c.json({ error: "intent_not_found" }, 404);
+    if (target.signer.toLowerCase() !== auth.address.toLowerCase()) {
+      return c.json({ error: "forbidden" }, 403);
+    }
+  }
+
+  const intent = revokeIntent(id);
   if (!intent) return c.json({ error: "intent_not_found" }, 404);
   const serialized = serializeIntent(intent);
   publish("intent.revoked", serialized);
@@ -216,6 +328,35 @@ app.post("/control/resume", requireLocalAdmin, (c) => {
   const control = setControlState(false);
   publish("control.changed", control);
   return c.json(control);
+});
+
+// --- Per-owner pause (WU-P3) --------------------------------------------------
+// A SIWE session's own kill switch — pauses every mandate that owner signed,
+// independent of the global operator kill switch above (pipeline.ts's
+// `checkPolicy` checks both, and approvals.ts re-checks both right before
+// signing an approved World ID gate).
+
+app.get("/me/control", (c) => {
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  return c.json(getOwnerControl(auth.address));
+});
+
+app.post("/me/pause", async (c) => {
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const body = await c.req.json().catch(() => undefined);
+  const parsed = pauseRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_pause_request", issues: parsed.error.issues }, 400);
+  }
+  return c.json(setOwnerControl(auth.address, true, parsed.data?.reason));
+});
+
+app.post("/me/resume", (c) => {
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  return c.json(setOwnerControl(auth.address, false));
 });
 
 // --- GET /mandate (WU-P2) -----------------------------------------------------
@@ -319,19 +460,38 @@ app.post("/sign", async (c) => {
   }
 });
 
-// --- GET /receipts -----------------------------------------------------------
+// --- GET /receipts (WU-P3 owner-scoped) -------------------------------------
+// Same operator-vs-owner split as `GET /intents` above.
 
 app.get("/receipts", (c) => {
   const limitParam = Number(c.req.query("limit"));
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 50;
-  return c.json(listReceipts(limit));
+  if (isLocalAdminRequest(c)) return c.json(listReceipts(limit));
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const owner = auth.address.toLowerCase();
+  const ownedIntentIds = new Set(
+    listIntents()
+      .filter((i) => i.signer.toLowerCase() === owner)
+      .map((i) => i.id),
+  );
+  return c.json(listReceipts(limit).filter((r) => ownedIntentIds.has(r.intentId)));
 });
 
-// --- GET /receipts/:id ---------------------------------------------------
+// --- GET /receipts/:id (WU-P3 owner-scoped) ---------------------------------
+// 401 for no/invalid session, 404 for a real receipt owned by someone else —
+// never reveals whether a receipt id exists to a non-owner.
 
 app.get("/receipts/:id", (c) => {
   const receipt = getReceipt(c.req.param("id"));
   if (!receipt) return c.json({ error: "receipt_not_found" }, 404);
+  if (isLocalAdminRequest(c)) return c.json(receipt);
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const intent = getIntent(receipt.intentId);
+  if (!intent || intent.signer.toLowerCase() !== auth.address.toLowerCase()) {
+    return c.json({ error: "receipt_not_found" }, 404);
+  }
   return c.json(receipt);
 });
 
@@ -355,6 +515,10 @@ const settlementRequestSchema = z.object({
 });
 
 app.post("/receipts/:id/settlement", async (c) => {
+  // Only the mandate's own agent may report its settlement.
+  const auth = authenticateAgent(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+
   const id = c.req.param("id");
   const body = await c.req.json().catch(() => undefined);
   const parsed = settlementRequestSchema.safeParse(body);
@@ -364,6 +528,7 @@ app.post("/receipts/:id/settlement", async (c) => {
 
   const receipt = getReceipt(id);
   if (!receipt) return c.json({ error: "receipt_not_found" }, 404);
+  if (receipt.intentId !== auth.mandate.id) return c.json({ error: "forbidden" }, 403);
   if (receipt.verdict !== "pay") {
     return c.json({ error: "not_a_pay_receipt", verdict: receipt.verdict }, 400);
   }
@@ -410,11 +575,55 @@ app.get("/approvals/:receiptId", (c) => {
   return c.json(approvalStatusResponse(approval));
 });
 
-// --- GET /events (SSE) --------------------------------------------------------
+// --- GET /events (SSE, WU-P3 owner-scoped) ------------------------------------
+// `EventSource` can't send an `Authorization` header, so both auth paths ride
+// the query string: `?admin=1` (+ loopback) for the unfiltered operator
+// dashboard stream, unchanged from WU9; `?session=<token>` for a wallet
+// owner's own stream, filtered to only the events that belong to its mandates.
 
-app.get("/events", (c) =>
-  streamSSE(c, async (stream) => {
+/** Resolves the owning wallet address for one firewall event, or `undefined`
+ * when the event has no single owner (`control.changed`, the global kill
+ * switch) or its owner can't be resolved. Every event either carries the
+ * intent's `signer` directly (`intent.created`/`intent.revoked`) or a
+ * receiptId/intentId this looks up through the store. */
+function eventOwnerAddress(evt: FirewallEvent): string | undefined {
+  const payload = evt.payload as Record<string, unknown> | undefined;
+  switch (evt.event) {
+    case "intent.created":
+    case "intent.revoked":
+      return typeof payload?.signer === "string" ? payload.signer : undefined;
+    case "decision":
+    case "settlement.reported":
+    case "sign.requested": {
+      const intentId = payload?.intentId;
+      return typeof intentId === "string" ? getIntent(intentId)?.signer : undefined;
+    }
+    case "stage.completed":
+    case "approval.requested":
+    case "approval.resolved": {
+      const receiptId = payload?.receiptId;
+      if (typeof receiptId !== "string") return undefined;
+      const receipt = getReceipt(receiptId);
+      return receipt ? getIntent(receipt.intentId)?.signer : undefined;
+    }
+    default:
+      return undefined; // e.g. "control.changed" — the global kill switch has no single owner
+  }
+}
+
+app.get("/events", (c) => {
+  const adminRequest = isLocalAdminEventsRequest(c);
+  let ownerAddress: string | undefined;
+  if (!adminRequest) {
+    const token = c.req.query("session");
+    const session = token ? getSessionByToken(token) : undefined;
+    if (!session) return c.json({ error: "unauthorized" }, 401);
+    ownerAddress = session.address.toLowerCase();
+  }
+
+  return streamSSE(c, async (stream) => {
     const unsubscribe = subscribe((evt) => {
+      if (ownerAddress && eventOwnerAddress(evt)?.toLowerCase() !== ownerAddress) return;
       void stream.writeSSE({ data: JSON.stringify(evt.payload), event: evt.event, id: evt.id });
     });
     stream.onAbort(unsubscribe);
@@ -424,8 +633,8 @@ app.get("/events", (c) =>
         await stream.writeSSE({ event: "heartbeat", data: "", id: crypto.randomUUID() });
       }
     }
-  }),
-);
+  });
+});
 
 // Resume any World ID approval left pending by a previous process (crash or
 // `--watch` restart) — approvals.ts fails closed (expires + releases budget)

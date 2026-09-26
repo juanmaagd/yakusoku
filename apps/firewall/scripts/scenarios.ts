@@ -12,9 +12,11 @@
 // onchain.
 //
 // Run: `bun run scenarios` (repo root) or `bun run --filter @yakusoku/firewall
-// scenarios`. Costs real credit: ~5 Jev calls + up to 2 World ID sandbox
-// device-authorization calls per run (see the scenario notes below) — run
-// this suite at most 3 times per the HARDEN task budget.
+// scenarios`. Costs real credit: several Jev calls + a handful of World ID
+// sandbox device-authorization calls per run (see the scenario notes below;
+// WU-P3's S21-S27 add ~2 more Jev calls and exactly one more World ID call,
+// deliberately avoiding it wherever a scenario doesn't need it) — run this
+// suite sparingly.
 //
 // Expected verdicts for the "legit purchase" scenarios adapt to whether
 // INTERCEPTA_API_KEY is set in the environment this script was launched
@@ -27,9 +29,16 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { toHex } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { createSiweMessage } from "viem/siwe";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 import type { PaymentRequired } from "@x402/core/types";
-import { TASK_INTENT_DOMAIN, TASK_INTENT_TYPES, stringifyWithBigint, type TaskIntentMessage } from "@yakusoku/shared";
+import {
+  CHAIN_ID,
+  TASK_INTENT_DOMAIN,
+  TASK_INTENT_TYPES,
+  stringifyWithBigint,
+  type TaskIntentMessage,
+} from "@yakusoku/shared";
 
 // --- Layout / config ---------------------------------------------------------
 
@@ -62,10 +71,20 @@ interface IntentHandle {
    * by `POST /intents`); empty string when the request failed. */
   agentKey: string;
   body: unknown;
+  /** WU-P3 — the wallet that signed this intent (`signer`), so a scenario can
+   * SIWE-sign-in as the same owner afterward. */
+  account: ReturnType<typeof privateKeyToAccount>;
 }
 
-async function createIntent(task: string, budgetUsdc: number, categories: string[], expirySeconds?: number): Promise<IntentHandle> {
-  const account = privateKeyToAccount(generatePrivateKey());
+/** `account` defaults to a fresh throwaway wallet; pass one explicitly (WU-P3
+ * ownership scenarios) to control which owner a given intent belongs to. */
+async function createIntent(
+  task: string,
+  budgetUsdc: number,
+  categories: string[],
+  expirySeconds?: number,
+  account: ReturnType<typeof privateKeyToAccount> = privateKeyToAccount(generatePrivateKey()),
+): Promise<IntentHandle> {
   const message: TaskIntentMessage = {
     task,
     budget: BigInt(Math.round(budgetUsdc * 1_000_000)),
@@ -85,7 +104,7 @@ async function createIntent(task: string, budgetUsdc: number, categories: string
     body: stringifyWithBigint({ message, signature, signer: account.address }),
   });
   const body = (await res.json().catch(() => undefined)) as { id?: string; agentKey?: string } | undefined;
-  return { status: res.status, id: body?.id ?? "", agentKey: body?.agentKey ?? "", body };
+  return { status: res.status, id: body?.id ?? "", agentKey: body?.agentKey ?? "", body, account };
 }
 
 async function getRemainingBudget(intentId: string): Promise<string> {
@@ -201,6 +220,88 @@ async function resumeSigning(): Promise<ControlState> {
 async function revokeIntentRequest(intentId: string): Promise<{ status: number }> {
   const res = await fetch(`${FIREWALL_URL}/intents/${intentId}/revoke`, { method: "POST", headers: ADMIN_HEADERS });
   return { status: res.status };
+}
+
+// --- WU-P3: SIWE sign-in helpers ---------------------------------------------
+// Matches OMAMORISAN_SIWE_DOMAINS' default allow-list (siwe.ts) — this
+// isolated firewall never overrides that env var, so "localhost:4001" is
+// always accepted without extra spawn-time config.
+const SIWE_DOMAIN = "localhost:4001";
+
+async function fetchNonce(): Promise<string> {
+  const res = await fetch(`${FIREWALL_URL}/auth/nonce`);
+  const body = (await res.json().catch(() => ({}))) as { nonce?: string };
+  if (!body.nonce) throw new Error("GET /auth/nonce returned no nonce");
+  return body.nonce;
+}
+
+interface SiweVerifyResponse {
+  sessionToken?: string;
+  address?: string;
+  expiresAt?: string;
+  error?: string;
+}
+
+/** Signs a fresh SIWE message as `account` and exchanges it for a session via
+ * `POST /auth/verify`. */
+async function siweSignIn(account: ReturnType<typeof privateKeyToAccount>): Promise<{ status: number; json: SiweVerifyResponse }> {
+  const nonce = await fetchNonce();
+  const message = createSiweMessage({
+    address: account.address,
+    chainId: CHAIN_ID,
+    domain: SIWE_DOMAIN,
+    nonce,
+    uri: `http://${SIWE_DOMAIN}/`,
+    version: "1",
+  });
+  const signature = await account.signMessage({ message });
+  const res = await fetch(`${FIREWALL_URL}/auth/verify`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message, signature }),
+  });
+  const json = (await res.json().catch(() => ({}))) as SiweVerifyResponse;
+  return { status: res.status, json };
+}
+
+/** Collects `event:`/`data:` frames from an SSE endpoint for `windowMs`, then
+ * aborts — a minimal parser for `scripts/*.ts` (no browser `EventSource`
+ * available here), used only to assert which decisions a filtered owner
+ * stream did/didn't deliver (S27). */
+async function collectSseEvents(
+  url: string,
+  headers: Record<string, string>,
+  windowMs: number,
+): Promise<{ event: string; data: string }[]> {
+  const controller = new AbortController();
+  const events: { event: string; data: string }[] = [];
+  const timer = setTimeout(() => controller.abort(), windowMs);
+  try {
+    const res = await fetch(url, { headers, signal: controller.signal });
+    if (!res.body) return events;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const raw = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const eventMatch = /^event: (.+)$/m.exec(raw);
+        const dataMatch = /^data: (.*)$/m.exec(raw);
+        if (eventMatch?.[1]) events.push({ event: eventMatch[1], data: dataMatch?.[1] ?? "" });
+      }
+    }
+  } catch {
+    // Aborted by the timeout above, or the connection dropped — either way,
+    // return whatever events arrived before that.
+  } finally {
+    clearTimeout(timer);
+  }
+  return events;
 }
 
 function tamperedRequirement(decoded: PaymentRequired, patch: Record<string, unknown>): PaymentRequired {
@@ -806,6 +907,253 @@ async function runS20(): Promise<void> {
   }
 }
 
+// --- WU-P3: SIWE session / owner-scoped access scenarios --------------------
+
+/** S21 — SIWE sign-in happy path: `POST /auth/verify` returns a session for
+ * the signing wallet, and `GET /auth/me` confirms it. */
+async function runS21(): Promise<void> {
+  const id = "S21";
+  const description = "SIWE sign-in happy path + GET /auth/me";
+  const expected = "200, session address matches the signer";
+  try {
+    const account = privateKeyToAccount(generatePrivateKey());
+    const { status, json } = await siweSignIn(account);
+    if (status !== 200 || !json.sessionToken) {
+      record(id, description, expected, `verify=${status}`, false, JSON.stringify(json));
+      return;
+    }
+    const verifyAddressOk = json.address?.toLowerCase() === account.address.toLowerCase();
+    const meRes = await fetch(`${FIREWALL_URL}/auth/me`, { headers: { authorization: `Bearer ${json.sessionToken}` } });
+    const me = (await meRes.json().catch(() => ({}))) as { address?: string };
+    const meOk = meRes.status === 200 && me.address?.toLowerCase() === account.address.toLowerCase();
+    const pass = verifyAddressOk && meOk;
+    record(id, description, expected, `verify=${status} me=${meRes.status} address=${me.address}`, pass);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S22 — a nonce can only ever authenticate once: replaying the exact same
+ * signed message a second time is rejected. */
+async function runS22(): Promise<void> {
+  const id = "S22";
+  const description = "SIWE nonce replay rejected";
+  const expected = "first=200, replay=401";
+  try {
+    const account = privateKeyToAccount(generatePrivateKey());
+    const nonce = await fetchNonce();
+    const message = createSiweMessage({
+      address: account.address,
+      chainId: CHAIN_ID,
+      domain: SIWE_DOMAIN,
+      nonce,
+      uri: `http://${SIWE_DOMAIN}/`,
+      version: "1",
+    });
+    const signature = await account.signMessage({ message });
+    const verifyOnce = () =>
+      fetch(`${FIREWALL_URL}/auth/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message, signature }),
+      });
+    const first = await verifyOnce();
+    const replay = await verifyOnce();
+    const pass = first.status === 200 && replay.status === 401;
+    record(id, description, expected, `first=${first.status} replay=${replay.status}`, pass);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S23 — owner A's session can neither list nor directly read owner B's
+ * intents/receipts. */
+async function runS23(): Promise<void> {
+  const id = "S23";
+  const description = "owner A cannot list or read owner B's receipts/intents";
+  const expected = "no leak in the list, and a direct read 404s";
+  try {
+    const ownerA = privateKeyToAccount(generatePrivateKey());
+    const ownerB = privateKeyToAccount(generatePrivateKey());
+    const intentB = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S23b", 1, ["gift_card:amazon"], undefined, ownerB);
+    if (intentB.status !== 201) throw new Error(`POST /intents failed for S23 owner B: ${intentB.status}`);
+
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S23b", "n/a", []);
+    const { json: signedB } = await signRequest({ intentId: intentB.id, paymentRequiredHeader: header, resourceUrl, context }, intentB.agentKey);
+    if (!signedB.receiptId) throw new Error("S23: expected a receiptId from B's /sign");
+
+    const sessionA = await siweSignIn(ownerA);
+    if (sessionA.status !== 200 || !sessionA.json.sessionToken) throw new Error(`S23: owner A sign-in failed: ${sessionA.status}`);
+    const headersA = { authorization: `Bearer ${sessionA.json.sessionToken}` };
+
+    const intentsRes = await fetch(`${FIREWALL_URL}/intents`, { headers: headersA });
+    const intentsBody = (await intentsRes.json().catch(() => [])) as { id?: string }[];
+    const leaksIntent = intentsBody.some((i) => i.id === intentB.id);
+
+    const receiptsRes = await fetch(`${FIREWALL_URL}/receipts`, { headers: headersA });
+    const receiptsBody = (await receiptsRes.json().catch(() => [])) as { receiptId?: string }[];
+    const leaksReceipt = receiptsBody.some((r) => r.receiptId === signedB.receiptId);
+
+    const directRes = await fetch(`${FIREWALL_URL}/receipts/${signedB.receiptId}`, { headers: headersA });
+
+    const pass = !leaksIntent && !leaksReceipt && directRes.status === 404;
+    record(id, description, expected, `list-leak=${leaksIntent} receipts-leak=${leaksReceipt} direct=${directRes.status}`, pass);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S24 — owner A's session cannot revoke owner B's mandate. */
+async function runS24(): Promise<void> {
+  const id = "S24";
+  const description = "owner A's session cannot revoke owner B's mandate";
+  const expected = "403 forbidden";
+  try {
+    const ownerA = privateKeyToAccount(generatePrivateKey());
+    const ownerB = privateKeyToAccount(generatePrivateKey());
+    const intentB = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S24b", 1, ["gift_card:amazon"], undefined, ownerB);
+    if (intentB.status !== 201) throw new Error(`POST /intents failed for S24 owner B: ${intentB.status}`);
+
+    const sessionA = await siweSignIn(ownerA);
+    if (sessionA.status !== 200 || !sessionA.json.sessionToken) throw new Error(`S24: owner A sign-in failed: ${sessionA.status}`);
+
+    const res = await fetch(`${FIREWALL_URL}/intents/${intentB.id}/revoke`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${sessionA.json.sessionToken}` },
+    });
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    const pass = res.status === 403 && json.error === "forbidden";
+    record(id, description, expected, `${res.status} ${json.error ?? ""}`.trim(), pass);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S25 — a per-owner pause blocks only that owner's mandates: A refuses
+ * `paused by owner`, B (untouched) is evaluated normally. Always resumes A
+ * in `finally`, mirroring S14's cleanup discipline. */
+async function runS25(): Promise<void> {
+  const id = "S25";
+  const description = "per-owner pause blocks A's mandate but not B's";
+  const expected = "A refuses `paused by owner`; B unaffected";
+  try {
+    const ownerA = privateKeyToAccount(generatePrivateKey());
+    const ownerB = privateKeyToAccount(generatePrivateKey());
+    const intentA = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S25a", 1, ["gift_card:amazon"], undefined, ownerA);
+    const intentB = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S25b", 1, ["gift_card:amazon"], undefined, ownerB);
+    if (intentA.status !== 201 || intentB.status !== 201) throw new Error("POST /intents failed for S25");
+
+    const sessionA = await siweSignIn(ownerA);
+    if (sessionA.status !== 200 || !sessionA.json.sessionToken) throw new Error(`S25: owner A sign-in failed: ${sessionA.status}`);
+    const headersA = { authorization: `Bearer ${sessionA.json.sessionToken}`, "content-type": "application/json" };
+
+    let signedA: SignApiResponse = {};
+    let signedB: SignApiResponse = {};
+    try {
+      const pauseRes = await fetch(`${FIREWALL_URL}/me/pause`, { method: "POST", headers: headersA, body: JSON.stringify({ reason: "S25" }) });
+      if (!pauseRes.ok) throw new Error(`POST /me/pause failed: ${pauseRes.status}`);
+
+      const { header: headerA, resourceUrl: urlA } = await fetch402(AMAZON_REHEARSAL_SKU);
+      const contextA = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S25a", "n/a", []);
+      signedA = (await signRequest({ intentId: intentA.id, paymentRequiredHeader: headerA, resourceUrl: urlA, context: contextA }, intentA.agentKey)).json;
+
+      const { header: headerB, resourceUrl: urlB } = await fetch402(AMAZON_REHEARSAL_SKU);
+      const contextB = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S25b", "n/a", []);
+      signedB = (await signRequest({ intentId: intentB.id, paymentRequiredHeader: headerB, resourceUrl: urlB, context: contextB }, intentB.agentKey)).json;
+    } finally {
+      // Never leave A paused after this scenario — its wallet is throwaway,
+      // but the isolated firewall keeps running for every scenario after this one.
+      await fetch(`${FIREWALL_URL}/me/resume`, { method: "POST", headers: headersA }).catch(() => {});
+    }
+
+    const aBlocked = signedA.verdict === "refuse" && /paused by owner/i.test(signedA.reason ?? "");
+    const bUnaffected = !(signedB.verdict === "refuse" && /paused by owner/i.test(signedB.reason ?? ""));
+    const pass = aBlocked && bUnaffected;
+    record(id, description, expected, `A=${signedA.verdict}(${signedA.reason}) B=${signedB.verdict}(${signedB.reason})`, pass);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S26 — an invalid (never-issued) session token is rejected, same as an
+ * expired one would be. */
+async function runS26(): Promise<void> {
+  const id = "S26";
+  const description = "invalid session token -> 401";
+  const expected = "401 unauthorized";
+  try {
+    const res = await fetch(`${FIREWALL_URL}/auth/me`, { headers: { authorization: "Bearer ys_not_a_real_session_token" } });
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    const pass = res.status === 401 && json.error === "unauthorized";
+    record(id, description, expected, `${res.status} ${json.error ?? ""}`.trim(), pass);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S27 — an owner-scoped `GET /events?session=...` stream delivers only that
+ * owner's `decision` events. Uses the S2-style KEY CASE refuse (steam-1 under
+ * an amazon-rehearsal intent) for both A and B — refuses immediately via Jev
+ * regardless of INTERCEPTA_API_KEY, so this never touches the (rate-limited)
+ * World ID sandbox. */
+async function runS27(): Promise<void> {
+  const id = "S27";
+  const description = "owner-scoped SSE delivers A's decision but not B's";
+  const expected = "A's stream sees only A's decision";
+  try {
+    const ownerA = privateKeyToAccount(generatePrivateKey());
+    const ownerB = privateKeyToAccount(generatePrivateKey());
+    const intentA = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S27a", 1, ["gift_card:amazon"], undefined, ownerA);
+    const intentB = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S27b", 1, ["gift_card:amazon"], undefined, ownerB);
+    if (intentA.status !== 201 || intentB.status !== 201) throw new Error("POST /intents failed for S27");
+
+    const sessionA = await siweSignIn(ownerA);
+    if (sessionA.status !== 200 || !sessionA.json.sessionToken) throw new Error(`S27: owner A sign-in failed: ${sessionA.status}`);
+
+    const ssePromise = collectSseEvents(`${FIREWALL_URL}/events?session=${encodeURIComponent(sessionA.json.sessionToken)}`, {}, 6_000);
+    await new Promise((r) => setTimeout(r, 500)); // let the SSE connection establish
+
+    const traps = await fetchPromo(AMAZON_REHEARSAL_SKU);
+    const untrustedContent = traps.map((t) => ({ source: `promo:${AMAZON_REHEARSAL_SKU}#${t.id}`, text: t.text }));
+
+    const { header: headerA, resourceUrl: urlA } = await fetch402(STEAM_1_SKU);
+    const { json: signedA } = await signRequest(
+      {
+        intentId: intentA.id,
+        paymentRequiredHeader: headerA,
+        resourceUrl: urlA,
+        context: cleanContext("Buy a $1 Amazon gift card (rehearsal) — S27a", "checkout upsell", untrustedContent),
+      },
+      intentA.agentKey,
+    );
+    const { header: headerB, resourceUrl: urlB } = await fetch402(STEAM_1_SKU);
+    const { json: signedB } = await signRequest(
+      {
+        intentId: intentB.id,
+        paymentRequiredHeader: headerB,
+        resourceUrl: urlB,
+        context: cleanContext("Buy a $1 Amazon gift card (rehearsal) — S27b", "checkout upsell", untrustedContent),
+      },
+      intentB.agentKey,
+    );
+
+    const events = await ssePromise;
+    const decisionReceiptIds = new Set(
+      events
+        .filter((e) => e.event === "decision")
+        .map((e) => (JSON.parse(e.data) as { receiptId?: string }).receiptId)
+        .filter((v): v is string => Boolean(v)),
+    );
+    const sawA = Boolean(signedA.receiptId) && decisionReceiptIds.has(signedA.receiptId as string);
+    const sawB = Boolean(signedB.receiptId) && decisionReceiptIds.has(signedB.receiptId as string);
+    const pass = signedA.verdict === "refuse" && signedB.verdict === "refuse" && sawA && !sawB;
+    record(id, description, expected, `A=${signedA.verdict} sawA=${sawA} sawB=${sawB}`, pass, `receiptIds seen=${[...decisionReceiptIds].join(",")}`);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
 // --- Process orchestration ---------------------------------------------------
 
 async function waitForHttp(url: string, timeoutMs = 20_000): Promise<void> {
@@ -892,6 +1240,13 @@ async function main(): Promise<void> {
     await runS18();
     await runS19();
     await runS20();
+    await runS21();
+    await runS22();
+    await runS23();
+    await runS24();
+    await runS25();
+    await runS26();
+    await runS27();
 
     printTable();
     exitCode = results.every((r) => r.pass) ? 0 : 1;
