@@ -1,7 +1,7 @@
 import TutorialVideo from "../ui/TutorialVideo";
 import { useCallback, useEffect, useState } from "react";
 import { MANDATE_CATEGORY_OPTIONS, SITE } from "../../config";
-import { listMandates, listOwnerPromises, revokeMandate, type OwnerPromise, type SerializedMandate } from "../../lib/api";
+import { listMandates, listOwnerPromises, revokeMandate, revokeOwnerPromise, type OwnerPromise, type SerializedMandate } from "../../lib/api";
 import { formatRemaining, formatUsdcFixed, shortHex } from "../../lib/format";
 import { dangerOutlinedButton, primaryButton, textButton } from "../../lib/ui";
 import ConfirmInline from "../ui/ConfirmInline";
@@ -61,6 +61,16 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
     }));
   }
 
+  async function handleRevokeWorldId(id: string) {
+    await revokeOwnerPromise(sessionToken, id);
+    const worldIdPromises = await listOwnerPromises(sessionToken);
+    setState((prev) => ({
+      kind: "loaded",
+      mandates: prev.kind === "loaded" ? prev.mandates : [],
+      worldIdPromises: sortWorldIdPromises(worldIdPromises),
+    }));
+  }
+
   const hasPromises = state.kind === "loaded" && (state.mandates.length > 0 || state.worldIdPromises.length > 0);
 
   return (
@@ -116,7 +126,7 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
         {hasPromises && (
           <ul className="grid gap-4 lg:grid-cols-2">
             {state.worldIdPromises.map((p) => (
-              <WorldIdPromiseCard key={p.id} promise={p} />
+              <WorldIdPromiseCard key={p.id} promise={p} onRevoke={handleRevokeWorldId} />
             ))}
             {state.mandates.map((mandate) => (
               <PromiseCard key={mandate.id} mandate={mandate} onRevoke={handleRevoke} />
@@ -172,8 +182,10 @@ function merchantHost(merchant: string | undefined): string | undefined {
 }
 
 /** A World ID promise: approved on the phone, spent from the account's smart
- * account, bound to one merchant. No revoke here (not an owner action yet). */
-function WorldIdPromiseCard({ promise }: { promise: OwnerPromise }) {
+ * account, bound to one merchant. An active one can be revoked by its
+ * linked owner straight from here (P6, `POST /owner/promises/:id/revoke`). */
+function WorldIdPromiseCard({ promise, onRevoke }: { promise: OwnerPromise; onRevoke: (id: string) => Promise<void> }) {
+  const [confirming, setConfirming] = useState(false);
   const status = worldIdStatus(promise);
   const expiryMs = Number(promise.expiry) * 1000;
   const absolute = new Date(expiryMs).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -215,13 +227,32 @@ function WorldIdPromiseCard({ promise }: { promise: OwnerPromise }) {
 
       <div className="mt-auto pt-5">
         <div className="border-t border-hairline pt-4">
-          <div className="flex items-center justify-between gap-3">
-            <a href={`${SITE.dashboardRoute}?promise=${encodeURIComponent(promise.id)}`} className={textButton}>
-              Watch live
-              <IconArrowRight size={14} />
-            </a>
-            <span className="text-caption text-graphite">Approved with World ID</span>
-          </div>
+          {confirming ? (
+            <ConfirmInline
+              message="Revoke this promise? Your agent can't spend from it anymore."
+              confirmLabel="Revoke"
+              busyLabel="Revoking…"
+              onConfirm={async () => {
+                await onRevoke(promise.id);
+                setConfirming(false);
+              }}
+              onCancel={() => setConfirming(false)}
+            />
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <a href={`${SITE.dashboardRoute}?promise=${encodeURIComponent(promise.id)}`} className={textButton}>
+                Watch live
+                <IconArrowRight size={14} />
+              </a>
+              {live ? (
+                <button type="button" onClick={() => setConfirming(true)} className={dangerOutlinedButton}>
+                  Revoke
+                </button>
+              ) : (
+                <span className="text-caption text-graphite">Approved with World ID</span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </li>

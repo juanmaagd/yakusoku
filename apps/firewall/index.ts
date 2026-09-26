@@ -53,6 +53,7 @@ import {
   createPromiseRequest,
   devApprovePromise,
   resolveMandate,
+  revokeOwnerPromiseRequest,
   revokePromiseRequest,
   resumePromiseApprovalsOnBoot,
   serializePromiseDetail,
@@ -934,6 +935,22 @@ app.get("/owner/promises", (c) => {
   return c.json(promises);
 });
 
+// --- POST /owner/promises/:id/revoke (P6) -------------------------------
+// The owner-session counterpart to the account-key-scoped `POST
+// /promises/:id/revoke` above (used by the MCP client) — lets the wallet
+// that linked itself as a promise's account owner at `/setup` revoke it
+// straight from the site, without holding that account's own key. Same
+// 404-for-both shape as everywhere else in this file: an unknown promise id
+// and one owned by a DIFFERENT wallet are indistinguishable.
+
+app.post("/owner/promises/:id/revoke", (c) => {
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const promise = revokeOwnerPromiseRequest(c.req.param("id"), auth.address);
+  if (!promise) return c.json({ error: "promise_not_found" }, 404);
+  return c.json(serializeOwnerPromise(promise, getAccount(promise.accountId)));
+});
+
 // --- GET /receipts/:id/attestation (WU12) -------------------------------
 // Serves the StepUp EIP-712 attestation on its own, so a third party can
 // fetch (and independently `verifyStepUpAttestation`) just the evidence,
@@ -1040,8 +1057,15 @@ app.get("/approvals/:receiptId", (c) => {
   const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
   if (!approval) return c.json({ error: "approval_not_found" }, 404);
   const auth = authenticateMandateCredential(c, approval.intentId);
-  if (!auth.ok) return c.json(auth.body, auth.status);
-  if (!auth.mandate || approval.intentId !== auth.mandate.id) return c.json({ error: "forbidden" }, 403);
+  // P9: a credential that's otherwise valid (checked by `preAuth` above) but
+  // doesn't own THIS approval's mandate used to answer 403 forbidden — a
+  // different, distinguishable shape from the 404 above for "doesn't exist
+  // at all". Collapse both into the exact same 404, same reasoning as the
+  // session-owner branch just above (and `GET /receipts/:id`): a caller can
+  // never tell "exists but isn't yours" apart from "never existed".
+  if (!auth.ok || !auth.mandate || approval.intentId !== auth.mandate.id) {
+    return c.json({ error: "approval_not_found" }, 404);
+  }
   return c.json(approvalStatusResponse(approval));
 });
 

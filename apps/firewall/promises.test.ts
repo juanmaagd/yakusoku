@@ -25,11 +25,12 @@ import { hashWorldIdSubject, verifyPromiseAttestation } from "@yakusoku/shared";
 process.env.FIREWALL_DATA_DIR = mkdtempSync(join(tmpdir(), "yakusoku-promises-test-"));
 process.env.FIREWALL_PRIVATE_KEY ??= `0x${"33".repeat(32)}`;
 
-const { createPromise, findOrCreateAccountBySubjectHash, getPromise, savePromise } = await import("./store");
+const { createPromise, findOrCreateAccountBySubjectHash, getPromise, savePromise, setAccountDeployment } = await import("./store");
 const {
   buildPromiseSummary,
   promiseAsMandate,
   resolveMandate,
+  revokeOwnerPromiseRequest,
   serializePromiseSummary,
   settlePromiseApproved,
   settlePromiseRefused,
@@ -413,5 +414,62 @@ describe("serializePromiseSummary — lineage (promise-replacement fix)", () => 
     const summary = serializePromiseSummary(getPromise(promiseId)!);
     expect(summary.replaces).toBeUndefined();
     expect(summary.replacedBy).toBeUndefined();
+  });
+});
+
+describe("revokeOwnerPromiseRequest — owner-session revoke (P6)", () => {
+  function linkOwner(accountId: string, owner: `0x${string}`) {
+    setAccountDeployment(accountId, {
+      smartAccount: "0x2222222222222222222222222222222222222b" as `0x${string}`,
+      owner,
+      perPaymentLimitAtomic: 25_000_000n,
+      recipients: [],
+    });
+  }
+
+  test("the linked owner revokes their own promise: status flips to revoked, resolveMandate reports it non-active", async () => {
+    const owner = "0x1111111111111111111111111111111111111a" as const;
+    const { promiseId, accountId } = await seedActivePromise("world-id-subject-owner-revoke-own");
+    linkOwner(accountId, owner);
+
+    const revoked = revokeOwnerPromiseRequest(promiseId, owner);
+    expect(revoked?.status).toBe("revoked");
+    expect(getPromise(promiseId)?.status).toBe("revoked");
+    // checkPolicy (pipeline.ts) refuses any `intent.source === "world_id"`
+    // mandate whose `promiseStatus` isn't `"active"` — this is the field it
+    // reads, so a later `/sign` against this promise refuses fail-closed.
+    expect(resolveMandate(promiseId)?.promiseStatus).toBe("revoked");
+  });
+
+  test("matches the owner address case-insensitively", async () => {
+    const owner = "0x1111111111111111111111111111111111111A" as const;
+    const { promiseId, accountId } = await seedActivePromise("world-id-subject-owner-revoke-case");
+    linkOwner(accountId, owner);
+
+    const revoked = revokeOwnerPromiseRequest(promiseId, owner.toLowerCase() as `0x${string}`);
+    expect(revoked?.status).toBe("revoked");
+  });
+
+  test("a DIFFERENT wallet gets undefined (the route's 404) and the promise stays active", async () => {
+    const owner = "0x1111111111111111111111111111111111111a" as const;
+    const stranger = "0x9999999999999999999999999999999999999d" as const;
+    const { promiseId, accountId } = await seedActivePromise("world-id-subject-owner-revoke-stranger");
+    linkOwner(accountId, owner);
+
+    const result = revokeOwnerPromiseRequest(promiseId, stranger);
+    expect(result).toBeUndefined();
+    expect(getPromise(promiseId)?.status).toBe("active");
+  });
+
+  test("a promise on an account with no linked owner yet gets undefined too", async () => {
+    const { promiseId } = await seedActivePromise("world-id-subject-owner-revoke-unlinked");
+    const result = revokeOwnerPromiseRequest(promiseId, "0x1111111111111111111111111111111111111a");
+    expect(result).toBeUndefined();
+    expect(getPromise(promiseId)?.status).toBe("active");
+  });
+
+  test("an unknown promise id gets undefined", () => {
+    const result = revokeOwnerPromiseRequest("promise_does_not_exist", "0x1111111111111111111111111111111111111a");
+    expect(result).toBeUndefined();
   });
 });

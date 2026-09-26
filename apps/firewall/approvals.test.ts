@@ -41,6 +41,7 @@ const {
   getPromise,
   getReceipt,
   savePendingApproval,
+  savePromise,
   setAccountDeployment,
 } = await import("./store");
 const { finalize } = await import("./receipts");
@@ -321,6 +322,29 @@ describe("settleApproved — a world_id promise requires the SAME human (P9.2)",
     expect(receipt?.worldId).toEqual({ approved: false, status: "world_id_wrong_human" });
     // The reservation `seedPendingApprovalOnPromise` simulated is released
     // back to 0, same as every other `settleRefused` path.
+    expect(getPromise(promiseId)?.spent).toBe(0n);
+  });
+
+  // P6 fix — `intent.revoked` (the generic wallet-mandate re-check just below
+  // this describe block's own SUT) is ALWAYS `false` for a promise-backed
+  // mandate (`promiseAsMandate`, promises.ts hardcodes it), so before this
+  // fix a promise revoked by its owner WHILE this exact approval sat waiting
+  // on the phone would still pay out on a genuine, fresh, correct-human
+  // approval. `intent.promiseStatus` is what actually catches it now.
+  test("the promise's owner revokes it while the approval is in flight -> the SAME correct human's approval still refuses", async () => {
+    const ownerSubject = "world-id-subject-approvals-owner-revoked-in-flight";
+    const { approval, receiptId, promiseId } = seedPendingApprovalOnPromise(ownerSubject);
+    const active = getPromise(promiseId)!;
+    savePromise({ ...active, status: "revoked", reason: "revoked by owner", updatedAt: new Date().toISOString() });
+
+    await settleApproved(approval, { sub: ownerSubject, acr: "dev", authTime: Math.floor(Date.now() / 1000) });
+
+    const receipt = getReceipt(receiptId);
+    expect(receipt?.verdict).toBe("refuse");
+    expect(receipt?.state).toBe("world_id_denied");
+    expect(receipt?.worldId).toEqual({ approved: false, status: "revoked" });
+    // Released back to 0, same as every other `settleRefused` path — never
+    // signed, despite a genuine, fresh, correct-human World ID approval.
     expect(getPromise(promiseId)?.spent).toBe(0n);
   });
 });

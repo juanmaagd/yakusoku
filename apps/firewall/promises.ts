@@ -27,6 +27,7 @@ import {
   getIntent,
   getPendingReplacementFor,
   getPromise,
+  listAccountsByOwner,
   listPromisesByStatus,
   savePromise,
   type PromiseStatus,
@@ -481,6 +482,24 @@ export function revokePromiseRequest(promiseId: string, accountId: string): Stor
   const updated: StoredPromise = { ...promise, status: "revoked", reason: "revoked by owner", updatedAt: new Date().toISOString() };
   savePromise(updated);
   return updated;
+}
+
+/** `POST /owner/promises/:id/revoke` (index.ts, SIWE-session auth, P6). The
+ * owner-session counterpart to `revokePromiseRequest` above (account-key
+ * auth) — same dashboard-promises (D1) ownership rule `GET /owner/promises`
+ * already uses: the promise's account must be one this wallet linked as
+ * owner at `/setup` (`listAccountsByOwner`, store.ts), case-insensitively.
+ * `undefined` for BOTH an unknown promise id and one owned by a DIFFERENT
+ * wallet (or one whose account has no linked owner yet), so index.ts's route
+ * can answer the exact same 404 for both — never confirming to a caller that
+ * some other owner's promise exists. Defers the actual (idempotent,
+ * terminal-safe) revoke to `revokePromiseRequest` once ownership holds. */
+export function revokeOwnerPromiseRequest(promiseId: string, ownerAddress: `0x${string}`): StoredPromise | undefined {
+  const promise = getPromise(promiseId);
+  if (!promise) return undefined;
+  const ownedAccountIds = new Set(listAccountsByOwner(ownerAddress).map((a) => a.id));
+  if (!ownedAccountIds.has(promise.accountId)) return undefined;
+  return revokePromiseRequest(promiseId, promise.accountId);
 }
 
 // --- Response shaping ----------------------------------------------------------

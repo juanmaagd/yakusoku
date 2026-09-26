@@ -194,6 +194,17 @@ export async function listOwnerPromises(sessionToken: string): Promise<OwnerProm
   return ownerScopedJson<OwnerPromise[]>("/owner/promises", sessionToken);
 }
 
+/** `POST /owner/promises/:id/revoke` (P6, apps/firewall/index.ts) — the
+ * owner-session counterpart to the account-key-scoped revoke the MCP client
+ * uses. Idempotent: revoking an already-terminal promise is a no-op, never
+ * re-activates it. A promise not owned by this wallet answers the same 404
+ * as one that doesn't exist at all — surfaced here as an ordinary error. */
+export async function revokeOwnerPromise(sessionToken: string, id: string): Promise<OwnerPromise> {
+  return ownerScopedJson<OwnerPromise>(`/owner/promises/${encodeURIComponent(id)}/revoke`, sessionToken, {
+    method: "POST",
+  });
+}
+
 /** No session required server-side (`GET /receipts/:id/attestation` is
  * unauthenticated, apps/firewall/index.ts) — returns `undefined` for a
  * receipt with no attestation (denied/expired/pre-World-ID) instead of

@@ -374,6 +374,21 @@ export async function settleApproved(approval: PendingApproval, claims: FreshApp
       await settleRefused(approval, "world_id_wrong_human", "world_id_wrong_human", "world_id_denied");
       return;
     }
+
+    // P6 fix — the promise itself may have been revoked by its owner (`POST
+    // /owner/promises/:id/revoke`/`POST /promises/:id/revoke`) while this
+    // approval sat waiting on the phone. `intent.revoked` below is a
+    // wallet-mandate-only field: `promiseAsMandate` (promises.ts) hardcodes
+    // it to `false` for every promise-backed mandate, so it would NEVER
+    // catch this. `intent.promiseStatus`, by contrast, is set fresh from
+    // `resolveMandate`'s `getPromise` call above (this function's own
+    // `intent` binding) — re-check it here, right before signing, same
+    // "never let a payment slip through fail-closed" reasoning as the pause/
+    // revoke re-checks below for a wallet-sourced intent.
+    if (intent.promiseStatus !== "active") {
+      await settleRefused(approval, "revoked", `promise no longer active (status: ${intent.promiseStatus})`, "world_id_denied");
+      return;
+    }
   }
 
   // WU13: re-check the kill switch and intent-revocation status right here,
