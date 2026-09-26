@@ -4,10 +4,15 @@
 @import "@fontsource-variable/mona-sans/standard.css";
 @import "@fontsource-variable/martian-mono/standard.css";
 
-/* The expanded walkthrough owns the right side, leaving the active page visible. */
+/* The expanded walkthrough owns the right side, leaving the active page visible.
+   The page makes room in step with the panel: same duration and easing both ways. */
 @media (min-width: 1024px) {
+  body {
+    transition: padding-right 300ms var(--ease-drawer);
+  }
   body.tutorial-side-open {
     padding-right: min(720px, 46vw);
+    transition-duration: 440ms;
   }
 }
 
@@ -90,6 +95,7 @@
 
   /* --- Motion --- */
   --ease-out-soft: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-out-quint: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -241,12 +247,18 @@
       transform 200ms ease-in,
       opacity 200ms ease-in;
   }
+  /* Desktop: the panel slides in from the edge, glued to the page's shrinking right edge. */
   @media (min-width: 1024px) {
     .tutorial-panel {
-      transform: translateX(32px);
+      transform: translateX(100%);
+      opacity: 1;
+      transition: transform 440ms var(--ease-drawer);
     }
     .tutorial-panel[data-visible="true"] {
       transform: translateX(0);
+    }
+    .tutorial-panel[data-phase="closing"] {
+      transition: transform 300ms var(--ease-drawer);
     }
   }
 
@@ -320,5 +332,8 @@
     transition-duration: 150ms !important;
     transform: none !important;
     filter: none !important;
+  }
+  .tutorial-panel:not([data-visible="true"]) {
+    opacity: 0 !important;
   }
 }

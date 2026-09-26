@@ -197,7 +197,7 @@ export default function TutorialVideo({ topic }: { topic: TutorialTopic }) {
 
   useEffect(() => {
     if (phase !== "closing") return;
-    const timeout = window.setTimeout(() => setPhase("closed"), 260);
+    const timeout = window.setTimeout(() => setPhase("closed"), 320);
     return () => window.clearTimeout(timeout);
   }, [phase]);
 
@@ -205,19 +205,20 @@ export default function TutorialVideo({ topic }: { topic: TutorialTopic }) {
     if (phase === "open") closeButtonRef.current?.focus();
   }, [phase]);
 
+  // The page gives up its right side only while the panel is visible, so the padding
+  // transition runs in the same frames as the panel's slide, in and out.
+  useEffect(() => {
+    document.body.classList.toggle("tutorial-side-open", isDesktop && phase === "open");
+  }, [phase, isDesktop]);
+  useEffect(() => () => document.body.classList.remove("tutorial-side-open"), []);
+
   useEffect(() => {
     if (phase === "closed") return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closePanel();
     };
     window.addEventListener("keydown", onKeyDown);
-    if (isDesktop) {
-      document.body.classList.add("tutorial-side-open");
-      return () => {
-        window.removeEventListener("keydown", onKeyDown);
-        document.body.classList.remove("tutorial-side-open");
-      };
-    }
+    if (isDesktop) return () => window.removeEventListener("keydown", onKeyDown);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
