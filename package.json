@@ -17,6 +17,7 @@
     "world-id-check": "bun run --filter @yakusoku/firewall world-id-check",
     "scenarios": "bun run --filter @yakusoku/firewall scenarios",
     "reset-data": "bun run --filter @yakusoku/firewall reset-data",
+    "account-payment-check": "bun run --filter @yakusoku/firewall account-payment-check",
     "agent": "bun run --filter @yakusoku/agent start",
     "dev-intent": "bun run --filter @yakusoku/agent dev-intent",
     "attack": "bun run --filter @yakusoku/agent attack",

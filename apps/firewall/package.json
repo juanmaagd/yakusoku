@@ -26,6 +26,7 @@
     "intercepta-check": "bun --env-file=../../../.env.hackathon scripts/intercepta-check.ts",
     "world-id-check": "bun --env-file=../../../.env.hackathon scripts/world-id-check.ts",
     "scenarios": "bun --env-file=../../../.env.hackathon scripts/scenarios.ts",
-    "reset-data": "bun scripts/reset-data.ts"
+    "reset-data": "bun scripts/reset-data.ts",
+    "account-payment-check": "bun --env-file=../../../.env.hackathon scripts/account-payment-check.ts"
   }
 }
