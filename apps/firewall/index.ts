@@ -53,6 +53,8 @@ import {
   serializePromiseDetail,
   serializePromiseSummary,
 } from "./promises";
+import { createSetupLink, describeAccountDeployment, getSetupStatus, linkOwner } from "./account-setup";
+import { createFirstPromiseRequestOutcome, devApproveFirstPromise, pollFirstPromise, resumeFirstPromiseApprovalsOnBoot } from "./first-promise";
 import { publish, subscribe, type FirewallEvent } from "./events-bus";
 
 const PORT = Number(process.env.PORT) || 4001;
@@ -340,14 +342,64 @@ app.post("/connect/poll", async (c) => {
 
 // --- GET /account (P9.1) ------------------------------------------------------
 
-app.get("/account", (c) => {
+app.get("/account", async (c) => {
   const auth = authenticateAccount(c);
   if (!auth.ok) return c.json(auth.body, auth.status);
+  // P11.3a — `smartAccount`/`owner`/`balanceUsdc` are only ever populated
+  // once this account has actually deployed (`describeAccountDeployment`
+  // reads the on-chain USDC balance live, so this is an async handler now).
+  const deployment = await describeAccountDeployment(auth.account);
   return c.json({
     accountId: auth.account.id,
     createdAt: auth.account.createdAt,
     promises: listPromisesByAccount(auth.account.id).map(serializePromiseSummary),
+    smartAccount: deployment.smartAccount,
+    owner: deployment.owner,
+    balanceUsdc: deployment.balanceUsdc,
+    perPaymentLimitUsdc: deployment.perPaymentLimitUsdc,
+    recipients: deployment.recipients,
   });
+});
+
+// --- Account setup (P11.3a) ---------------------------------------------------
+// Links the account's own wallet as the owner of a freshly deployed
+// `OmamorisanAccount` smart account — see account-setup.ts's header for the
+// full flow and its fail-closed contract.
+
+app.post("/accounts/setup-link", (c) => {
+  const auth = authenticateAccount(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  return c.json(createSetupLink(auth.account.id), 201);
+});
+
+app.get("/setup/:token", async (c) => {
+  // No auth — the token itself is the credential (root API contract). 404
+  // for both "never existed" and "expired before ever deploying", so a
+  // guess never learns which is which.
+  const outcome = await getSetupStatus(c.req.param("token"));
+  if (!outcome.ok) return c.json({ error: "setup_token_not_found" }, 404);
+  const { ok: _ok, ...body } = outcome;
+  return c.json(body);
+});
+
+const setupOwnerSchema = z.object({
+  owner: z.string().regex(/^0x[0-9a-fA-F]{40}$/, "not a hex address"),
+  signature: z.string().regex(/^0x[0-9a-fA-F]+$/, "not a hex signature"),
+});
+
+app.post("/setup/:token/owner", async (c) => {
+  const body = await c.req.json().catch(() => undefined);
+  const parsed = setupOwnerSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_setup_owner_request", issues: parsed.error.issues }, 400);
+  }
+  const outcome = await linkOwner(c.req.param("token"), parsed.data.owner as Hex, parsed.data.signature as Hex);
+  if (!outcome.ok) {
+    if (outcome.reason === "not_found") return c.json({ error: "setup_token_not_found" }, 404);
+    if (outcome.reason === "invalid_signature") return c.json({ error: "invalid_signature" }, 401);
+    return c.json({ error: "deploy_failed", message: outcome.message }, 500);
+  }
+  return c.json({ status: "deployed", smartAccount: outcome.smartAccount, owner: outcome.owner, txHash: outcome.txHash });
 });
 
 // --- Promises (P9.2) ----------------------------------------------------------
@@ -422,6 +474,52 @@ app.post("/promises/:id/revoke", (c) => {
   const promise = revokePromiseRequest(c.req.param("id"), auth.account.id);
   if (!promise) return c.json({ error: "promise_not_found" }, 404);
   return c.json(serializePromiseDetail(promise));
+});
+
+// --- POST /promises/first (P9.6) ----------------------------------------------
+// No auth — nobody is authenticated yet, same as `POST /connect`. A single
+// World ID approval creates the account AND activates this promise together
+// (first-promise.ts) — the MCP's `request_promise` calls this instead of
+// `POST /promises` when the session has no credential at all yet.
+
+app.post("/promises/first", async (c) => {
+  const body = await c.req.json().catch(() => undefined);
+  const parsed = createPromiseSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_promise_request", issues: parsed.error.issues }, 400);
+  }
+  if (!Number.isFinite(parsed.data.budgetUsdc)) {
+    return c.json({ error: "invalid_promise_request", issues: "budgetUsdc must be numeric" }, 400);
+  }
+  const outcome = await createFirstPromiseRequestOutcome(parsed.data);
+  if (!outcome.ok) return c.json({ error: outcome.error }, outcome.status);
+  const r = outcome.request;
+  return c.json(
+    {
+      promiseId: r.id,
+      pollSecret: r.pollSecret,
+      verificationUri: r.verificationUri,
+      verificationUriComplete: r.verificationUriComplete,
+      userCode: r.userCode,
+      expiresAt: r.expiresAt,
+      summary: r.summary,
+    },
+    201,
+  );
+});
+
+const pollFirstPromiseSchema = z.object({ pollSecret: z.string().min(1) });
+
+app.post("/promises/first/:id/poll", async (c) => {
+  const body = await c.req.json().catch(() => undefined);
+  const parsed = pollFirstPromiseSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_poll_request", issues: parsed.error.issues }, 400);
+  }
+  const result = pollFirstPromise(c.req.param("id"), parsed.data.pollSecret);
+  if (!result.ok) return c.json(result.body, result.status);
+  const { ok: _ok, ...responseBody } = result;
+  return c.json(responseBody);
 });
 
 // --- POST /intents -----------------------------------------------------------
@@ -953,6 +1051,18 @@ if (process.env.OMAMORISAN_DEV_APPROVALS === "1") {
     if (!result.ok) return c.json({ error: result.error }, 400);
     return c.json({ ok: true });
   });
+
+  // P9.6 — same dev-only fabricated-approval seam for the combined
+  // account+promise gate.
+  app.post("/dev/promises/first/:id/approve", async (c) => {
+    if (!isLocalAdminRequest(c)) return c.json({ error: "forbidden" }, 403);
+    const body = await c.req.json().catch(() => undefined);
+    const parsed = devApproveSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: "invalid_dev_approve_request", issues: parsed.error.issues }, 400);
+    const result = await devApproveFirstPromise(c.req.param("id"), parsed.data.subject);
+    if (!result.ok) return c.json({ error: result.error }, 400);
+    return c.json({ ok: true });
+  });
 }
 
 // Resume any World ID approval left pending by a previous process (crash or
@@ -963,6 +1073,7 @@ resumePendingApprovalsOnBoot();
 // approval (promises.ts) left pending across a restart.
 resumeConnectRequestsOnBoot();
 resumePromiseApprovalsOnBoot();
+resumeFirstPromiseApprovalsOnBoot();
 
 console.log(`Omamorisan firewall listening on :${PORT}`);
 
