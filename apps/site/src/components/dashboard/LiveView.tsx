@@ -15,9 +15,7 @@ import {
 } from "../../lib/api";
 import { connectSseWithRetry, type SseConnectionStatus } from "../../lib/sse";
 import { inputBase, primaryButton, textButton } from "../../lib/ui";
-import { useWalletSession } from "../../lib/useWalletSession";
-import SignInGate from "../app/SignInGate";
-import AppShell, { useOwnerControl } from "../ui/AppShell";
+import { useOwnerControl } from "../ui/AppShell";
 import EmptyState from "../ui/EmptyState";
 import { IconArrowRight, IconChevronDown, IconCross, IconPlay, IconPlus } from "../ui/Icons";
 import InlineError from "../ui/InlineError";
@@ -74,32 +72,11 @@ function reducer(state: LiveState, action: LiveAction): LiveState {
 
 const initialState: LiveState = { receipts: new Map(), mandates: new Map(), promises: new Map(), approvals: new Map(), fresh: new Set() };
 
-/** `/app/dashboard`'s React island (S4 Live): gated on the same wallet+SIWE
- * session as `/app`, then the owner's decisions kept live over SSE. A stored
- * session token is verified on every mount (including a plain navigation
- * from /app, a separate page load) — `"checking"` renders this neutral
- * skeleton instead of `SignInGate`, so a signed-in owner never sees the
- * "Sign in" screen flash while that check is in flight. This is also the
- * server-rendered (and first client) render, since `useWalletSession` starts
- * in `"checking"` — no hydration mismatch. */
-export default function DashboardApp() {
-  const session = useWalletSession();
-  const [liveStatus, setLiveStatus] = useState<SseConnectionStatus>("connecting");
-
-  return (
-    <AppShell active="live" session={session} liveStatus={liveStatus}>
-      {session.stage.kind === "signed-in" ? (
-        <LiveView key={session.stage.sessionToken} sessionToken={session.stage.sessionToken} onUnauthorized={session.handleUnauthorized} onLiveStatus={setLiveStatus} />
-      ) : session.stage.kind === "checking" ? (
-        <LiveSkeleton />
-      ) : (
-        <SignInGate session={session} />
-      )}
-    </AppShell>
-  );
-}
-
-function LiveSkeleton() {
+/** The neutral loading state shown in this tab while a stored session is
+ * being verified (`useWalletSession`'s `"checking"` stage) — also `AppRoot`'s
+ * server-rendered and first-client render for `/app/dashboard`, so there's
+ * no hydration mismatch and no "Sign in" flash while the check is in flight. */
+export function LiveSkeleton() {
   return (
     <section>
       <Skeleton className="h-7 w-40" />
@@ -121,10 +98,27 @@ function LiveSkeleton() {
   );
 }
 
+interface LiveFilterRequest {
+  /** The promise/mandate id to filter by, or `undefined` for "All promises". */
+  id: string | undefined;
+  /** Bumped on every explicit navigation to this tab (a "Watch live" link, a
+   * header tab click, or back/forward) so the effect below re-applies `id`
+   * even when it repeats a value already selected, and never fires from an
+   * unrelated re-render. */
+  token: number;
+}
+
 interface LiveViewProps {
   sessionToken: string;
   onUnauthorized: () => void;
   onLiveStatus: (status: SseConnectionStatus) => void;
+  /** Set by `AppRoot` (P5) whenever the owner navigates *to* this
+   * already-mounted tab from elsewhere in the app — e.g. a "Watch live" link
+   * on a different promise while this tab stayed alive in the background.
+   * `initialPromiseFilter` below only ever reads the URL once, at mount, so
+   * without this a second "Watch live" click while Live is already mounted
+   * would silently keep showing the previous filter. */
+  filterRequest?: LiveFilterRequest;
 }
 
 function initialPromiseFilter(): string | undefined {
@@ -132,7 +126,14 @@ function initialPromiseFilter(): string | undefined {
   return new URLSearchParams(window.location.search).get("promise") ?? undefined;
 }
 
-function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps) {
+/** The Live tab's signed-in content (S4): the owner's decisions kept live
+ * over SSE. Formerly `/app/dashboard`'s whole React island (`DashboardApp`);
+ * `AppRoot` (P5) now owns the wallet/SIWE session and the sign-in gate once,
+ * shared with the Promises tab, and mounts this component the first time the
+ * owner visits Live. It then stays mounted (hidden, not unmounted) so the
+ * SSE connection and every fetched list survive switching back to Promises
+ * and returning. */
+export default function LiveView({ sessionToken, onUnauthorized, onLiveStatus, filterRequest }: LiveViewProps) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [load, setLoad] = useState<{ kind: "loading" } | { kind: "loaded" } | { kind: "error"; message: string }>({ kind: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
@@ -295,6 +296,17 @@ function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps)
     const timer = window.setTimeout(() => setResolved(undefined), 4000);
     return () => window.clearTimeout(timer);
   }, [resolved]);
+
+  // A "Watch live" link (or the header tab, or back/forward) navigating to
+  // this already-mounted tab: apply its filter the same way `selectPromise`
+  // would, but without touching history — `AppRoot` already pushed/replaced
+  // the URL this filter came from.
+  useEffect(() => {
+    if (!filterRequest) return;
+    setSelectedMandateId(filterRequest.id);
+    setSelectedReceiptId(undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react only to a new navigation (token), not to filterRequest.id's identity
+  }, [filterRequest?.token]);
 
   function selectPromise(id: string | undefined) {
     setSelectedMandateId(id);

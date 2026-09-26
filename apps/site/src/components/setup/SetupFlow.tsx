@@ -10,7 +10,7 @@ type Load = { kind: "loading" } | { kind: "invalid" } | { kind: "error"; message
 
 /** Reads `?token=` once at mount. Guarded for SSR (Astro's `client:load`
  * pre-renders this component on the server, where `window` doesn't exist) —
- * same pattern as `DashboardApp.tsx`'s `initialPromiseFilter`. */
+ * same pattern as `LiveView.tsx`'s `initialPromiseFilter`. */
 function initialToken(): string | undefined {
   if (typeof window === "undefined") return undefined;
   return new URLSearchParams(window.location.search).get("token") ?? undefined;

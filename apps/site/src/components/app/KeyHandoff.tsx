@@ -1,7 +1,6 @@
 import TutorialVideo from "../ui/TutorialVideo";
 import ConnectionSetup from "./ConnectionSetup";
 import { useEffect, useState } from "react";
-import { SITE } from "../../config";
 import { ghostButton, label, primaryButton } from "../../lib/ui";
 import CopyButton from "../ui/CopyButton";
 import { IconArrowRight, IconCheck } from "../ui/Icons";
@@ -11,12 +10,15 @@ interface KeyHandoffProps {
   entryPath?: string;
   created: CreatedPromise;
   onDone: () => void;
+  /** Switches to the Live tab client-side (P5); used to be a
+   * `window.location.assign` full document reload. */
+  onOpenLive: () => void;
 }
 
 /** S3: the only moment the agent key exists in the UI. It is never fetched
  * again (the firewall only returns it on `POST /intents`), so leaving is
  * gated on the owner confirming they stored it. */
-export default function KeyHandoff({ created, onDone, entryPath }: KeyHandoffProps) {
+export default function KeyHandoff({ created, onDone, entryPath, onOpenLive }: KeyHandoffProps) {
   const [stored, setStored] = useState(false);
 
   useEffect(() => {
@@ -71,7 +73,7 @@ export default function KeyHandoff({ created, onDone, entryPath }: KeyHandoffPro
           <span className="text-body text-ink">I&rsquo;ve stored the agent key somewhere safe.</span>
         </label>
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button type="button" disabled={!stored} onClick={() => window.location.assign(SITE.dashboardRoute)} className={primaryButton}>
+          <button type="button" disabled={!stored} onClick={onOpenLive} className={primaryButton}>
             Open Live
             <IconArrowRight size={14} />
           </button>

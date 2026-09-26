@@ -13,7 +13,7 @@ interface DecisionFeedProps {
 }
 
 /** The two lanes: what the agent tried on the left, what Omamorisan did on
- * the right, newest first. Presentational: `DashboardApp` owns the data. */
+ * the right, newest first. Presentational: `LiveView` owns the data. */
 export default function DecisionFeed({ receipts, selectedReceiptId, freshIds, onSelect }: DecisionFeedProps) {
   return (
     <div className="overflow-hidden rounded-card border border-hairline bg-surface">

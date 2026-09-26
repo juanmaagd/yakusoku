@@ -1,11 +1,11 @@
 ---
 import { fileURLToPath } from "node:url";
 import Layout from "../layouts/Layout.astro";
-import AppFlow from "../components/app/AppFlow";
+import AppRoot from "../components/AppRoot";
 import { SITE } from "../config";
 const entryPath = import.meta.env.DEV ? fileURLToPath(new URL("../../../mcp/index.ts", import.meta.url)) : undefined;
 ---
 
 <Layout title={`Promises — ${SITE.name}`}>
-  <AppFlow client:load entryPath={entryPath} />
+  <AppRoot client:load initialView="promises" entryPath={entryPath} />
 </Layout>

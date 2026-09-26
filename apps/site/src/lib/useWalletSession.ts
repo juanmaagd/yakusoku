@@ -1,8 +1,10 @@
 // Shared wallet-connect -> Base Sepolia -> SIWE sign-in state machine (P5's
 // AppFlow.tsx originally inlined this; extracted in P6 so `/app/dashboard`
 // reuses the exact same flow instead of a second hand-rolled copy — see the
-// P6 brief: "Auth gate: reuse P5's connect + sign-in"). AppFlow.tsx now
-// builds on this hook too; its rendered screens are unchanged.
+// P6 brief: "Auth gate: reuse P5's connect + sign-in"). Since a later P5
+// pass, `AppRoot.tsx` is the only caller (once per document load), shared by
+// both tabs; the promises/live views built on top of this hook are
+// unchanged.
 
 import { useCallback, useEffect, useState } from "react";
 import type { Address } from "viem";
