@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { DecisionReceipt } from "@yakusoku/shared";
 import { verifyStepUpAttestation } from "@yakusoku/shared";
 import { basescanTx } from "../../config";
-import { getAttestation } from "../../lib/api";
+import { getAttestation, revealGiftCard } from "../../lib/api";
 import { plainReason, stageChecklist, verdictOf } from "../../lib/decisionCopy";
 import { formatUsdcFixed, shortAddress, shortHex } from "../../lib/format";
 import { formatMs, formatPercent, resourcePath } from "../../lib/receiptView";
@@ -29,14 +29,16 @@ type ChainConfirmState =
  * independent evidence (StepUp attestation checked in this browser, the
  * settlement tx read straight from Base Sepolia), and the raw technical
  * record one disclosure away. */
-export default function DecisionDetail({ receipt }: { receipt: DecisionReceipt }) {
+export default function DecisionDetail({ receipt, sessionToken }: { receipt: DecisionReceipt; sessionToken: string }) {
   const [attestation, setAttestation] = useState<AttestationState>({ kind: "checking" });
   const [chainConfirm, setChainConfirm] = useState<ChainConfirmState>({ kind: "idle" });
+  const [giftCard, setGiftCard] = useState<{ kind: "hidden" | "loading" } | { kind: "revealed"; code: string } | { kind: "error"; message: string }>({ kind: "hidden" });
 
   useEffect(() => {
     let cancelled = false;
     setAttestation({ kind: "checking" });
     setChainConfirm({ kind: "idle" });
+    setGiftCard({ kind: "hidden" });
     void (async () => {
       try {
         const record = await getAttestation(receipt.receiptId);
@@ -71,6 +73,17 @@ export default function DecisionDetail({ receipt }: { receipt: DecisionReceipt }
 
   const stages = stageChecklist(receipt);
   const showEvidence = Boolean(receipt.settlement) || Boolean(receipt.worldId) || attestation.kind === "verified" || attestation.kind === "invalid";
+  const hasGiftCard = receipt.state === "settled" && receipt.giftCardAvailable === true;
+
+  async function handleRevealGiftCard() {
+    setGiftCard({ kind: "loading" });
+    try {
+      const result = await revealGiftCard(sessionToken, receipt.receiptId);
+      setGiftCard({ kind: "revealed", code: result.code });
+    } catch (err) {
+      setGiftCard({ kind: "error", message: err instanceof Error ? err.message : "Could not reveal the code." });
+    }
+  }
 
   return (
     <div className="space-y-7">
@@ -105,6 +118,25 @@ export default function DecisionDetail({ receipt }: { receipt: DecisionReceipt }
           <p className="mt-3 rounded-card bg-ask-wash px-3 py-2 text-body-sm text-ask-ink">Waiting for your approval. Scan the code in the banner above.</p>
         )}
       </div>
+
+      {hasGiftCard && (
+        <section className="rounded-card border border-hairline bg-fog p-4">
+          <h3 className="text-body-sm font-semibold text-ink">Gift card</h3>
+          {giftCard.kind === "revealed" ? (
+            <div className="mt-3 space-y-3">
+              <p className="break-all font-mono text-body text-ink">{giftCard.code}</p>
+              <button type="button" className={smallButton} onClick={() => setGiftCard({ kind: "hidden" })}>Hide code</button>
+            </div>
+          ) : (
+            <div className="mt-3 space-y-2">
+              <button type="button" className={smallButton} disabled={giftCard.kind === "loading"} onClick={() => void handleRevealGiftCard()}>
+                {giftCard.kind === "loading" ? "Loading…" : "Reveal code"}
+              </button>
+              {giftCard.kind === "error" && <p className="text-body-sm text-refuse-ink">{giftCard.message}</p>}
+            </div>
+          )}
+        </section>
+      )}
 
       <section>
         <h3 className="text-body-sm font-semibold text-ink">What happened</h3>

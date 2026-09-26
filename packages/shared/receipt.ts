@@ -236,6 +236,8 @@ export const decisionReceiptSchema = z.object({
   txHash: z.string().optional(),
   explorerUrl: z.string().optional(),
   settlement: settlementSchema.optional(),
+  /** True when an owner-only gift card code was stored for this settled receipt. The code itself is never serialized here. */
+  giftCardAvailable: z.boolean().optional(),
   /**
    * P11.2 — who actually paid: the account's own `OmamorisanAccount` smart
    * contract for a world_id promise, or the firewall's operator EOA for a

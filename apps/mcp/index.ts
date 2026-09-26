@@ -47,7 +47,8 @@ const SERVER_INSTRUCTIONS =
   "If pay_x402 returns needs_human_approval, show the link and code and wait, then call check_approval. A " +
   "refusal is final: never retry with different wording. " +
   "Give each distinct purchase its own purchaseRef, so buying the same item twice under one promise settles as " +
-  "two separate payments instead of replaying the first.";
+  "two separate payments instead of replaying the first. After payment, give the human the revealUrl and tell " +
+  "them to sign in with their linked wallet and reveal the gift card in the browser; never ask for the code in chat.";
 
 function buildServer(session: SessionState, httpMode: boolean): McpServer {
   const server = new McpServer({ name: "omamorisan", version: "0.1.0" }, { instructions: SERVER_INSTRUCTIONS });

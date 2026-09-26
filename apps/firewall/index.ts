@@ -32,6 +32,7 @@ import {
   getPendingApprovalByReceiptId,
   getPromise,
   getReceipt,
+  getGiftCardForReceipt,
   getSessionByToken,
   listAccountsByOwner,
   listAllPromises,
@@ -43,6 +44,7 @@ import {
   revokeIntent,
   revokeSession,
   saveReceipt,
+  saveSettledReceipt,
   setAccountHealthOverride,
   setControlState,
   setOwnerControl,
@@ -983,6 +985,11 @@ app.get("/receipts/:id/attestation", (c) => {
 
 const settlementRequestSchema = z.object({
   txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, "must be a 0x-prefixed 32-byte hex transaction hash"),
+  giftCard: z.object({
+    sku: z.string().min(1).max(120),
+    code: z.string().min(1).max(256),
+    amountUsdc: z.number().positive(),
+  }).optional(),
 });
 
 app.post("/receipts/:id/settlement", async (c) => {
@@ -1012,6 +1019,29 @@ app.post("/receipts/:id/settlement", async (c) => {
     return c.json({ error: "not_a_pay_receipt", verdict: receipt.verdict }, 400);
   }
 
+  if (parsed.data.giftCard) {
+    const expectedSku = receipt.resourceUrl?.split("/").pop();
+    if (expectedSku !== encodeURIComponent(parsed.data.giftCard.sku) ||
+        Math.round(parsed.data.giftCard.amountUsdc * 1_000_000).toString() !== receipt.amount) {
+      return c.json({ error: "gift_card_does_not_match_receipt" }, 400);
+    }
+  }
+
+  // A lost HTTP response may cause the MCP to repeat the same report after
+  // settlement. Accept only the same transaction; the encrypted code store
+  // separately rejects a different fulfillment for this receipt.
+  if (receipt.state === "settled") {
+    if (receipt.settlement?.txHash.toLowerCase() !== parsed.data.txHash.toLowerCase()) {
+      return c.json({ error: "conflicting_settlement" }, 409);
+    }
+    try {
+      saveSettledReceipt(parsed.data.giftCard ? { ...receipt, giftCardAvailable: true } : receipt, parsed.data.giftCard);
+    } catch {
+      return c.json({ error: "conflicting_fulfillment" }, 409);
+    }
+    return c.json({ receiptId: id, revealUrl: parsed.data.giftCard ? `${process.env.OMAMORISAN_SITE_URL ?? "http://localhost:4321"}/app/dashboard?receipt=${encodeURIComponent(id)}` : undefined });
+  }
+
   let newState;
   try {
     newState = transition(receipt.state, "settled");
@@ -1026,10 +1056,31 @@ app.post("/receipts/:id/settlement", async (c) => {
     ...receipt,
     state: newState,
     settlement: { txHash: parsed.data.txHash, network: X402_NETWORK, reportedAt: new Date().toISOString() },
+    giftCardAvailable: !!parsed.data.giftCard,
   };
-  saveReceipt(updated);
+  try {
+    saveSettledReceipt(updated, parsed.data.giftCard);
+  } catch {
+    return c.json({ error: "fulfillment_storage_failed" }, 500);
+  }
   publish("settlement.reported", updated);
-  return c.json(updated);
+  return c.json({ receiptId: id, revealUrl: parsed.data.giftCard ? `${process.env.OMAMORISAN_SITE_URL ?? "http://localhost:4321"}/app/dashboard?receipt=${encodeURIComponent(id)}` : undefined });
+});
+
+// Redeemable codes are fetched only on an explicit owner action. They never
+// appear in receipt lists, SSE events, or responses to an agent key.
+app.get("/receipts/:id/gift-card", (c) => {
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const receipt = getReceipt(c.req.param("id"));
+  if (!receipt || receipt.state !== "settled" || !listOwnedMandateIds(auth.address).has(receipt.intentId)) {
+    return c.json({ error: "gift_card_not_found" }, 404);
+  }
+  const giftCard = getGiftCardForReceipt(receipt.receiptId);
+  if (!giftCard) return c.json({ error: "gift_card_not_found" }, 404);
+  c.header("Cache-Control", "private, no-store");
+  c.header("Pragma", "no-cache");
+  return c.json(giftCard);
 });
 
 // --- GET /approvals/:receiptId (WU11, WU-P1 auth) -----------------------------

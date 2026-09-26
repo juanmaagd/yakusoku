@@ -6,6 +6,7 @@
 // (no `await` between the policy check and `recordSpend`) still holds.
 
 import { Database } from "bun:sqlite";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { generateSiweNonce } from "viem/siwe";
@@ -333,6 +334,13 @@ db.exec(`
     data_json TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS receipts_created_at ON receipts (created_at);
+  CREATE TABLE IF NOT EXISTS gift_card_fulfillments (
+    receipt_id TEXT PRIMARY KEY,
+    sku TEXT NOT NULL,
+    amount_usdc REAL NOT NULL,
+    encrypted_code TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS idempotency_cache (
     payment_identifier TEXT PRIMARY KEY,
     data_json TEXT NOT NULL
@@ -570,6 +578,11 @@ const upsertReceiptStmt = db.prepare(
 );
 const getReceiptStmt = db.prepare(`SELECT data_json FROM receipts WHERE receipt_id = $id`);
 const listReceiptsStmt = db.prepare(`SELECT data_json FROM receipts ORDER BY created_at DESC LIMIT $limit`);
+const getGiftCardStmt = db.prepare(`SELECT sku, amount_usdc, encrypted_code FROM gift_card_fulfillments WHERE receipt_id = $id`);
+const insertGiftCardStmt = db.prepare(
+  `INSERT INTO gift_card_fulfillments (receipt_id, sku, amount_usdc, encrypted_code, created_at)
+   VALUES ($id, $sku, $amountUsdc, $encryptedCode, $createdAt)`,
+);
 
 const getCachedOutcomeStmt = db.prepare(`SELECT data_json FROM idempotency_cache WHERE payment_identifier = $id`);
 const setCachedOutcomeStmt = db.prepare(
@@ -848,6 +861,64 @@ export function saveReceipt(receipt: DecisionReceipt): void {
     $createdAt: receipt.createdAt,
     $data: JSON.stringify(receipt),
   });
+}
+
+export interface StoredGiftCard {
+  sku: string;
+  code: string;
+  amountUsdc: number;
+}
+
+function fulfillmentKey(): Buffer {
+  const privateKey = process.env.FIREWALL_PRIVATE_KEY;
+  if (!privateKey) throw new Error("FIREWALL_PRIVATE_KEY is required to store gift card codes");
+  return createHash("sha256").update("omamorisan:gift-card-fulfillment:v1:").update(privateKey).digest();
+}
+
+function encryptGiftCardCode(code: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", fulfillmentKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(code, "utf8"), cipher.final()]);
+  return [iv, cipher.getAuthTag(), encrypted].map((part) => part.toString("base64url")).join(".");
+}
+
+function decryptGiftCardCode(value: string): string {
+  const [iv, tag, encrypted] = value.split(".");
+  if (!iv || !tag || !encrypted) throw new Error("invalid stored gift card code");
+  const decipher = createDecipheriv("aes-256-gcm", fulfillmentKey(), Buffer.from(iv, "base64url"));
+  decipher.setAuthTag(Buffer.from(tag, "base64url"));
+  return Buffer.concat([decipher.update(Buffer.from(encrypted, "base64url")), decipher.final()]).toString("utf8");
+}
+
+/** Persist the settlement and its owner-only fulfillment together. Repeats with the same details are idempotent. */
+export function saveSettledReceipt(receipt: DecisionReceipt, giftCard?: StoredGiftCard): void {
+  const encryptedCode = giftCard ? encryptGiftCardCode(giftCard.code) : undefined;
+  db.transaction(() => {
+    if (giftCard && encryptedCode) {
+      const existing = getGiftCardStmt.get({ $id: receipt.receiptId }) as
+        | { sku: string; amount_usdc: number; encrypted_code: string }
+        | null;
+      if (existing) {
+        if (existing.sku !== giftCard.sku || existing.amount_usdc !== giftCard.amountUsdc || decryptGiftCardCode(existing.encrypted_code) !== giftCard.code) {
+          throw new Error("conflicting gift card fulfillment for receipt");
+        }
+      } else {
+        insertGiftCardStmt.run({
+          $id: receipt.receiptId,
+          $sku: giftCard.sku,
+          $amountUsdc: giftCard.amountUsdc,
+          $encryptedCode: encryptedCode,
+          $createdAt: new Date().toISOString(),
+        });
+      }
+    }
+    saveReceipt(receipt);
+  })();
+}
+
+export function getGiftCardForReceipt(receiptId: string): StoredGiftCard | undefined {
+  const row = getGiftCardStmt.get({ $id: receiptId }) as { sku: string; amount_usdc: number; encrypted_code: string } | null;
+  return row ? { sku: row.sku, amountUsdc: row.amount_usdc, code: decryptGiftCardCode(row.encrypted_code) } : undefined;
 }
 
 export function getReceipt(id: string): DecisionReceipt | undefined {

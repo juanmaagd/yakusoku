@@ -4,7 +4,7 @@
 // talks to a real firewall.
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { encodePaymentRequiredHeader } from "@x402/core/http";
+import { encodePaymentRequiredHeader, encodePaymentResponseHeader } from "@x402/core/http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -90,6 +90,7 @@ describe("check_approval — cross-session ownership (T8 fix B)", () => {
     } as unknown as Parameters<typeof encodePaymentRequiredHeader>[0]);
 
     const requestLog: string[] = [];
+    let deliveredCode: string | undefined;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       const method = init?.method ?? "GET";
@@ -100,7 +101,10 @@ describe("check_approval — cross-session ownership (T8 fix B)", () => {
         if (headers.has("payment-signature")) {
           return new Response(JSON.stringify({ sku: "amazon-1", code: "GC-TEST-1234", amountUsdc: 1 }), {
             status: 200,
-            headers: { "content-type": "application/json" },
+            headers: {
+              "content-type": "application/json",
+              "PAYMENT-RESPONSE": encodePaymentResponseHeader({ success: true, transaction: `0x${"12".repeat(32)}`, network: "eip155:84532" }),
+            },
           });
         }
         return new Response("{}", { status: 402, headers: { "PAYMENT-REQUIRED": paymentRequiredHeader } });
@@ -126,6 +130,10 @@ describe("check_approval — cross-session ownership (T8 fix B)", () => {
       }
       if (url === "http://firewall.test/approvals/receipt_1") {
         return Response.json({ status: "approved", verdict: "pay", reason: "approved", paymentSignature: "sig_test_abc" });
+      }
+      if (url === "http://firewall.test/receipts/receipt_1/settlement" && method === "POST") {
+        deliveredCode = (JSON.parse(String(init?.body)) as { giftCard: { code: string } }).giftCard.code;
+        return Response.json({ receiptId: "receipt_1", revealUrl: "https://site.test/app/dashboard?receipt=receipt_1" });
       }
       throw new Error(`unexpected fetch in test: ${method} ${url}`);
     }) as typeof fetch;
@@ -155,9 +163,11 @@ describe("check_approval — cross-session ownership (T8 fix B)", () => {
     // Session A (the real owner) can still complete its own purchase.
     const ownResult = await clientA.callTool({ name: "check_approval", arguments: { receiptId: "receipt_1" } });
     expect(ownResult.isError ?? false).toBe(false);
-    const ownBody = JSON.parse(textOf(ownResult)) as { status: string; giftCard?: { code: string } };
+    const ownBody = JSON.parse(textOf(ownResult)) as { status: string; revealUrl?: string };
     expect(ownBody.status).toBe("paid");
-    expect(ownBody.giftCard?.code).toBe("GC-TEST-1234");
+    expect(ownBody.revealUrl).toBe("https://site.test/app/dashboard?receipt=receipt_1");
+    expect(textOf(ownResult)).not.toContain("GC-TEST-1234");
+    expect(deliveredCode).toBe("GC-TEST-1234");
 
     await Promise.all([clientA.close(), clientB.close()]);
   });

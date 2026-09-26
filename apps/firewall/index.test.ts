@@ -23,6 +23,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { USDC_SEPOLIA_ADDRESS, X402_NETWORK, type TaskIntentMessage } from "@yakusoku/shared";
 
 // store.ts opens a bun:sqlite file under FIREWALL_DATA_DIR and signer.ts
@@ -31,7 +32,7 @@ import { USDC_SEPOLIA_ADDRESS, X402_NETWORK, type TaskIntentMessage } from "@yak
 process.env.FIREWALL_DATA_DIR = mkdtempSync(join(tmpdir(), "yakusoku-index-test-"));
 process.env.FIREWALL_PRIVATE_KEY ??= `0x${"44".repeat(32)}`;
 
-const { createIntent, savePendingApproval } = await import("./store");
+const { createIntent, createSession, savePendingApproval, saveReceipt } = await import("./store");
 const firewallConfig = (await import("./index")).default;
 const server = Bun.serve({ ...firewallConfig, port: 0 });
 const BASE_URL = `http://127.0.0.1:${server.port}`;
@@ -168,4 +169,57 @@ describe("POST /sign — purchaseRef validation (WU: purchase ref)", () => {
     expect(body.verdict).toBe("refuse");
     expect(body.reason).toContain("exceeds remaining budget");
   });
+});
+
+test("gift card code is delivered only to the signed-in receipt owner", async () => {
+  const owner = "0x3333333333333333333333333333333333333333" as const;
+  const stranger = "0x4444444444444444444444444444444444444444" as const;
+  const { intent, agentKey } = createIntent(makeTaskIntent("cc"), `0x${"aa".repeat(65)}`, owner);
+  const receiptId = `receipt_gift_card_${crypto.randomUUID()}`;
+  const code = "GC-OWNER-ONLY-1234";
+  const txHash = `0x${"12".repeat(32)}`;
+  saveReceipt({
+    receiptId,
+    paymentIdentifier: `payment_${receiptId}`,
+    intentId: intent.id,
+    createdAt: new Date().toISOString(),
+    state: "signed",
+    verdict: "pay",
+    reasons: ["approved"],
+    resourceUrl: "http://store.test/giftcard/amazon-1-rehearsal",
+    amount: "1000000",
+    timeline: [],
+  });
+
+  const settlement = await fetch(`${BASE_URL}/receipts/${receiptId}/settlement`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${agentKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ txHash, giftCard: { sku: "amazon-1-rehearsal", code, amountUsdc: 1 } }),
+  });
+  expect(settlement.status).toBe(200);
+  const reported = await settlement.json() as { revealUrl: string };
+  expect(reported.revealUrl).toContain(`receipt=${receiptId}`);
+  expect(JSON.stringify(reported)).not.toContain(code);
+
+  const ownerToken = createSession(owner).token;
+  const strangerToken = createSession(stranger).token;
+  const giftCardUrl = `${BASE_URL}/receipts/${receiptId}/gift-card`;
+  expect((await fetch(giftCardUrl)).status).toBe(401);
+  expect((await fetch(giftCardUrl, { headers: { authorization: `Bearer ${agentKey}` } })).status).toBe(401);
+  expect((await fetch(giftCardUrl, { headers: { authorization: `Bearer ${strangerToken}` } })).status).toBe(404);
+
+  const ownerResponse = await fetch(giftCardUrl, { headers: { authorization: `Bearer ${ownerToken}` } });
+  expect(ownerResponse.status).toBe(200);
+  expect(ownerResponse.headers.get("cache-control")).toContain("no-store");
+  expect((await ownerResponse.json() as { code: string }).code).toBe(code);
+
+  const database = new Database(join(process.env.FIREWALL_DATA_DIR!, "firewall.sqlite"), { readonly: true });
+  const stored = database.prepare("SELECT encrypted_code FROM gift_card_fulfillments WHERE receipt_id = ?").get(receiptId) as { encrypted_code: string };
+  expect(stored.encrypted_code).not.toContain(code);
+  database.close();
+
+  const ordinaryReceipt = await fetch(`${BASE_URL}/receipts/${receiptId}`, { headers: { authorization: `Bearer ${ownerToken}` } });
+  const publicReceipt = await ordinaryReceipt.json() as { giftCardAvailable: boolean };
+  expect(publicReceipt.giftCardAvailable).toBe(true);
+  expect(JSON.stringify(publicReceipt)).not.toContain(code);
 });

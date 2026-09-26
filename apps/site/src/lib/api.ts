@@ -187,6 +187,11 @@ export async function getReceipt(sessionToken: string, id: string): Promise<Deci
   return ownerScopedJson<DecisionReceipt>(`/receipts/${encodeURIComponent(id)}`, sessionToken);
 }
 
+/** Owner-only delivery. This endpoint is requested only after a Reveal click. */
+export async function revealGiftCard(sessionToken: string, receiptId: string): Promise<{ sku: string; code: string; amountUsdc: number }> {
+  return ownerScopedJson(`/receipts/${encodeURIComponent(receiptId)}/gift-card`, sessionToken);
+}
+
 /** Newest-first, every World ID promise across every account this wallet
  * linked as owner (apps/firewall/index.ts's `GET /owner/promises`). Public
  * fields only — no agent keys, no attestation internals. */

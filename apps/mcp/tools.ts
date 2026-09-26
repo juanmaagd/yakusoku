@@ -387,20 +387,30 @@ async function completePayment(
     throw new Error(`store settlement retry returned ${res.status}: ${text}`);
   }
   const body = await res.json().catch(() => undefined);
+  const giftCardResult = z.object({
+    sku: z.string().min(1),
+    code: z.string().min(1),
+    amountUsdc: z.number().positive(),
+  }).safeParse(body);
+  const giftCard = giftCardResult.success ? giftCardResult.data : undefined;
 
   let txHash: string | undefined;
   let explorerUrl: string | undefined;
+  let revealUrl: string | undefined;
   const paymentResponseHeader = res.headers.get("PAYMENT-RESPONSE");
   if (paymentResponseHeader) {
     const settlement = decodePaymentResponseHeader(paymentResponseHeader);
     txHash = settlement.transaction;
     explorerUrl = `https://sepolia.basescan.org/tx/${txHash}`;
     try {
-      await fetch(`${firewallUrl}/receipts/${receiptId}/settlement`, {
+      const report = await fetch(`${firewallUrl}/receipts/${receiptId}/settlement`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${agentKey}` },
-        body: JSON.stringify({ txHash }),
+        body: JSON.stringify({ txHash, ...(giftCard ? { giftCard } : {}) }),
       });
+      if (!report.ok) throw new Error(`HTTP ${report.status}`);
+      const reported = await report.json().catch(() => undefined) as { revealUrl?: string } | undefined;
+      revealUrl = reported?.revealUrl;
     } catch (err) {
       // Best-effort — the gift card already settled onchain regardless — but
       // a failed report leaves the firewall's own receipt out of sync with
@@ -409,7 +419,21 @@ async function completePayment(
       console.error(`[mcp] settlement report to firewall failed for receipt ${receiptId}:`, err instanceof Error ? err.message : String(err));
     }
   }
-  return { status: "paid", resource: resourceUrl, giftCard: body, txHash, explorerUrl, receiptId };
+  return {
+    status: "paid",
+    resource: resourceUrl,
+    txHash,
+    explorerUrl,
+    receiptId,
+    ...(giftCard
+      ? {
+          revealUrl,
+          message: revealUrl
+            ? `Payment complete. Ask the human to open ${revealUrl}, sign in with the wallet linked to their Omamorisan account, and select Reveal code. The agent must not ask them to paste the code into chat.`
+            : "Payment complete, but the gift card could not be delivered to the owner dashboard yet. Do not retry the payment; use the receiptId to investigate delivery.",
+        }
+      : {}),
+  };
 }
 
 /** Shapes a fresh `/sign` verdict into the tool's return value. `pay` settles
@@ -1012,7 +1036,9 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         "purchase its own purchaseRef (e.g. \"amazon-1-first\", \"amazon-1-second\") so buying the same item " +
         "twice under one promise settles as two separate payments; reuse the SAME purchaseRef only to retry " +
         "that same purchase (after a timeout, or while waiting on check_approval) — a refusal is final for " +
-        "that item under that promise no matter the purchaseRef.",
+        "that item under that promise no matter the purchaseRef. After a gift-card " +
+        "payment, show the human the revealUrl and tell them to sign in with their linked wallet; the code " +
+        "is revealed only in the owner dashboard.",
       inputSchema: {
         url: z.string().describe("the http(s) URL of the x402-protected resource to buy"),
         justification: z.string().describe("why this purchase matches the human's original request"),
@@ -1113,7 +1139,8 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
       description:
         "Poll the outcome of a pending World ID human-approval gate started by pay_x402 (once — call again " +
         "later if still pending). If just approved, completes the original purchase and reports settlement, " +
-        "exactly like a `pay` verdict from pay_x402. If denied or expired, reports the refusal — never retried.",
+        "exactly like a `pay` verdict from pay_x402. For a gift card, show the human revealUrl and tell them " +
+        "to sign in to the owner dashboard to reveal the code. If denied or expired, reports the refusal — never retried.",
       inputSchema: { receiptId: z.string().describe("the receiptId returned by pay_x402's needs_human_approval") },
     },
     async ({ receiptId }) => {

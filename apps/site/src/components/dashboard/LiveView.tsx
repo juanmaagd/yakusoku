@@ -126,6 +126,11 @@ function initialPromiseFilter(): string | undefined {
   return new URLSearchParams(window.location.search).get("promise") ?? undefined;
 }
 
+function initialReceiptFilter(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  return new URLSearchParams(window.location.search).get("receipt") ?? undefined;
+}
+
 /** The Live tab's signed-in content (S4): the owner's decisions kept live
  * over SSE. Formerly `/app/dashboard`'s whole React island (`DashboardApp`);
  * `AppRoot` (P5) now owns the wallet/SIWE session and the sign-in gate once,
@@ -139,7 +144,7 @@ export default function LiveView({ sessionToken, onUnauthorized, onLiveStatus, f
   const [reloadKey, setReloadKey] = useState(0);
   const [connStatus, setConnStatus] = useState<SseConnectionStatus>("connecting");
   const [selectedMandateId, setSelectedMandateId] = useState<string | undefined>(initialPromiseFilter);
-  const [selectedReceiptId, setSelectedReceiptId] = useState<string | undefined>();
+  const [selectedReceiptId, setSelectedReceiptId] = useState<string | undefined>(initialReceiptFilter);
   const [resolved, setResolved] = useState<ApprovalOutcome | undefined>();
   const fetchedApprovalsRef = useRef(new Set<string>());
   const pendingRef = useRef(new Set<string>());
@@ -396,7 +401,7 @@ export default function LiveView({ sessionToken, onUnauthorized, onLiveStatus, f
             {isDesktop && (
               <aside className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-card border border-hairline bg-surface p-5">
                 {selectedReceipt ? (
-                  <DecisionDetail key={selectedReceipt.receiptId} receipt={selectedReceipt} />
+                  <DecisionDetail key={selectedReceipt.receiptId} receipt={selectedReceipt} sessionToken={sessionToken} />
                 ) : (
                   <p className="text-body-sm text-graphite">Select a decision to see what happened, step by step.</p>
                 )}
@@ -406,7 +411,7 @@ export default function LiveView({ sessionToken, onUnauthorized, onLiveStatus, f
         )}
       </div>
 
-      {!isDesktop && selectedReceipt && <DetailSheet receipt={selectedReceipt} onClose={() => setSelectedReceiptId(undefined)} />}
+      {!isDesktop && selectedReceipt && <DetailSheet receipt={selectedReceipt} sessionToken={sessionToken} onClose={() => setSelectedReceiptId(undefined)} />}
       <TutorialVideo topic="live" />
     </section>
   );
@@ -487,7 +492,7 @@ function PausedBanner({ onResume }: { onResume: () => Promise<void> }) {
   );
 }
 
-function DetailSheet({ receipt, onClose }: { receipt: DecisionReceipt; onClose: () => void }) {
+function DetailSheet({ receipt, sessionToken, onClose }: { receipt: DecisionReceipt; sessionToken: string; onClose: () => void }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -510,7 +515,7 @@ function DetailSheet({ receipt, onClose }: { receipt: DecisionReceipt; onClose: 
             <IconCross size={16} />
           </button>
         </div>
-        <DecisionDetail receipt={receipt} />
+        <DecisionDetail receipt={receipt} sessionToken={sessionToken} />
       </div>
     </div>
   );
