@@ -98,4 +98,4 @@ Bun.serve({
   },
 });
 
-console.log(`Omamorisan site (static) listening on :${PORT}`);
+console.log(`Omamori site (static) listening on :${PORT}`);

@@ -143,7 +143,7 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
   }, [goTo]);
 
   useEffect(() => {
-    document.title = view === "live" ? `Live — ${SITE.name}` : view === "account" ? `Account — ${SITE.name}` : `Promises — ${SITE.name}`;
+    document.title = view === "live" ? `Live — ${SITE.name}` : view === "account" ? `Account — ${SITE.name}` : `Intents — ${SITE.name}`;
   }, [view]);
 
   const openLive = useCallback(() => goTo("live"), [goTo]);

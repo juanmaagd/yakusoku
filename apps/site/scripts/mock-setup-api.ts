@@ -57,7 +57,7 @@ const store = new Map<string, SetupRecord>([
         { address: fakeAddress("merchant-amazon"), label: "Amazon Gift Cards (demo)" },
       ],
       messageTemplate:
-        "I authorize {owner} as the owner of my Omamorisan smart account (acct_demo_needs_owner) on Base Sepolia (chain 84532). Omamorisan may pay only the merchants I've registered, up to 5.00 USDC per payment, until I pause or withdraw.",
+        "I authorize {owner} as the owner of my Omamori smart account (acct_demo_needs_owner) on Base Sepolia (chain 84532). Omamori may pay only the merchants I've registered, up to 5.00 USDC per payment, until I pause or withdraw.",
       expiresAt: inThirtyMinutes(),
     },
   ],
@@ -68,7 +68,7 @@ const store = new Map<string, SetupRecord>([
       accountId: "acct_demo_deployed",
       perPaymentLimitUsdc: "5.00",
       recipients: [{ address: fakeAddress("merchant-gift-cards"), label: "Demo Gift Card Store" }],
-      messageTemplate: "I authorize {owner} as the owner of my Omamorisan smart account (acct_demo_deployed) on Base Sepolia (chain 84532).",
+      messageTemplate: "I authorize {owner} as the owner of my Omamori smart account (acct_demo_deployed) on Base Sepolia (chain 84532).",
       owner: DEMO_OWNER,
       smartAccount: fakeAddress("demo-deployed-account"),
       balanceUsdc: "0.00",

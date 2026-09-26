@@ -40,7 +40,7 @@ const FLOW =
   "budget, and how long (up to 7 days) — then call `request_promise` once with them and show me the World ID " +
   "link and code so I can approve on my phone; that single approval also connects my account. Show me any setup " +
   "link too so I can fund it. Before every purchase, call `list_promises` and pay through `pay_x402` under an " +
-  "active promise that already covers it, without asking me again. If nothing covers it, tell me why and only " +
+  "active intent that already covers it, without asking me again. If nothing covers it, tell me why and only " +
   "call `request_promise` with `replaces` if I agree to widen the rules. Never retry a refused payment with " +
   "different wording.";
 
@@ -73,8 +73,8 @@ export const AGENT_PROVIDERS: readonly ProviderSetup[] = [
       supported: true,
       steps: [
         "In claude.ai or Claude Desktop, open Settings → Connectors → Add custom connector.",
-        "Name it Omamorisan and paste the URL below. No sign-in is needed.",
-        "In a new chat, turn on Omamorisan from the + menu → Connectors, then paste the prompt.",
+        "Name it Omamori and paste the URL below. No sign-in is needed.",
+        "In a new chat, turn on Omamori from the + menu → Connectors, then paste the prompt.",
       ],
       requirement: "Pro or Max plan. On Team or Enterprise, an owner enables custom connectors first.",
       docsUrl: "https://support.claude.com/en/articles/11175166",
@@ -100,7 +100,7 @@ export const AGENT_PROVIDERS: readonly ProviderSetup[] = [
       steps: [
         "On chatgpt.com, open Settings → Security and login and turn on Developer mode.",
         "Go to chatgpt.com/plugins, press +, and create an app with the URL below. Set Authentication to No Authentication.",
-        "In a new chat, choose Developer mode from the + menu, select Omamorisan, then paste the prompt. ChatGPT asks you to confirm each Omamorisan action.",
+        "In a new chat, choose Developer mode from the + menu, select Omamori, then paste the prompt. ChatGPT asks you to confirm each Omamori action.",
       ],
       requirement: "Plus, Pro, Business, Enterprise or Edu, on the web.",
       docsUrl: "https://developers.openai.com/api/docs/guides/developer-mode",

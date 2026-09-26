@@ -68,7 +68,7 @@ export default function SignInGate({ session }: { session: WalletSession }) {
               )}
             </Step>
             <Step n={2} state={s2} error={error} title={`Switch to ${SITE.network}`} doneText={`On ${SITE.network}`}>
-              <p className="text-body-sm text-graphite">Promises are signed on {SITE.network}, a testnet.</p>
+              <p className="text-body-sm text-graphite">Intents are signed on {SITE.network}, a testnet.</p>
               <button type="button" onClick={() => void session.switchNetwork()} className={`${primaryButton} mt-3`}>
                 Switch network
               </button>

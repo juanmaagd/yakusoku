@@ -79,7 +79,7 @@ export default function PromiseComposer({ provider, address, onCreated, onCancel
       const created = await createMandate(serializeSignedIntent(prepared, signature, address));
       onCreated({ id: created.id, agentKey: created.agentKey, task: prepared.task });
     } catch (err) {
-      setError(isUserRejection(err) ? "Signature rejected. Nothing was created." : describeWalletError(err, "Could not create this promise."));
+      setError(isUserRejection(err) ? "Signature rejected. Nothing was created." : describeWalletError(err, "Could not create this intent."));
       setPhase("idle");
     }
   }
@@ -88,10 +88,10 @@ export default function PromiseComposer({ provider, address, onCreated, onCancel
     <section>
       <button type="button" onClick={onCancel} disabled={busy} className={`${ghostButton} -ml-3`}>
         <IconArrowLeft size={14} />
-        Promises
+        Intents
       </button>
       <h1 className="headline mt-3 text-heading-sm md:text-heading">
-        New <strong>promise</strong>
+        New <strong>intent</strong>
       </h1>
 
       <div className="mt-8 grid items-start gap-10 lg:grid-cols-[minmax(0,1fr)_440px]">
@@ -135,7 +135,7 @@ export default function PromiseComposer({ provider, address, onCreated, onCancel
               </span>
             </div>
             <p id="promise-budget-help" className={helpText}>
-              The most your agent can spend under this promise.
+              The most your agent can spend under this intent.
             </p>
           </div>
 
@@ -253,7 +253,7 @@ function PromisePreview({ prepared, draftTask, address, phase, missing, error, o
   return (
     <div className="rounded-card border border-hairline bg-surface shadow-console">
       <div className="flex items-center justify-between gap-3 border-b border-hairline px-5 py-3">
-        <span className="text-body-sm font-semibold text-ink">Promise</span>
+        <span className="text-body-sm font-semibold text-ink">Intent</span>
         <span className="label text-graphite">EIP-712 typed data</span>
       </div>
 
@@ -305,7 +305,7 @@ function PromisePreview({ prepared, draftTask, address, phase, missing, error, o
 
       <div className="border-t border-hairline px-5 py-4">
         <button type="button" onClick={onSign} disabled={!prepared || phase !== "idle"} className={`${primaryButton} w-full`}>
-          {phase === "signing" ? "Waiting for your wallet…" : phase === "submitting" ? "Registering with the firewall…" : "Sign promise"}
+          {phase === "signing" ? "Waiting for your wallet…" : phase === "submitting" ? "Registering with the firewall…" : "Sign intent"}
         </button>
         {!prepared && missing.length > 0 ? (
           <p className="mt-2 text-caption text-graphite">Add {joinList(missing)} to sign.</p>

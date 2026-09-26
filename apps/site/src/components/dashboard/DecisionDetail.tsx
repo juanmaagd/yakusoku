@@ -103,7 +103,7 @@ export default function DecisionDetail({ receipt, sessionToken }: { receipt: Dec
             </span>
           </Row>
           <Row term="When">{new Date(receipt.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" })}</Row>
-          {receipt.task && <Row term="Promise">{receipt.task}</Row>}
+          {receipt.task && <Row term="Intent">{receipt.task}</Row>}
         </dl>
         {receipt.justification && (
           <details className="group mt-3">

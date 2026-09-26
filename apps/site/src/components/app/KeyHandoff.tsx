@@ -40,7 +40,7 @@ export default function KeyHandoff({ created, onDone, entryPath, onOpenLive }: K
               <IconCheck size={18} strokeWidth={2} />
             </span>
             <h1 className="headline text-heading-sm md:text-heading">
-              Promise <strong>signed.</strong>
+              Intent <strong>signed.</strong>
             </h1>
           </div>
           <p className="mt-3 text-body text-graphite">Connect your agent below. Your key is shown once; save the configuration before leaving.</p>
@@ -54,11 +54,11 @@ export default function KeyHandoff({ created, onDone, entryPath, onOpenLive }: K
       <div className="mt-8">
         <SecretField fieldLabel="Agent key" value={created.agentKey} />
         <p className="mt-3 max-w-[64ch] text-body-sm text-graphite">
-          This secret authorizes payment requests under this promise. The firewall still checks every request. Keep it in your client settings, not in chat.
+          This secret authorizes payment requests under this intent. The firewall still checks every request. Keep it in your client settings, not in chat.
         </p>
       </div>
 
-      <p className="mt-4 break-all font-mono text-caption text-graphite">Promise ID: {created.id}</p>
+      <p className="mt-4 break-all font-mono text-caption text-graphite">Intent ID: {created.id}</p>
       <TutorialVideo topic="connect" />
       <ConnectionSetup agentKey={created.agentKey} entryPath={entryPath} />
 
@@ -78,7 +78,7 @@ export default function KeyHandoff({ created, onDone, entryPath, onOpenLive }: K
             <IconArrowRight size={14} />
           </button>
           <button type="button" disabled={!stored} onClick={onDone} className={ghostButton}>
-            Back to promises
+            Back to intents
           </button>
         </div>
       </div>

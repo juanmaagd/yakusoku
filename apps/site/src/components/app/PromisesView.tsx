@@ -34,7 +34,7 @@ export default function PromisesView({ address, sessionToken, entryPath, onOpenL
   if (view.kind === "new") {
     const provider = getInjectedProvider();
     if (!provider) {
-      return <InlineError title="Your wallet disconnected." detail="Reload the page and sign in again to create a promise." />;
+      return <InlineError title="Your wallet disconnected." detail="Reload the page and sign in again to create an intent." />;
     }
     return (
       <PromiseComposer
