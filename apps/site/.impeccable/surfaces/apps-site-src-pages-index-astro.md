@@ -17,7 +17,7 @@ OWN-WORLD: White canvas in a 1200px column framed by hairline rails; Mona Sans d
 
 STORY: The visitor watches a Steam-card request refused against an Amazon promise, walks the six layers as a technical diagram, believes it through on-chain receipts, then launches the app or plugs in an agent.
 
-FIRST VIEWPORT: 64px nav, black "Launch app" right. Left: mono eyebrow, 64px mixed-weight headline, subhead, black plus outline CTAs. Right: live verdict console replaying attack/legit, an obsidian key object behind it.
+FIRST VIEWPORT: 64px nav, black "Launch app" right. Left: mixed-weight headline (no eyebrow), subhead, black plus outline CTAs. Right: the promise-diff card (you signed vs agent asks, deterministic rules pass, Refused) floating over the caged-key art; plays once, Replay restarts.
 
 FORM: Category canon, user-pinned (Clutch-led); position n/a; seed 0d6eb18c.
 

@@ -1,136 +1,205 @@
-# Design reference — warm paper notebook
+---
+name: Omamorisan
+description: A pre-signature firewall for AI agent payments, presented as a security-grade white gallery.
+colors:
+  ink: "#0b0d12"
+  charcoal: "#1a1d24"
+  graphite: "#5b606b"
+  stone: "#8a8f99"
+  canvas: "#ffffff"
+  fog: "#f7f8fa"
+  hairline: "#e6e8ec"
+  hairline-strong: "#d5d8de"
+  verified: "#1f5bff"
+  verified-wash: "#eaf0ff"
+  refuse: "#e5372a"
+  refuse-wash: "#fdeceb"
+  refuse-ink: "#b4231a"
+  ask: "#b87400"
+  ask-wash: "#fff4dc"
+  ask-ink: "#85530a"
+typography:
+  display:
+    fontFamily: "Mona Sans Variable, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "68px"
+    fontWeight: 400
+    lineHeight: 1.04
+    letterSpacing: "-0.02em"
+  heading:
+    fontFamily: "Mona Sans Variable, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "38px"
+    fontWeight: 400
+    lineHeight: 1.12
+    letterSpacing: "-0.015em"
+  body:
+    fontFamily: "Mona Sans Variable, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "16px"
+    fontWeight: 400
+    lineHeight: 1.55
+  label:
+    fontFamily: "Martian Mono Variable, ui-monospace, SFMono-Regular, Menlo, monospace"
+    fontSize: "11px"
+    fontWeight: 400
+    lineHeight: 1.4
+    letterSpacing: "0.12em"
+rounded:
+  sm: "4px"
+  card: "6px"
+  btn: "6px"
+spacing:
+  xs: "4px"
+  sm: "8px"
+  md: "16px"
+  lg: "24px"
+  band: "64px"
+  band-lg: "96px"
+components:
+  button-primary:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.canvas}"
+    rounded: "{rounded.btn}"
+    padding: "10px 18px"
+  button-primary-hover:
+    backgroundColor: "{colors.charcoal}"
+  button-outline:
+    backgroundColor: "transparent"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.btn}"
+    padding: "10px 18px"
+  card:
+    backgroundColor: "{colors.canvas}"
+    rounded: "{rounded.card}"
+---
 
-> **Rule (builder, Sat Sep 26):** the product is named Omamorisan, but the design must NOT use any Japanese aesthetic (no kanji, torii, washi, seals, cherry blossoms or vermilion-as-Japan). Follow this reference only.
->
-> Supplied by the builder as the binding visual direction for the site (`apps/site`). It describes a style analyzed from a public product marketing site ("warm paper notebook under afternoon sun"). We use the **style only**: no third-party names, logos, illustrations or proprietary fonts ship in this project. Implementation substitutes: **Inter** for the sans (proprietary original), **Source Serif 4** for the editorial serif (proprietary original). Token names in code are product-neutral (see the mapping at the end).
+# Design System: Omamorisan
 
-**Theme:** light
+## Overview
 
-Source measurements are normalized; roles and recommendations are interpreted. Font summary lists are independent, not paired by position. HTML examples are reconstructions, not source components.
+**Creative North Star: "The Gallery Console"**
 
-The style reads like a well-loved paper notebook under afternoon light: a warm off-white canvas (#f6f5f4) that feels tactile rather than clinical, generous sans typography that gives editorial weight to product copy, and color used as sparse punctuation — peachy pills highlight verbs, a single blue anchors the primary action, and a rotating cast of accent hues (coral, amber, sky, midnight) paints the feature card backgrounds like sticky notes. Cards sit on the canvas with 1px hairline borders and 12px corners — no shadows, no chrome — like ruled sections in a notebook. Motion is playful and springy, with 200ms ease transitions and bouncy character-mark animations that make the interface feel alive without ever being decorative.
+A sober, security-grade white gallery, not a warm notebook and not a dark neon shield hero — both were explicitly rejected in favor of a hairline-framed, near-monochrome canvas where the signed promise and the agent's request appear as real product fragments and color only ever reports state. The craft bar was three pinned reference products (clutch.security, base.org, neverhack.com), borrowed for grammar only — white gallery canvas, mixed-weight grotesk headlines, technical line diagrams, mono uppercase labels, split hero with live product — never their logos, fonts, or exact colors. The world explicitly refuses any Japanese aesthetic despite the Japanese product name.
 
-## Tokens — Colors
+The landing (Persuade) and the app (Operate) share one world at two densities: the landing tells the story once, spaciously, with an animated promise-diff hero; the app is denser and quieter, its motion reserved for actual state changes (a new receipt sliding into the feed, a sheet opening), never decoration.
 
-| Name | Value | Role |
-|------|-------|------|
-| Primary Blue | `#0075de` | Primary CTA fill, active nav accent, filled action buttons — the single chromatic commitment in a near-monochrome system |
-| Paper Warmth | `#f6f5f4` | Page canvas, hero background, section backgrounds |
-| Pure White | `#ffffff` | Card surfaces, elevated panels, contrast text on dark cards |
-| Ink Black | `#000000` | Primary text, nav links, headings — at varying alpha (100%, 95%, 90%, 60%, 40%, 20%) to build hierarchy |
-| Charcoal | `#111111` | Dark text variant where pure black feels too harsh |
-| Stone | `#757575` | Secondary nav text, muted helper text, deactivated labels |
-| Graphite | `#615d59` | Body text with warm cast |
-| Slate | `#696969` | Card body text, secondary content within cards |
-| Sky Tint | `#e6f3fe` | Ghost CTA background, soft blue wash, tinted hover states |
-| Marigold | `#ffb110` | Hero pill highlights, feature card background, warm accent for callouts |
-| Coral | `#f64932` | Decorative card backgrounds, hero pill alternates |
-| Saffron | `#e89d01` | Secondary warm yellow for background washes |
-| Vermillion | `#e32d14` | Deep coral for saturated section backgrounds, signal-warm accent |
-| Mocha | `#b18164` | Warm brown accent for section panels |
-| Signal Blue | `#097fe8` | Decorative card backgrounds, secondary blue |
-| Sky Wash | `#62aef0` | Lightest blue — decorative backgrounds, heading accent highlights |
-| Midnight Ink | `#02093a` | Dark island cards, decorative bands, soft emphasis behind content |
+**Key Characteristics:**
+- White canvas, hairline-framed 1200px column, near-zero shadow.
+- Color is rationed to exactly three states: verified blue, refuse red, ask-human amber — nothing else in the system is colored.
+- Mona Sans mixed 400/600 headlines paired with uppercase Martian Mono labels for data and metadata.
+- Monochrome 1-bit stippled obsidian illustrations, used sparingly, never as generic decoration.
+- Black is the only "confident" UI color: primary actions are ink-black, not blue.
 
-## Tokens — Typography
+## Colors
 
-**Sans (substitute: Inter)** — 400 body, 500 nav/UI, 600–700 display headings. Aggressive negative letter-spacing at large sizes (-4.6px at 96px, -2px at 72px) so headlines feel confident and compact. Sizes: 12, 14, 16, 20, 22, 24, 40, 42, 48, 54, 72, 96px. OpenType: `"lnum"`.
+Color is rationed to mean state, never mood or decoration; everything else in the interface is ink, graphite, stone or hairline.
 
-**Editorial serif (substitute: Source Serif 4)** — 400 only, 18px and 32px; reserved for a few section intros and pull-quote moments. Never for UI labels or navigation.
+### Primary
+- **Ink** (`#0b0d12`): primary text, headings, primary button fill — the system's one "confident" non-state color, doubling as the default action color.
 
-| Role | Size | Line height | Letter spacing |
-|------|------|-------------|----------------|
-| caption | 12px | 1.33 | 0.12px |
-| body-sm | 14px | 1.43 | — |
-| body | 16px | 1.5 | — |
-| subheading | 20px | 1 | — |
-| heading-sm | 22px | 1.27 | -0.242px |
-| heading | 40px | 1.5 | — |
-| heading-lg | 48px | 1.5 | — |
-| display-sm | 54px | 1.04 | -1.89px |
-| display | 72px | 1.21 | -2.016px |
-| display-lg | 96px | 1.04 | -4.608px |
+### Secondary (state colors — the only chromatic vocabulary)
+- **Verified Blue** (`#1f5bff`): matched-intent / paid / human-approved state — focus rings, verdict stamps, the firewall diagram's final node, and the accent pixel kept in the stippled art.
+- **Refuse Red** (`#e5372a` fill / `#b4231a` ink variant): refused-payment state — verdict text, diff underline, danger buttons. The `-ink` variant is the AA-safe darker text color on white or on the red wash; the flat `#e5372a` is for fills only.
+- **Ask Amber** (`#b87400` fill / `#85530a` ink variant): needs-human state, same fill/ink-variant split as refuse.
 
-## Tokens — Spacing & Shapes
+### Neutral
+- **Canvas** (`#ffffff`): page and card background — the gallery white.
+- **Fog** (`#f7f8fa`): hover backgrounds, subtle callout panels (e.g. the "fail-closed" strip).
+- **Charcoal** (`#1a1d24`): primary button hover.
+- **Graphite** (`#5b606b`): secondary/body-adjacent text, help text.
+- **Stone** (`#8a8f99`): tertiary/muted labels, disabled text.
+- **Hairline** (`#e6e8ec`) / **Hairline-strong** (`#d5d8de`): the only borders in the system — the frame rails, card edges, dividers, input strokes.
 
-Base unit 4px, comfortable density. Spacing: 4, 8, 12, 16, 20, 24, 28, 32, 36, 64, 80px.
+### Named Rules
+**The State-Only Rule.** Blue, red and amber never appear as decoration. Each exists solely to report a firewall/promise state (verified, refused, needs-you); if a UI element isn't reporting one of those three states, it is ink, graphite, stone, or hairline.
 
-| Element | Radius |
-|---------|--------|
-| cards | 12px |
-| pills | 9999px |
-| small | 4px |
-| buttons | 8px |
+**The Black-Action Rule.** The primary/confident action color is ink-black (`#0b0d12`), not the accent blue. Blue is reserved for the "verified" state, so it never gets diluted into meaning "click here."
 
-Layout: page max-width 1440px, section gap 80px, card padding 24px, element gap 8px.
+## Typography
 
-## Components
+**Display/Heading Font:** Mona Sans Variable (with `ui-sans-serif, system-ui, sans-serif` fallback)
+**Label/Data Font:** Martian Mono Variable (with `ui-monospace, SFMono-Regular, Menlo, monospace` fallback)
 
-- **Primary CTA button:** `#0075de` fill, white 14px/500 text, 8px radius, padding 6px 15px. The only filled chromatic button in any view.
-- **Ghost CTA button:** `#e6f3fe` fill, `#0075de` text, 8px radius. The lower-commitment alternative beside the primary.
-- **Ghost text button:** transparent, ink at 95% alpha, 8px radius. Tertiary actions.
-- **Outlined text button:** transparent, 1px border ink 90%, 4px radius, padding 5px 10px. Compact inline actions.
-- **Muted nav link:** ink at 54% alpha, darkens to 100% on hover, never underlined.
-- **Pill tag:** colored fill, black or white text, 9999px radius, padding 4px 12px — status labels.
-- **White feature card:** white, 12px radius, 24px padding, 1px border `rgba(0,0,0,0.08)`, no shadow.
-- **Accent feature card:** one accent hue as full background, 12px radius, 24px padding, no border.
-- **Dark feature card:** `#02093a` with white text — a dark island, never a full dark theme.
-- **Hero highlight pill:** accent fill (peach `#f6d5b8`, marigold `#ffb110` or coral `#f64932`) behind one verb of the hero sentence, 9999px radius, padding 8px 24px — the signature typographic device.
-- **Task card (product mockup):** white, 8px radius, padding 8px 12px, hairline border, 14px/500 text, optional small status pill.
-- **Section header:** 48–54px, weight 500–700, tight tracking, optional 18px serif subhead.
+**Character:** A variable grotesk carrying both the editorial hero voice and dense UI copy, paired with an uppercase monospace for anything that is data, metadata, or a system label — the pairing that reads "product marketing" next to "technical instrument" on the same screen.
 
-## Do's and Don'ts
+### Hierarchy
+- **Display** (400, 68px / hero up to `clamp` ~44–56px on landing, 1.04 line-height, -0.02em): the hero headline only; set as a `.headline` block mixing 400 body weight with a 600 `<strong>` span on the key phrase — never the whole sentence bolded.
+- **Heading-lg** (400/600 mixed, 52px, 1.06): section headers ("Six stages...").
+- **Heading** (400, 38px, 1.12, -0.015em): sub-section headers.
+- **Heading-sm** (400, 24px, 1.25, -0.01em): card/verdict headings (e.g. the promise card's "Refused").
+- **Body-lg / Body / Body-sm** (400, 18/16/14px, ~1.5): copy, subheads, help text; body copy is capped at roughly 46–52ch measure.
+- **Label** (400, 11px, uppercase, 0.12em tracking, Martian Mono, `font-stretch: 90%`): stage numbers, nav-adjacent metadata, pill text, "You signed" / "Agent asks" data-row keys, the "Built with" strip.
+- **Caption** (400, 12px, often mono/tabular for numbers): timestamps, addresses, resource paths.
 
-Do:
-- `#f6f5f4` canvas with `#ffffff` cards — never a warm card on a white page.
-- One `#0075de` primary action per screen; everything else ghost or text.
-- Negative letter-spacing on every display size; body at normal tracking.
-- 1px `rgba(0,0,0,0.08)` borders instead of shadows.
-- 12px cards, 8px buttons, 9999px only for pills.
-- Paint feature blocks with accent hues rather than borders or shadows.
-- 200ms ease for hovers and transitions; spring motion only for hero elements and character marks.
+### Named Rules
+**The Mixed-Weight Headline Rule.** Headlines set at 400 weight with only the load-bearing phrase lifted to 600 (`.headline strong`) — never a uniform bold headline, never a separate kicker/eyebrow line above it.
 
-Don't:
-- Pure white page background.
-- Shadows on content cards (only the sticky nav and the product UI mockup carry one).
-- More than one filled chromatic button in a view.
-- 100% black for all text — build hierarchy with alpha.
-- The serif for UI labels or navigation.
-- Radius larger than 12px on rectangular content.
-- Gradients — strictly flat fills.
-
-## Surfaces and elevation
-
-| Level | Value | Purpose |
-|-------|-------|---------|
-| 0 Page canvas | `#f6f5f4` | Warm off-white base |
-| 1 Card surface | `#ffffff` | Surfaces that sit on top of the page |
-| 2 Accent card | `#ffb110` (or another accent) | Colored feature blocks |
-| 3 Dark card | `#02093a` | Dark island blocks |
-
-- Sticky nav shadow: `0px 0.7px 1.462px 0px rgb(0% 0% 0% / 0.015), 0px 3px 9px 0px rgb(0% 0% 0% / 0.03)`
-- Product UI mockup shadow: `0px 4px 12px rgba(0, 0, 0, 0.1)`
-
-## Imagery
-
-Illustration-first, photography-free: flat illustrated marks in 2px colored circles, hand-drawn squiggles, sparkles and arrows as punctuation, and real product UI mockups as the only "real" visuals (large, centered, one drop shadow). No lifestyle photos, stock imagery or 3D renders.
+**The Mono-Means-Data Rule.** Martian Mono is reserved for labels, stage indices, addresses, amounts, and timestamps — anything that is literally data or a system value. It never appears in sentence-form prose.
 
 ## Layout
 
-Centered, max-width ~1440px. Hero as a centered stack: headline with an embedded highlight pill → subhead → two-button CTA row → large product UI mockup. Sections alternate between white-card grids and full-bleed accent panels; feature blocks use two columns (text + colored panel) alternating sides; a 2×2 card grid with a full-width top card. Section gaps ~80px. Fixed 64px top nav with centered items and right-aligned actions.
+The landing and app share one hairline-framed column: `.frame` centers content at `max-width: 1200px` with a 1px vertical hairline border on each side (`border-inline`), so the whole site reads as one long framed page rather than full-bleed sections. Landing sections are `.band` blocks — a top hairline divider with 64px vertical padding on mobile, 96px from the `md` breakpoint (768px) — giving the generous, spacious Persuade density.
 
-## Implementation token mapping (Tailwind v4 `@theme`)
+The app (`/app`, `/app/dashboard`) runs the same frame and hairline vocabulary at a denser Operate rhythm: a 64px shell bar (matching the landing's 64px nav height) with tabs and a wallet chip, then the framed column holds tighter card stacks and a two-lane feed with a detail drawer instead of full `.band` sections. Card internal padding and list-row padding stay in the 12–16px range rather than the landing's 64–96px band gaps.
 
-| Reference | Code token |
-|-----------|-----------|
-| Primary Blue `#0075de` | `--color-primary` |
-| Paper Warmth `#f6f5f4` | `--color-canvas` |
-| Pure White | `--color-surface` |
-| Ink Black | `--color-ink` |
-| Charcoal | `--color-charcoal` |
-| Stone / Graphite / Slate | `--color-stone`, `--color-graphite`, `--color-slate` |
-| Sky Tint | `--color-sky-tint` |
-| Marigold / Coral / Saffron / Vermillion / Mocha | `--color-marigold`, `--color-coral`, `--color-saffron`, `--color-vermillion`, `--color-mocha` |
-| Signal Blue / Sky Wash / Midnight Ink | `--color-signal`, `--color-sky`, `--color-midnight` |
-| Sans | `--font-sans` (Inter) |
-| Serif | `--font-serif` (Source Serif 4) |
+## Elevation & Depth
+
+The system is flat by default: cards use a single hairline border (`border border-hairline`) and no shadow. Exactly one shadow token exists in the whole build, `--shadow-console` (`0 30px 60px -30px rgba(11,13,18,0.28), 0 2px 6px rgba(11,13,18,0.06)`), and it is applied to exactly one element — the hero's "promise" verdict card — to lift the one artifact the story asks the visitor to focus on. Depth everywhere else is conveyed by hairline framing and fog-tinted hover backgrounds, not shadow.
+
+### Shadow Vocabulary
+- **Console** (`0 30px 60px -30px rgba(11,13,18,0.28), 0 2px 6px rgba(11,13,18,0.06)`): the hero promise/verdict card only. Not used on any other card, panel, or dashboard element.
+
+### Named Rules
+**The One-Shadow Rule.** A single soft shadow token exists, reserved for the hero's promise card. Every other card, panel and row in the system is a flat hairline rectangle.
+
+## Shapes
+
+Corners are consistently small and understated: 6px on cards and buttons (`--radius-card`, `--radius-btn`), 4px on small/compact elements (chips, state tags, small badges), and fully round (`rounded-full`) only for the small circular status-mark rings in checklists. There is no pill-radius button or tag anywhere in the built system (unlike the retired notebook world, which used `9999px` pills throughout). Borders are hairline (1px, `#e6e8ec` / `#d5d8de`) everywhere; the frame itself is a pair of hairline rules bounding the whole 1200px column.
+
+## Components
+
+### Buttons
+- **Shape:** 6px radius (`--radius-btn`), 10px/18px padding, 14px/500 text, 200ms color transitions.
+- **Primary:** ink-black fill (`#0b0d12`), white text, charcoal hover (`#1a1d24`) — the only filled chromatic-free black button, used for "Launch app" and the confident default action.
+- **Outline:** 1px ink border, transparent fill, fog hover background — the secondary/lower-commitment action.
+- **Small/Ghost/Text variants:** compact row-scoped actions (Copy, Revoke, Retry) at the same 6px radius; ghost has no border, text-only underlines on hover.
+- **Danger (outlined and filled):** built on the `refuse`/`refuse-ink` tokens exclusively for destructive actions (revoke); never used for ordinary secondary actions.
+
+### Chips / State pills
+- **Style:** `label` mono text, 4px radius (`rounded-sm`), selected state is solid ink fill; unselected is a hairline-strong outline. State pills (`StatusPill`) use only the four state washes (verified/refuse/ask/muted) plus a neutral hairline-outlined variant — never a decorative color.
+
+### Cards / Containers
+- **Corner Style:** 6px radius (`--radius-card`).
+- **Background:** white surface on white/fog canvas.
+- **Shadow Strategy:** none, except the single hero console shadow (see Elevation & Depth).
+- **Border:** 1px hairline.
+- **Internal Padding:** 16–24px on landing feature panels; 12–16px in dense app rows.
+
+### Inputs / Fields
+- **Style:** 1px hairline-strong border, 6px radius, white surface, graphite placeholder.
+- **Focus:** border darkens to ink; global `:focus-visible` also draws a 2px verified-blue outline with 2px offset — the one place blue appears outside a verdict.
+- **Error:** refuse-ink text below the field.
+
+### Navigation
+- Sticky 64px header, hairline bottom border, canvas background; nav links are graphite, darkening to ink on hover, never underlined; the black "Launch app" button sits right-aligned. The app shell reuses the same 64px bar height with Promises/Live tabs and a "Pause all" control instead of marketing links.
+
+### Signature Component: The Promise-Diff Card
+The hero's centerpiece: a hairline-framed, console-shadowed card showing a `dl` of "You signed" vs. "Agent asks" rows, a mismatched word underlined in a refuse-red gradient wash, a row of small passed-rule checkmarks in mono caption text, and a verdict line ("Refused — not what you signed"). On load (or on manual "Replay"), rows fade/slide in in sequence and the mismatch underline sweeps in via a `background-size` transition, timed 380–1500ms with `ease-out-soft`; it is the landing's only choreographed motion sequence and fully respects `prefers-reduced-motion`, defaulting to its final, fully-revealed state.
+
+## Do's and Don'ts
+
+### Do:
+- **Do** ration color to exactly three states (verified blue, refuse red, ask amber) plus their washes and `-ink` text variants; everything else is ink/graphite/stone/hairline.
+- **Do** use ink-black, not blue, for primary/confident actions.
+- **Do** keep radius small and consistent: 6px for cards/buttons, 4px for compact chips, full round only for tiny status-mark rings.
+- **Do** set headlines at 400 weight with only the key phrase lifted to 600 — never a fully bold headline.
+- **Do** reserve Martian Mono for data/labels/metadata, never for prose sentences.
+- **Do** keep the interface flat; the hero promise card is the one deliberate exception to the no-shadow rule.
+- **Do** scope motion to actual state changes (a new decision arriving, a sheet opening) in the app, and to the hero's one promise-diff replay on the landing; always provide a fully-revealed reduced-motion final state.
+- **Do** keep 1-bit stippled obsidian illustrations sparse and load-bearing (hero, gate, empty states, handoff, approval) rather than generic decoration.
+
+### Don't:
+- **Don't** use any Japanese aesthetic motif (kanji, torii, washi, seals, vermilion-as-Japan, cherry blossoms) despite the Japanese product name — this is a binding brand commitment, not a style option.
+- **Don't** use pill/`9999px` radius on buttons or content cards; that belonged to the retired warm-notebook world and is gone from the shipped system.
+- **Don't** add a second shadow token or shadow a second card; the system is otherwise flat by design.
+- **Don't** invent a kicker/eyebrow line above headlines; the shipped hierarchy is mixed-weight headline direct to subhead, with mono labels reserved for actual data rows, not decorative overline text.
+- **Don't** use glyph icon fonts; the built icon set is hand-authored 16px stroke SVGs at a single 1.5 stroke weight, `currentColor`-driven so state color always comes from the parent.
+- **Don't** surface internal technical names (Jev, Intercepta, state-machine values) in primary product copy — the user-facing noun is "promise," and technical detail sits one click away in a disclosure.
