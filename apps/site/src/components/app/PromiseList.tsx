@@ -37,7 +37,7 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
       const [mandates, worldIdPromises] = await Promise.all([listMandates(sessionToken), listOwnerPromises(sessionToken)]);
       setState({ kind: "loaded", mandates: sortPromises(mandates), worldIdPromises: sortWorldIdPromises(worldIdPromises) });
     } catch (err) {
-      setState({ kind: "error", message: err instanceof Error ? err.message : "Could not load your promises." });
+      setState({ kind: "error", message: err instanceof Error ? err.message : "Could not load your intents." });
     }
   }, [sessionToken]);
 
@@ -87,14 +87,14 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
         {hasPromises && (
           <button type="button" onClick={onNew} className={primaryButton}>
             <IconPlus size={14} />
-            New promise
+            New intent
           </button>
         )}
       </div>
 
       <div className="mt-8">
         {state.kind === "loading" && (
-          <ul aria-busy="true" aria-label="Loading your promises" className="grid gap-4 lg:grid-cols-2">
+          <ul aria-busy="true" aria-label="Loading your intents" className="grid gap-4 lg:grid-cols-2">
             {[0, 1].map((i) => (
               <li key={i} className="rounded-card border border-hairline p-5">
                 <Skeleton className="h-5 w-16" />
@@ -106,18 +106,18 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
           </ul>
         )}
 
-        {state.kind === "error" && <InlineError title="Couldn't load your promises." detail={state.message} onRetry={() => void load()} />}
+        {state.kind === "error" && <InlineError title="Couldn't load your intents." detail={state.message} onRetry={() => void load()} />}
 
         {state.kind === "loaded" && !hasPromises && (
           <div className="rounded-card border border-hairline">
             <EmptyState
               art="/art/app/intent.webp"
-              title="No promises yet"
-              body="Sign your first promise. Your agent gets a key that can only ask the firewall to pay for it."
+              title="No intents yet"
+              body="Sign your first intent. Your agent gets a key that can only ask the firewall to pay for it."
             >
               <button type="button" onClick={onNew} className={primaryButton}>
                 <IconPlus size={14} />
-                New promise
+                New intent
               </button>
             </EmptyState>
           </div>
@@ -229,7 +229,7 @@ function WorldIdPromiseCard({ promise, onRevoke }: { promise: OwnerPromise; onRe
         <div className="border-t border-hairline pt-4">
           {confirming ? (
             <ConfirmInline
-              message="Revoke this promise? Your agent can't spend from it anymore."
+              message="Revoke this intent? Your agent can't spend from it anymore."
               confirmLabel="Revoke"
               busyLabel="Revoking…"
               onConfirm={async () => {
@@ -306,7 +306,7 @@ function PromiseCard({ mandate, onRevoke }: { mandate: SerializedMandate; onRevo
         <div className="border-t border-hairline pt-4">
           {confirming ? (
             <ConfirmInline
-              message="Revoke this promise? Its agent key stops working immediately."
+              message="Revoke this intent? Its agent key stops working immediately."
               confirmLabel="Revoke"
               busyLabel="Revoking…"
               onConfirm={async () => {
@@ -354,10 +354,10 @@ function PromiseIdRef({ id }: { id: string }) {
       type="button"
       onClick={() => void copy()}
       title={id}
-      aria-label={copied ? "Promise ID copied" : `Copy promise ID ${short}`}
+      aria-label={copied ? "Intent ID copied" : `Copy intent ID ${short}`}
       className="inline-flex items-center gap-2 rounded-sm px-1.5 py-1 text-graphite transition-colors duration-200 ease-out hover:bg-fog hover:text-ink"
     >
-      <span className="label">Promise ID</span>
+      <span className="label">Intent ID</span>
       <span className="font-mono text-caption text-ink">{short}</span>
       {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
     </button>

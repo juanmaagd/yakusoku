@@ -370,10 +370,10 @@ export default function LiveView({ sessionToken, onUnauthorized, onLiveStatus, f
 
         {load.kind === "loaded" && mandates.length === 0 && promises.length === 0 && (
           <div className="rounded-card border border-hairline">
-            <EmptyState art="/art/app/agent.webp" title="No promises yet" body="Your agent can only pay against a promise you signed. Sign one first.">
+            <EmptyState art="/art/app/agent.webp" title="No intents yet" body="Your agent can only pay against an intent you signed. Sign one first.">
               <a href={SITE.appRoute} className={primaryButton}>
                 <IconPlus size={14} />
-                New promise
+                New intent
               </a>
             </EmptyState>
           </div>
@@ -386,9 +386,9 @@ export default function LiveView({ sessionToken, onUnauthorized, onLiveStatus, f
               title="No payments yet."
               body="When your agent asks the firewall to pay, every decision shows up here in real time."
             >
-              <p className="max-w-[46ch] text-body-sm text-graphite">Connect your agent with the key or account it received when the promise was set up.</p>
+              <p className="max-w-[46ch] text-body-sm text-graphite">Connect your agent with the key or account it received when the intent was set up.</p>
               <a href={SITE.appRoute} className={textButton}>
-                Go to promises
+                Go to intents
                 <IconArrowRight size={14} />
               </a>
             </EmptyState>
@@ -449,7 +449,7 @@ function PromiseFilter({
           onChange={(e) => onSelect(e.target.value || undefined)}
           className={`${inputBase} appearance-none py-2 pr-9 text-body-sm sm:w-[320px]`}
         >
-          <option value="">All promises</option>
+          <option value="">All intents</option>
           {mandates.map((m) => (
             <option key={m.id} value={m.id}>
               {truncate(m.message.task, 56)}
@@ -470,7 +470,7 @@ function PausedBanner({ onResume }: { onResume: () => Promise<void> }) {
       <img src="/art/app/pause.webp" alt="" width={1024} height={1024} decoding="async" className="hidden size-20 shrink-0 md:block" />
       <div className="min-w-0 flex-1">
         <h2 className="text-subheading font-medium text-ink">All your agents are paused.</h2>
-        <p className="mt-1 text-body-sm text-graphite">The firewall refuses to sign for any of your promises until you resume.</p>
+        <p className="mt-1 text-body-sm text-graphite">The firewall refuses to sign for any of your intents until you resume.</p>
       </div>
       <button
         type="button"

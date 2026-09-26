@@ -30,15 +30,15 @@ export function verdictOf(r: Pick<DecisionReceipt, "state" | "verdict">): Verdic
 }
 
 function policyReason(raw: string): string {
-  if (/budget/i.test(raw)) return "Outside your promise: budget.";
-  if (/expired/i.test(raw)) return "Outside your promise: expiry.";
-  if (/network/i.test(raw)) return "Outside your promise: network.";
-  if (/asset/i.test(raw)) return "Outside your promise: asset.";
-  if (/revoked/i.test(raw)) return "The promise was revoked.";
+  if (/budget/i.test(raw)) return "Outside your intent: budget.";
+  if (/expired/i.test(raw)) return "Outside your intent: expiry.";
+  if (/network/i.test(raw)) return "Outside your intent: network.";
+  if (/asset/i.test(raw)) return "Outside your intent: asset.";
+  if (/revoked/i.test(raw)) return "The intent was revoked.";
   if (/paused by owner/i.test(raw)) return "You paused all agents.";
-  if (/unknown intent/i.test(raw)) return "No promise matches this request.";
+  if (/unknown intent/i.test(raw)) return "No intent matches this request.";
   if (/malformed/i.test(raw)) return "The payment request was malformed.";
-  return "Outside your promise.";
+  return "Outside your intent.";
 }
 
 /** One sentence for the "Omamorisan" lane. */
@@ -65,7 +65,7 @@ export function plainReason(r: Pick<DecisionReceipt, "state" | "reasons" | "worl
       return "Waiting for you.";
     case "world_id_denied":
       if (r.worldId?.status === "paused") return "Stopped: you paused all agents.";
-      if (r.worldId?.status === "revoked") return "Stopped: the promise was revoked.";
+      if (r.worldId?.status === "revoked") return "Stopped: the intent was revoked.";
       if (r.worldId?.status === "error") return "The approval failed, so it was refused.";
       return "You denied it.";
     case "world_id_expired":
@@ -76,7 +76,7 @@ export function plainReason(r: Pick<DecisionReceipt, "state" | "reasons" | "worl
       return "Signing failed. Nothing was paid.";
     case "signed":
     case "settled":
-      return "Matches your promise. Signed.";
+      return "Matches your intent. Signed.";
     case "settlement_failed":
       return "Signed, but the settlement failed.";
     case "error":
@@ -94,11 +94,11 @@ export interface StageRow {
 
 const STAGES: { id: string; name: string }[] = [
   { id: "idempotency", name: "Not a replay" },
-  { id: "policy", name: "Within your promise" },
+  { id: "policy", name: "Within your intent" },
   { id: "merchant", name: "Verified with the store directly" },
   { id: "provenance", name: "Destination traceable" },
   { id: "intercepta", name: "Address screening" },
-  { id: "jev", name: "Matches your promise" },
+  { id: "jev", name: "Matches your intent" },
   { id: "world_id", name: "Human approval" },
   { id: "sign", name: "Signed" },
 ];

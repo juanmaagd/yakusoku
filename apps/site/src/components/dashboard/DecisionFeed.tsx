@@ -19,7 +19,7 @@ export default function DecisionFeed({ receipts, selectedReceiptId, freshIds, on
     <div className="overflow-hidden rounded-card border border-hairline bg-surface">
       <div className="hidden grid-cols-2 border-b border-hairline sm:grid">
         <div className="label px-4 py-2.5 text-graphite">Agent tried</div>
-        <div className="label border-l border-hairline px-4 py-2.5 text-graphite">Omamorisan</div>
+        <div className="label border-l border-hairline px-4 py-2.5 text-graphite">Omamori</div>
       </div>
       <ul className="divide-y divide-hairline">
         {receipts.map((r) => {

@@ -54,7 +54,7 @@ export default function PromisesSection({ promises }: PromisesSectionProps) {
   if (promises.length === 0) return null;
   return (
     <section className="mt-8">
-      <h2 className="text-subheading font-medium text-ink">World ID promises</h2>
+      <h2 className="text-subheading font-medium text-ink">World ID intents</h2>
       <ul className="mt-3 grid gap-4 lg:grid-cols-2">
         {promises.map((p) => (
           <PromiseRow key={p.id} promise={p} />

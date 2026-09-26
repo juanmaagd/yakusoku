@@ -99,7 +99,7 @@ export default function DeployedCard({ info, justDeployedTxHash }: Props) {
         <h1 className="headline mt-2 text-heading-sm md:text-heading">
           Your <strong>{SITE.name}</strong> account is live
         </h1>
-        <p className="mt-3 text-body text-graphite">Go back to your agent — it can now buy within your promises.</p>
+        <p className="mt-3 text-body text-graphite">Go back to your agent — it can now buy within your intents.</p>
       </div>
 
       {justDeployedTxHash && (

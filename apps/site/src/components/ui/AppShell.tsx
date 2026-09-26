@@ -127,7 +127,7 @@ export default function AppShell({ active, session, liveStatus, children }: AppS
 
 function Tabs({ active, liveStatus }: { active: Section; liveStatus?: SseConnectionStatus }) {
   const tabs: { id: Section; label: string; href: string }[] = [
-    { id: "promises", label: "Promises", href: SITE.appRoute },
+    { id: "promises", label: "Intents", href: SITE.appRoute },
     { id: "live", label: "Live", href: SITE.dashboardRoute },
     { id: "account", label: "Account", href: SITE.accountRoute },
   ];
@@ -217,7 +217,7 @@ function PauseControl({ control, pause, resume }: OwnerControl) {
       {confirming && (
         <div className={popover}>
           <ConfirmInline
-            message="Pause every agent? The firewall refuses to sign for any of your promises until you resume."
+            message="Pause every agent? The firewall refuses to sign for any of your intents until you resume."
             confirmLabel="Pause all"
             busyLabel="Pausing…"
             onConfirm={async () => {
