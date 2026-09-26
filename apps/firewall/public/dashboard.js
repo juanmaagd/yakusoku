@@ -1,4 +1,4 @@
-// Yakusoku dashboard — vanilla JS, no framework, no build step (WU10).
+// Omamorisan dashboard — vanilla JS, no framework, no build step (WU10).
 // Loads GET /receipts + GET /intents once, then applies live SSE events from
 // GET /events. Reconnects the SSE stream if it drops.
 
@@ -82,7 +82,7 @@ function pct(n) {
 
 // --- receipt classification --------------------------------------------------
 
-/** Maps a receipt to the badge shown on the "with Yakusoku" lane. */
+/** Maps a receipt to the badge shown on the "with Omamorisan" lane. */
 function classifyReceipt(r) {
   if (r.state === "awaiting_world_id") {
     return { code: "waiting", label: "WAITING FOR HUMAN" };

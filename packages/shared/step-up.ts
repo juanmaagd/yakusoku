@@ -16,7 +16,10 @@ import { CHAIN_ID } from "./constants";
  * the firewall's database nor its say-so — same "an application is never its
  * own oracle" principle as the independent post-hoc verifier (WU14).
  *
- * Domain intentionally reuses `TASK_INTENT_DOMAIN`'s exact values (same app,
+ * Domain keeps the original working name ("Yakusoku") on purpose: stored
+ * attestations are re-verified by the verifier, so this internal name changes
+ * only with the final product rename (with legacy-domain acceptance). It
+ * otherwise mirrors `TASK_INTENT_DOMAIN` (same app,
  * same chain) — EIP-712 struct hashes are namespaced by `primaryType`, so a
  * `StepUpAttestation` and a `TaskIntent` sharing one domain never collide.
  * No `verifyingContract`: this is off-chain evidence in the MVP (no contract

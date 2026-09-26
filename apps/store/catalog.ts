@@ -1,4 +1,4 @@
-// Demo catalog for the Yakusoku store — a gift-card shop an AI shopping agent
+// Demo catalog for the Omamorisan store — a gift-card shop an AI shopping agent
 // browses. Real, x402-purchasable products live in CATALOG; the raw
 // prompt-injection trap copy an attacker would plant on a product page lives
 // in PROMO_TRAPS, served unprotected via GET /promo/:sku so later work units

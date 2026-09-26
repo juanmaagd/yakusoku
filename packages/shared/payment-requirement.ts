@@ -6,7 +6,7 @@ const addressSchema = z.string().refine(isAddress, { message: "not a valid EVM a
 
 /**
  * Loose CAIP-2 (`namespace:reference`) format check. This schema only checks
- * shape — whether the network is the one Yakusoku actually supports is a
+ * shape — whether the network is the one Omamorisan actually supports is a
  * policy decision the firewall pipeline makes, see `isSupportedNetwork` below
  * and plan-tecnico.md §2.4 ("red" as a policy-layer check, not a parse error).
  */
@@ -29,7 +29,7 @@ export const paymentRequirementSchema = z.object({
 });
 export type PaymentRequirement = z.infer<typeof paymentRequirementSchema>;
 
-/** True when `network` is the single network Yakusoku runs on (Base Sepolia). */
+/** True when `network` is the single network Omamorisan runs on (Base Sepolia). */
 export function isSupportedNetwork(network: string): boolean {
   return network === X402_NETWORK;
 }

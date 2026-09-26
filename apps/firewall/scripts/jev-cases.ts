@@ -23,7 +23,7 @@ const ATTACKER_FLAGGED = "0x9f2A1B000000000000000000000000000000c3D1";
 const DEMO_TASK = "Buy a $25 Amazon gift card for my sister's birthday. Expires today.";
 const TOMORROW = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 const AMAZON_URL = "http://localhost:4000/giftcard/amazon-25";
-const AMAZON_DESCRIPTION = "Yakusoku demo store — pay to unlock a gift card code";
+const AMAZON_DESCRIPTION = "Omamorisan demo store — pay to unlock a gift card code";
 
 function signedIntent(task: string, budgetUsdc: number, categories: string[]): JevInput["signedIntent"] {
   return { task, budgetUsdc, categories, expiry: TOMORROW };

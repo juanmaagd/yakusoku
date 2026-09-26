@@ -8,7 +8,7 @@ import { CHAIN_ID } from "./constants";
  * (plan-tecnico.md §2.2). The `nonce` field on the message covers replay.
  */
 export const TASK_INTENT_DOMAIN = {
-  name: "Yakusoku",
+  name: "Omamorisan",
   version: "1",
   chainId: CHAIN_ID,
 } as const;

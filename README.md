@@ -1,4 +1,4 @@
-# Yakusoku (約束, "promise")
+# Omamorisan
 
 **A pre-signature firewall for AI agent payments: it only signs a payment when it matches an intent the user actually signed.**
 
@@ -81,7 +81,7 @@ Every payment is screened **live**, before the firewall signs it, as stage 4 of 
 
 ### Curvegrid — Best AI Agent Project
 
-**One-sentence summary:** Yakusoku is a policy-aware payment agent guardrail — it lets an AI shopping agent act, but only signs the payments that match what the human actually authorized, using live third-party risk screening and a fresh human-identity check as the last line of defense.
+**One-sentence summary:** Omamorisan is a policy-aware payment agent guardrail — it lets an AI shopping agent act, but only signs the payments that match what the human actually authorized, using live third-party risk screening and a fresh human-identity check as the last line of defense.
 
 **MultiBaas:** not used. This project talks to Base Sepolia directly through `viem` (RPC calls, EIP-712 signing/verification) and to the x402 facilitator (`x402.org`) for settlement; no MultiBaas integration was built.
 

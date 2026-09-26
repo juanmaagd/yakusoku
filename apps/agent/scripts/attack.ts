@@ -79,7 +79,7 @@ const decision = (await signRes.json()) as {
   paymentSignature?: string;
 };
 console.log(`[attack] firewall verdict=${decision.verdict} reason="${decision.reason}" receiptId=${decision.receiptId}`);
-console.log(`[attack] without Yakusoku, a naive agent wallet would have paid for ${sku}.`);
+console.log(`[attack] without Omamorisan, a naive agent wallet would have paid for ${sku}.`);
 
 if (decision.verdict === "pay" && decision.paymentSignature) {
   if (!settle) {

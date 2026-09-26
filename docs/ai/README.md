@@ -1,6 +1,6 @@
-# AI usage in Yakusoku
+# AI usage in Omamorisan
 
-Yakusoku was built during ETHGlobal Tokyo 2026 by a solo builder with heavy, supervised AI assistance. This folder records **how AI was used, what it was asked to do, and how its output was verified**, so judges can see which parts are human decisions and which parts were AI-generated.
+Omamorisan was built during ETHGlobal Tokyo 2026 by a solo builder with heavy, supervised AI assistance. This folder records **how AI was used, what it was asked to do, and how its output was verified**, so judges can see which parts are human decisions and which parts were AI-generated.
 
 ## Who did what
 
@@ -48,7 +48,7 @@ The human set the rules the AI had to follow: the repo started empty at kickoff,
 | WU7 | Intercepta (Web3 Antivirus) address + token screening, fail-closed. | Unit tests with stubbed `fetch`; live check pending the sandbox key. |
 | WU8 | TypeSafe Jev with the calibrated question set; rules in code. | Live case runner: key case refused, no attack pays. |
 | WU9 | SQLite persistence, per-stage receipt timeline, SSE event stream, settlement reports. | Live SSE capture; state survives a restart. |
-| WU10 | Minimal two-lane dashboard ("without Yakusoku" vs "with Yakusoku"). | Browser screenshots; live row without reload. |
+| WU10 | Minimal two-lane dashboard ("without Omamorisan" vs "with Omamorisan"). | Browser screenshots; live row without reload. |
 | WU11 | World ID for Agents human-approval gate (device flow, JWKS validation, deny/expire). | Real sandbox device authorization; expiry refuses and releases budget. |
 | HARDEN | Refuse dominance, 13-scenario e2e suite, cheap trap SKU, disclosed attack script. | `bun run scenarios` → 13/13 pass. |
 | WU13 | Dashboard/firewall pause-resume kill switch and per-intent revoke, loopback + admin-header guarded. | `bun run scenarios` → 15/15 pass (adds pause/revoke scenarios); pause without the admin header → 403. |

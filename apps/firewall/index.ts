@@ -1,4 +1,4 @@
-// Yakusoku firewall — the only process holding the signing key. Verifies
+// Omamorisan firewall — the only process holding the signing key. Verifies
 // signed TaskIntents, runs the pre-signature decision pipeline, signs x402
 // payments on the agent's behalf, and streams live decision events to the
 // dashboard over SSE (root CLAUDE.md, plan-tecnico.md §2, WU9).
@@ -411,7 +411,7 @@ app.get("/events", (c) =>
 // for any row whose deadline already passed while the firewall was down.
 resumePendingApprovalsOnBoot();
 
-console.log(`Yakusoku firewall listening on :${PORT}`);
+console.log(`Omamorisan firewall listening on :${PORT}`);
 
 // WU10 fix: Bun's default HTTP idleTimeout is 10s, shorter than the SSE
 // heartbeat above (15s) — every /events connection was silently killed by

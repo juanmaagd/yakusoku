@@ -1,4 +1,4 @@
-// Yakusoku demo store — an x402-protected gift-card shop an AI shopping agent
+// Omamorisan demo store — an x402-protected gift-card shop an AI shopping agent
 // browses. Serves the legit Amazon gift card the demo's signed TaskIntent
 // covers, a cheap rehearsal sku, real Steam inventory the injected promo
 // pushes unrequested (the product's key differentiator), and the raw
@@ -93,7 +93,7 @@ const httpServer = new x402HTTPResourceServer(resourceServer, {
       price: priceForRequest,
       maxTimeoutSeconds: 60,
     },
-    description: "Yakusoku demo store — pay to unlock a gift card code",
+    description: "Omamorisan demo store — pay to unlock a gift card code",
     extensions: { [PAYMENT_IDENTIFIER]: declarePaymentIdentifierExtension(false) },
   },
 }).onProtectedRequest(async (context) => {
@@ -175,5 +175,5 @@ app.get("/giftcard/:sku", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Yakusoku store listening on :${PORT} (merchant ${merchantAddress})`);
+  console.log(`Omamorisan store listening on :${PORT} (merchant ${merchantAddress})`);
 });

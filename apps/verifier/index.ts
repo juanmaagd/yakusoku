@@ -380,7 +380,7 @@ function printReport(findings: Finding[], args: Args): void {
     return;
   }
 
-  console.log("\n=== Yakusoku independent verifier — findings ===\n");
+  console.log("\n=== Omamorisan independent verifier — findings ===\n");
   if (findings.length === 0) {
     console.log("(no findings — no pay receipts with a settlement hash, no on-chain transfers in window)");
   } else {

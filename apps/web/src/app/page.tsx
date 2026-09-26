@@ -192,7 +192,7 @@ export default function Page() {
   return (
     <main className="page">
       <header>
-        <h1>Yakusoku</h1>
+        <h1>Omamorisan</h1>
         <p className="tagline">Every payment your agent makes keeps the promise you signed — or it does not happen.</p>
         {/* Live dashboard link lands here in WU10. */}
       </header>
@@ -263,7 +263,7 @@ export default function Page() {
 
       <section className="card">
         <h2>2. Review before you sign</h2>
-        <p className="hint">This is exactly what your wallet will sign. Yakusoku will only pay for purchases that match it.</p>
+        <p className="hint">This is exactly what your wallet will sign. Omamorisan will only pay for purchases that match it.</p>
         <dl className="summary">
           <dt>Task</dt>
           <dd>{task || '—'}</dd>

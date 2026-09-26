@@ -13,7 +13,7 @@ Recording checklist before hitting record (do these once, right before the take)
 
 ## Beat 1 — Intro (0:00–0:18, ≤ 20s)
 
-**Say:** "AI agents can already pay for things on their own — x402 lets a store or API say 'pay 25 USDC' and the agent just pays. The problem: a hidden prompt in a page can trick the agent into paying a *clean* address, for a *reasonable* amount, for something you never asked for. Every existing guard — spend caps, address blocklists — misses exactly that case. Yakusoku is a firewall that only signs a payment if it matches what you actually signed."
+**Say:** "AI agents can already pay for things on their own — x402 lets a store or API say 'pay 25 USDC' and the agent just pays. The problem: a hidden prompt in a page can trick the agent into paying a *clean* address, for a *reasonable* amount, for something you never asked for. Every existing guard — spend caps, address blocklists — misses exactly that case. Omamorisan is a firewall that only signs a payment if it matches what you actually signed."
 
 **Show:** one slide, 4 bullets max — "Problem / Clean address / In budget / Wrong item" — or skip the slide and say it over the terminal/dashboard idle screen.
 
@@ -65,7 +65,7 @@ bun run attack -- --intent <intentId>
 bun run verify -- --from-block <n>
 ```
 
-**Say:** "This doesn't trust the firewall's own database — it reads the chain directly and cross-checks every payment and every human-approval signature against it. Zero critical findings. The base transaction layer is commodity now. What nobody was checking is whether the payment actually matches what you asked for — that's Yakusoku."
+**Say:** "This doesn't trust the firewall's own database — it reads the chain directly and cross-checks every payment and every human-approval signature against it. Zero critical findings. The base transaction layer is commodity now. What nobody was checking is whether the payment actually matches what you asked for — that's Omamorisan."
 
 **Show:** verifier CLI output (`0 CRITICAL`), then cut.
 

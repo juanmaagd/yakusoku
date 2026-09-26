@@ -11,7 +11,7 @@ import { Providers } from './providers'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Yakusoku — Sign your intent',
+  title: 'Omamorisan — Sign your intent',
   description: 'Sign the EIP-712 TaskIntent that your agent must keep before it can spend on your behalf.',
 }
 
