@@ -1,26 +1,5 @@
 ---
 import SetupAgentCard from "./SetupAgentCard";
-
-// Order carries meaning: rules are approved once, before any purchase;
-// purchases then run without taps; a doubt approval is the exception, not
-// the rule.
-const MOMENTS = [
-  {
-    dt: "Rules",
-    headline: "Once, up front",
-    body: "Approve what your agent may buy, where, and how much. The same World App tap connects your account.",
-  },
-  {
-    dt: "Purchases",
-    headline: "No taps",
-    body: "Your agent pays on its own while each purchase fits your rules.",
-  },
-  {
-    dt: "Doubt",
-    headline: "Only if something's off",
-    body: "The firewall pauses and asks you on your phone before it ever signs.",
-  },
-] as const;
 ---
 
 <section id="setup-agent" class="band" aria-labelledby="setup-heading">
@@ -28,21 +7,8 @@ const MOMENTS = [
     Set up your <strong>agent.</strong>
   </h2>
   <p class="mt-6 max-w-[54ch] text-body-lg text-graphite">
-    One prompt and one approval set your rules. After that, your agent buys on its own inside them — your phone
-    only lights up when something looks off.
+    Paste one prompt into your agent. It connects to Omamori and asks you for its first intent.
   </p>
-
-  <dl class="mt-10 grid grid-cols-1 border-y border-hairline sm:grid-cols-3">
-    {
-      MOMENTS.map((moment) => (
-        <div class="border-hairline py-5 sm:px-6 sm:first:pl-0 sm:last:pr-0 max-sm:[&:not(:first-child)]:border-t sm:[&:not(:first-child)]:border-l">
-          <dt class="label text-graphite">{moment.dt}</dt>
-          <dd class="mt-2 text-heading-sm text-ink">{moment.headline}</dd>
-          <dd class="mt-1.5 text-body-sm text-graphite">{moment.body}</dd>
-        </div>
-      ))
-    }
-  </dl>
 
   <SetupAgentCard client:visible />
 

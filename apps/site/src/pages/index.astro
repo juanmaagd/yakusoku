@@ -3,6 +3,8 @@ import TutorialVideo from "../components/ui/TutorialVideo";
 import Layout from "../layouts/Layout.astro";
 import Nav from "../components/Nav.astro";
 import Hero from "../components/Hero.astro";
+import OwnerFlow from "../components/OwnerFlow.astro";
+import BuiltForAgents from "../components/BuiltForAgents.astro";
 import WhyRulesMiss from "../components/WhyRulesMiss.astro";
 import HowItWorks from "../components/HowItWorks.astro";
 import HumanApproval from "../components/HumanApproval.astro";
@@ -18,13 +20,15 @@ import Footer from "../components/Footer.astro";
   <main class="overflow-x-clip">
     <div class="frame">
       <Hero />
-      <WhyRulesMiss />
-      <HowItWorks />
+      <OwnerFlow />
       <TutorialVideo topic="overview" client:load />
+      <BuiltForAgents />
+      <WhyRulesMiss />
       <HumanApproval />
       <Proof />
-      <Developers />
       <SetupAgent />
+      <HowItWorks />
+      <Developers />
       <CloseCta />
     </div>
   </main>
