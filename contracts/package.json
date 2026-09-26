@@ -1,0 +1,12 @@
+{
+  "name": "@yakusoku/contracts-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Standalone bun/viem deploy tooling for the Foundry project in this directory. Deliberately NOT a member of the root bun workspace (see ../package.json's \"workspaces\") — this has its own node_modules/lockfile so `contracts/` stays a self-contained unit a Solidity teammate can clone and use independently of the TS app workspace.",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "viem": "^2.56.9"
+  }
+}

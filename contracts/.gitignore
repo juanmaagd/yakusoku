@@ -1,0 +1,25 @@
+# Compiler files
+cache/
+out/
+
+# Standalone bun/viem deploy tooling (package.json in this directory) —
+# independent from the root bun workspace, see contracts/package.json.
+node_modules/
+bun.lock
+
+# Commonly ignored directories
+.logs/
+.ignore/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+.env.*
+!.env.example

@@ -6,3 +6,4 @@ export * from "./step-up";
 export * from "./promise-attestation";
 export * from "./receipt";
 export * from "./json";
+export * from "./omamorisan-account";
