@@ -187,7 +187,7 @@ export function validatePromiseInput(input: CreatePromiseInput, accountId?: stri
   }
   const maxUsdc = maxPromiseUsdc();
   if (input.budgetUsdc > maxUsdc) {
-    return { ok: false, status: 400, error: `budgetUsdc exceeds the ${maxUsdc} USDC per-promise cap` };
+    return { ok: false, status: 400, error: `budgetUsdc exceeds the ${maxUsdc} USDC per-intent cap` };
   }
   if (input.categories.length < 1 || input.categories.length > 5) {
     return { ok: false, status: 400, error: "categories must have between 1 and 5 entries" };
@@ -231,7 +231,7 @@ export function validatePromiseInput(input: CreatePromiseInput, accountId?: stri
     const pendingCount = countPendingPromisesForAccount(accountId);
     const maxPending = maxPendingPromises();
     if (pendingCount >= maxPending) {
-      return { ok: false, status: 429, error: `too many pending promises for this account (max ${maxPending})` };
+      return { ok: false, status: 429, error: `too many pending intents for this account (max ${maxPending})` };
     }
   }
 
@@ -329,7 +329,7 @@ export async function settlePromiseApproved(promiseId: string, claims: FreshAppr
 
   const account = getAccount(fresh.accountId);
   if (!account) {
-    await settlePromiseRefused(promiseId, "error", "account no longer available when the promise resolved");
+    await settlePromiseRefused(promiseId, "error", "account no longer available when the intent resolved");
     return;
   }
 
@@ -343,7 +343,7 @@ export async function settlePromiseApproved(promiseId: string, claims: FreshAppr
   // complete approval: there's no human-approved origin to attest to, and
   // the pipeline's `merchant` stage would refuse it fail-closed anyway.
   if (!fresh.merchant) {
-    await settlePromiseRefused(promiseId, "error", "promise has no bound merchant (created before merchant binding existed)");
+    await settlePromiseRefused(promiseId, "error", "intent has no bound merchant (created before merchant binding existed)");
     return;
   }
 
@@ -378,7 +378,7 @@ export async function settlePromiseApproved(promiseId: string, claims: FreshAppr
         oldToRevoke = {
           ...target,
           status: "revoked",
-          reason: `replaced by promise ${fresh.id}`,
+          reason: `replaced by intent ${fresh.id}`,
           replacedBy: fresh.id,
           updatedAt: new Date().toISOString(),
         };
@@ -414,8 +414,8 @@ export async function resolvePromiseApprovalInBackground(promiseId: string): Pro
   const promise = getPromise(promiseId);
   if (!promise || promise.status !== "pending_approval") return;
   if (!promise.deviceCode || !promise.intervalSeconds || !promise.expiresAt || !promise.requestedAt) {
-    console.error(`[promises] promise ${promiseId} is pending_approval but missing device-flow fields — refusing`);
-    await settlePromiseRefused(promiseId, "error", "malformed pending promise (missing device-flow fields)");
+    console.error(`[promises] intent ${promiseId} is pending_approval but missing device-flow fields — refusing`);
+    await settlePromiseRefused(promiseId, "error", "malformed pending intent (missing device-flow fields)");
     return;
   }
 
@@ -448,8 +448,8 @@ export async function resolvePromiseApprovalInBackground(promiseId: string): Pro
       return;
     }
     case "denied":
-      await settlePromiseRefused(promiseId, "denied", "human denied the promise approval request");
-      return;
+      await settlePromiseRefused(promiseId, "denied", "human denied the intent approval request");
+  return;
     case "expired":
       await settlePromiseRefused(promiseId, "expired", "World ID approval window elapsed without a response");
       return;
@@ -463,7 +463,7 @@ export async function resolvePromiseApprovalInBackground(promiseId: string): Pro
 export function resumePromiseApprovalsOnBoot(): void {
   const pending = listPromisesByStatus("pending_approval");
   for (const promise of pending) {
-    console.log(`[promises] resuming pending promise ${promise.id} (expires ${promise.expiresAt})`);
+    console.log(`[promises] resuming pending intent ${promise.id} (expires ${promise.expiresAt})`);
     void resolvePromiseApprovalInBackground(promise.id).catch((err) => {
       console.error(`[promises] resume failed for ${promise.id}`, err);
     });
@@ -584,7 +584,7 @@ export interface DevApproveResult {
 export async function devApprovePromise(promiseId: string, subject: string): Promise<DevApproveResult> {
   const promise = getPromise(promiseId);
   if (!promise) return { ok: false, error: "promise_not_found" };
-  if (promise.status !== "pending_approval") return { ok: false, error: `promise is not pending_approval (status: ${promise.status})` };
+  if (promise.status !== "pending_approval") return { ok: false, error: `intent is not pending_approval (status: ${promise.status})` };
   await settlePromiseApproved(promiseId, { sub: subject, acr: "dev", authTime: Math.floor(Date.now() / 1000) });
   return { ok: true };
 }

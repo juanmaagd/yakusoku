@@ -183,7 +183,7 @@ export const merchantStage: PipelineStage = {
         return {
           outcome: "refuse",
           state: "merchant_blocked",
-          reason: "merchant_mismatch: this promise has no bound merchant (created before merchant binding existed)",
+          reason: "merchant_mismatch: this intent has no bound merchant (created before merchant binding existed)",
         };
       }
       const resourceOrigin = normalizeMerchantOrigin(ctx.resourceUrl);
@@ -194,7 +194,7 @@ export const merchantStage: PipelineStage = {
         return {
           outcome: "refuse",
           state: "merchant_blocked",
-          reason: `merchant_mismatch: promise is bound to ${ctx.intent.merchant}, this payment targets ${resourceOrigin.origin}`,
+          reason: `merchant_mismatch: intent is bound to ${ctx.intent.merchant}, this payment targets ${resourceOrigin.origin}`,
         };
       }
     }

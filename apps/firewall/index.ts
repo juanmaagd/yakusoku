@@ -1347,7 +1347,7 @@ resumeConnectRequestsOnBoot();
 resumePromiseApprovalsOnBoot();
 resumeFirstPromiseApprovalsOnBoot();
 
-console.log(`Omamorisan firewall listening on :${PORT}`);
+console.log(`Omamori firewall listening on :${PORT}`);
 
 // WU10 fix: Bun's default HTTP idleTimeout is 10s, shorter than the SSE
 // heartbeat above (15s) — every /events connection was silently killed by

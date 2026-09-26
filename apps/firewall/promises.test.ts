@@ -345,7 +345,7 @@ describe("settlePromiseApproved — replacement activation (promise-replacement 
     expect(newPromise?.replaces).toBe(oldId);
     expect(oldPromise?.status).toBe("revoked");
     expect(oldPromise?.replacedBy).toBe(newId);
-    expect(oldPromise?.reason).toBe(`replaced by promise ${newId}`);
+    expect(oldPromise?.reason).toBe(`replaced by intent ${newId}`);
   });
 
   test("a denied replacement leaves the old promise fully untouched", async () => {

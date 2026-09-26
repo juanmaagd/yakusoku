@@ -164,7 +164,7 @@ export function pollFirstPromise(id: string, pollSecret: string): PollFirstPromi
   if (request.status === "pending") return { ok: true, status: "pending" };
 
   if (request.status === "approved") {
-    if (!request.accountId) return { ok: true, status: "error", reason: "approved first-promise request missing accountId" };
+    if (!request.accountId) return { ok: true, status: "error", reason: "approved first-intent request missing accountId" };
     const promise = getPromise(request.id);
     const remaining = promise ? promise.budget - promise.spent : request.budget;
     const remainingBudget = (remaining > 0n ? remaining : 0n).toString();
@@ -296,7 +296,7 @@ export async function resolveFirstPromiseApprovalInBackground(id: string): Promi
       return;
     }
     case "denied":
-      await settleFirstPromiseRefused(id, "denied", "human denied the connect+promise approval request");
+      await settleFirstPromiseRefused(id, "denied", "human denied the connect+intent approval request");
       return;
     case "expired":
       await settleFirstPromiseRefused(id, "expired", "World ID approval window elapsed without a response");
@@ -334,7 +334,7 @@ export interface DevApproveResult {
 export async function devApproveFirstPromise(id: string, subject: string): Promise<DevApproveResult> {
   const request = getFirstPromiseRequest(id);
   if (!request) return { ok: false, error: "first_promise_not_found" };
-  if (request.status !== "pending") return { ok: false, error: `first-promise request is not pending (status: ${request.status})` };
+  if (request.status !== "pending") return { ok: false, error: `first-intent request is not pending (status: ${request.status})` };
   await settleFirstPromiseApproved(id, { sub: subject, acr: "dev", authTime: Math.floor(Date.now() / 1000) });
   return { ok: true };
 }

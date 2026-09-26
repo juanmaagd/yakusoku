@@ -450,7 +450,7 @@ export async function settleApproved(approval: PendingApproval, claims: FreshApp
     // "never let a payment slip through fail-closed" reasoning as the pause/
     // revoke re-checks below for a wallet-sourced intent.
     if (intent.promiseStatus !== "active") {
-      await settleRefused(approval, "revoked", `promise no longer active (status: ${intent.promiseStatus})`, "world_id_denied");
+      await settleRefused(approval, "revoked", `intent no longer active (status: ${intent.promiseStatus})`, "world_id_denied");
       return;
     }
   }

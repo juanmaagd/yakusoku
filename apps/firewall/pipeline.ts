@@ -234,7 +234,7 @@ function checkPolicy(
   // pass trivially). A wallet-sourced `StoredIntent` never sets `source`, so
   // this is a no-op for the existing path.
   if (intent.source === "world_id" && intent.promiseStatus !== "active") {
-    return { ok: false, reason: `promise not active (status: ${intent.promiseStatus})` };
+    return { ok: false, reason: `intent not active (status: ${intent.promiseStatus})` };
   }
   // WU13: a revoked intent is a permanent business fact (unlike the kill
   // switch, there's no "unrevoke") — check it here so the refusal is cached
