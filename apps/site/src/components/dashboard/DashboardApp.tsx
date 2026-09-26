@@ -75,7 +75,13 @@ function reducer(state: LiveState, action: LiveAction): LiveState {
 const initialState: LiveState = { receipts: new Map(), mandates: new Map(), promises: new Map(), approvals: new Map(), fresh: new Set() };
 
 /** `/app/dashboard`'s React island (S4 Live): gated on the same wallet+SIWE
- * session as `/app`, then the owner's decisions kept live over SSE. */
+ * session as `/app`, then the owner's decisions kept live over SSE. A stored
+ * session token is verified on every mount (including a plain navigation
+ * from /app, a separate page load) — `"checking"` renders this neutral
+ * skeleton instead of `SignInGate`, so a signed-in owner never sees the
+ * "Sign in" screen flash while that check is in flight. This is also the
+ * server-rendered (and first client) render, since `useWalletSession` starts
+ * in `"checking"` — no hydration mismatch. */
 export default function DashboardApp() {
   const session = useWalletSession();
   const [liveStatus, setLiveStatus] = useState<SseConnectionStatus>("connecting");
@@ -84,10 +90,34 @@ export default function DashboardApp() {
     <AppShell active="live" session={session} liveStatus={liveStatus}>
       {session.stage.kind === "signed-in" ? (
         <LiveView key={session.stage.sessionToken} sessionToken={session.stage.sessionToken} onUnauthorized={session.handleUnauthorized} onLiveStatus={setLiveStatus} />
+      ) : session.stage.kind === "checking" ? (
+        <LiveSkeleton />
       ) : (
         <SignInGate session={session} />
       )}
     </AppShell>
+  );
+}
+
+function LiveSkeleton() {
+  return (
+    <section>
+      <Skeleton className="h-7 w-40" />
+      <div aria-busy="true" aria-label="Checking your session" className="mt-6 divide-y divide-hairline rounded-card border border-hairline">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="grid grid-cols-1 gap-3 px-4 py-4 sm:grid-cols-2">
+            <div>
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="mt-2 h-3 w-40" />
+            </div>
+            <div>
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="mt-2 h-3 w-48" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
