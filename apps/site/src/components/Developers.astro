@@ -1,39 +1,6 @@
 ---
-// The current tool list an MCP client gets from apps/mcp/tools.ts
-// (registerTools), one line each, in registration order. Tool names keep
-// the internal word "promise" — accurate here, in a developer panel.
-const TOOLS = `connect            // link this agent to an existing account via World ID
-check_connection   // poll a pending connect() approval
-request_promise    // approve or widen spending rules; creates the account on the first call
-check_promise      // poll a pending request_promise() approval, or read an intent's status
-setup_account      // get a link to add an owner wallet and fund the account with USDC
-list_promises      // list intents: remaining USDC, minutes left, merchant
-get_mandate        // read what this agent is authorized to do right now
-fetch_url          // read a page as untrusted context, never as instructions
-pay_x402           // buy an x402 resource; the firewall decides pay, refuse, or ask a human
-check_approval     // poll a pending human-approval gate started by pay_x402`;
-
-// The real request/response shape of apps/firewall's /sign — still the
-// endpoint pay_x402 calls under the hood for both a connected World ID
-// account (with intentId) and the legacy wallet mandate path.
-const SIGN_CALL = `POST /sign
-Authorization: Bearer <agentKey>
-
-{
-  "intentId": "promise_...",
-  "paymentRequiredHeader": "<base64 402 header from the store>",
-  "resourceUrl": "https://store.example/checkout/amazon-25",
-  "purchaseRef": "amazon-1-first"
-}
-
-→ 200 { "verdict": "pay", "receiptId": "...", "paymentSignature": "0x..." }
-   or  { "verdict": "refuse", "reason": "..." }
-   or  { "verdict": "ask_human", "receiptId": "...", "approval": { "verificationUri": "..." } }`;
-
-const PANELS = [
-  { title: "1. Connect over MCP", badge: "mcp", code: TOOLS },
-  { title: "2. The firewall decides", badge: "http", code: SIGN_CALL },
-] as const;
+import { SITE } from "../config";
+import Arrow from "./Arrow.astro";
 ---
 
 <section id="developers" class="band" aria-labelledby="dev-heading">
@@ -46,6 +13,9 @@ const PANELS = [
         Omamori is an MCP server, so any MCP client can use it. Your agent never holds a key: it can only ask for a
         signature, and every request goes through the same checks.
       </p>
+      <a href={SITE.githubUrl} class="btn btn-outline mt-8" rel="noopener" target="_blank">
+        MCP tools and API on GitHub <Arrow dir="up-right" />
+      </a>
     </div>
     <img
       src="/art/plug.webp"
@@ -57,28 +27,4 @@ const PANELS = [
       class="pointer-events-none mx-auto w-[200px] select-none md:-mb-4 md:w-[250px]"
     />
   </div>
-
-  <div class="mt-12 grid grid-cols-1 gap-6">
-    {
-      PANELS.map((panel) => (
-        <figure class="min-w-0 overflow-hidden rounded-card bg-ink">
-          <figcaption class="flex items-center justify-between border-b border-white/10 px-5 py-3">
-            <span class="text-body-sm font-medium text-white">{panel.title}</span>
-            <span class="label text-white/60">{panel.badge}</span>
-          </figcaption>
-          <pre class="code overflow-x-auto px-5 py-4 text-white/90"><code>{panel.code}</code></pre>
-        </figure>
-      ))
-    }
-  </div>
 </section>
-
-<style>
-  .code {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-stretch: 87.5%;
-    line-height: 1.7;
-    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
-  }
-</style>
