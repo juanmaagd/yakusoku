@@ -25,15 +25,23 @@ import { hashWorldIdSubject, verifyPromiseAttestation } from "@yakusoku/shared";
 process.env.FIREWALL_DATA_DIR = mkdtempSync(join(tmpdir(), "yakusoku-promises-test-"));
 process.env.FIREWALL_PRIVATE_KEY ??= `0x${"33".repeat(32)}`;
 
-const { createPromise, findOrCreateAccountBySubjectHash, getPromise } = await import("./store");
-const { promiseAsMandate, resolveMandate, settlePromiseApproved, settlePromiseRefused } = await import("./promises");
+const { createPromise, findOrCreateAccountBySubjectHash, getPromise, savePromise } = await import("./store");
+const {
+  buildPromiseSummary,
+  promiseAsMandate,
+  resolveMandate,
+  serializePromiseSummary,
+  settlePromiseApproved,
+  settlePromiseRefused,
+  validatePromiseInput,
+} = await import("./promises");
 
 function randomNonce(): `0x${string}` {
   return toHex(crypto.getRandomValues(new Uint8Array(32)));
 }
 
 let seq = 0;
-function seedPendingPromise(accountId: string) {
+function seedPendingPromise(accountId: string, opts: { replaces?: string } = {}) {
   seq += 1;
   const promiseId = `promise_test_${seq}`;
   createPromise({
@@ -48,6 +56,7 @@ function seedPendingPromise(accountId: string) {
     spent: 0n,
     status: "pending_approval",
     summary: 'Approve "Buy a $1 Amazon gift card (rehearsal)" — up to $1.00 USDC across gift_card:amazon.',
+    replaces: opts.replaces,
     deviceCode: `device-${promiseId}`,
     verificationUri: "https://sandbox.auth.world.org/device",
     userCode: `USER-${promiseId}`,
@@ -59,6 +68,15 @@ function seedPendingPromise(accountId: string) {
     updatedAt: new Date().toISOString(),
   });
   return promiseId;
+}
+
+/** Seeds a pending promise and immediately approves it — the exact state a
+ * promise-replacement test needs as its "old, active" target. */
+async function seedActivePromise(subject: string): Promise<{ promiseId: string; accountId: string }> {
+  const acct = findOrCreateAccountBySubjectHash(hashWorldIdSubject(subject));
+  const promiseId = seedPendingPromise(acct.id);
+  await settlePromiseApproved(promiseId, { sub: subject, acr: "dev", authTime: Math.floor(Date.now() / 1000) });
+  return { promiseId, accountId: acct.id };
 }
 
 describe("settlePromiseApproved — right subject activates + attests (P9.2)", () => {
@@ -191,5 +209,209 @@ describe("settlePromiseRefused — never attaches an attestation (P9.2)", () => 
 describe("resolveMandate — unknown id (P9.2)", () => {
   test("returns undefined for an id that is neither an intent nor a promise", () => {
     expect(resolveMandate("nothing_here")).toBeUndefined();
+  });
+});
+
+// --- Promise-replacement fix -------------------------------------------------
+
+const REPLACES_INPUT_BASE = {
+  task: "Buy a Steam gift card instead",
+  budgetUsdc: 1,
+  categories: ["gift_card:steam"],
+  expiresInSeconds: 3600,
+  merchant: "http://localhost:4000",
+};
+
+describe("validatePromiseInput — replaces validation (promise-replacement fix)", () => {
+  test("replaces_not_allowed_first_promise — no account yet (P9.6 path)", () => {
+    const result = validatePromiseInput({ ...REPLACES_INPUT_BASE, replaces: "promise_whatever" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(400);
+      expect(result.error).toBe("replaces_not_allowed_first_promise");
+    }
+  });
+
+  test("replaces_not_found — unknown id", async () => {
+    const { accountId } = await seedActivePromise("world-id-subject-replaces-unknown");
+    const result = validatePromiseInput({ ...REPLACES_INPUT_BASE, replaces: "promise_does_not_exist" }, accountId);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(404);
+      expect(result.error).toBe("replaces_not_found");
+    }
+  });
+
+  test("replaces_not_found — belongs to a different account (never leaks existence across accounts)", async () => {
+    const owner = await seedActivePromise("world-id-subject-replaces-owner");
+    const intruder = findOrCreateAccountBySubjectHash(randomNonce());
+    const result = validatePromiseInput({ ...REPLACES_INPUT_BASE, replaces: owner.promiseId }, intruder.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // Same status/error as an unknown id — a caller can never tell "not
+      // found" apart from "found, but not yours".
+      expect(result.status).toBe(404);
+      expect(result.error).toBe("replaces_not_found");
+    }
+  });
+
+  test("replaces_not_active — target is still pending_approval", async () => {
+    const acct = findOrCreateAccountBySubjectHash(randomNonce());
+    const pendingId = seedPendingPromise(acct.id);
+    const result = validatePromiseInput({ ...REPLACES_INPUT_BASE, replaces: pendingId }, acct.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(409);
+      expect(result.error).toBe("replaces_not_active");
+    }
+  });
+
+  test("replaces_not_active — target is revoked", async () => {
+    const { accountId, promiseId } = await seedActivePromise("world-id-subject-replaces-revoked");
+    const active = getPromise(promiseId)!;
+    savePromise({ ...active, status: "revoked", reason: "revoked by owner", updatedAt: new Date().toISOString() });
+
+    const result = validatePromiseInput({ ...REPLACES_INPUT_BASE, replaces: promiseId }, accountId);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(409);
+      expect(result.error).toBe("replaces_not_active");
+    }
+  });
+
+  test("replaces_not_active — target is exhausted (remaining budget is zero)", async () => {
+    const { accountId, promiseId } = await seedActivePromise("world-id-subject-replaces-exhausted");
+    const active = getPromise(promiseId)!;
+    savePromise({ ...active, spent: active.budget, updatedAt: new Date().toISOString() });
+
+    const result = validatePromiseInput({ ...REPLACES_INPUT_BASE, replaces: promiseId }, accountId);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(409);
+      expect(result.error).toBe("replaces_not_active");
+    }
+  });
+
+  test("replacement_already_pending — a second concurrent replacement for the same target is refused", async () => {
+    const { accountId, promiseId } = await seedActivePromise("world-id-subject-replaces-stacked");
+    seedPendingPromise(accountId, { replaces: promiseId }); // first replacement, still unresolved
+
+    const result = validatePromiseInput({ ...REPLACES_INPUT_BASE, replaces: promiseId }, accountId);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(409);
+      expect(result.error).toBe("replacement_already_pending");
+    }
+  });
+
+  test("a well-formed replacement of the caller's own active promise passes validation", async () => {
+    const { accountId, promiseId } = await seedActivePromise("world-id-subject-replaces-valid");
+    const result = validatePromiseInput({ ...REPLACES_INPUT_BASE, replaces: promiseId }, accountId);
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("buildPromiseSummary — replaces makes the change explicit (promise-replacement fix)", () => {
+  test("prefixes the old task/budget before the new promise's own summary line", () => {
+    const summary = buildPromiseSummary(
+      "Buy a Steam gift card",
+      2,
+      ["gift_card:steam"],
+      BigInt(Math.floor(Date.now() / 1000) + 3600),
+      "http://localhost:4000",
+      { task: "Buy an Amazon gift card", budgetUsdc: 1 },
+    );
+    expect(summary.startsWith('Replaces "Buy an Amazon gift card" ($1.00 USDC). Approve "Buy a Steam gift card"')).toBe(true);
+  });
+
+  test("omits the prefix entirely for an ordinary (non-replacing) promise", () => {
+    const summary = buildPromiseSummary("Buy a Steam gift card", 2, ["gift_card:steam"], BigInt(Math.floor(Date.now() / 1000) + 3600), "http://localhost:4000");
+    expect(summary.startsWith("Replaces")).toBe(false);
+  });
+});
+
+describe("settlePromiseApproved — replacement activation (promise-replacement fix)", () => {
+  test("happy path: replacement approved -> new active, old revoked, lineage recorded both ways", async () => {
+    const subject = "world-id-subject-replace-happy";
+    const { accountId, promiseId: oldId } = await seedActivePromise(subject);
+    const newId = seedPendingPromise(accountId, { replaces: oldId });
+
+    await settlePromiseApproved(newId, { sub: subject, acr: "dev", authTime: Math.floor(Date.now() / 1000) });
+
+    const newPromise = getPromise(newId);
+    const oldPromise = getPromise(oldId);
+    expect(newPromise?.status).toBe("active");
+    expect(newPromise?.replaces).toBe(oldId);
+    expect(oldPromise?.status).toBe("revoked");
+    expect(oldPromise?.replacedBy).toBe(newId);
+    expect(oldPromise?.reason).toBe(`replaced by promise ${newId}`);
+  });
+
+  test("a denied replacement leaves the old promise fully untouched", async () => {
+    const subject = "world-id-subject-replace-denied";
+    const { accountId, promiseId: oldId } = await seedActivePromise(subject);
+    const newId = seedPendingPromise(accountId, { replaces: oldId });
+
+    await settlePromiseRefused(newId, "denied", "human denied the replacement approval request");
+
+    const oldPromise = getPromise(oldId);
+    expect(oldPromise?.status).toBe("active");
+    expect(oldPromise?.replacedBy).toBeUndefined();
+    expect(getPromise(newId)?.status).toBe("denied");
+  });
+
+  test("an expired replacement leaves the old promise fully untouched", async () => {
+    const subject = "world-id-subject-replace-expired";
+    const { accountId, promiseId: oldId } = await seedActivePromise(subject);
+    const newId = seedPendingPromise(accountId, { replaces: oldId });
+
+    await settlePromiseRefused(newId, "expired", "World ID approval window elapsed without a response");
+
+    const oldPromise = getPromise(oldId);
+    expect(oldPromise?.status).toBe("active");
+    expect(oldPromise?.replacedBy).toBeUndefined();
+    expect(getPromise(newId)?.status).toBe("expired");
+  });
+
+  test("atomicity: old already revoked at activation -> new still activates, old is left completely untouched", async () => {
+    const subject = "world-id-subject-replace-already-revoked";
+    const { accountId, promiseId: oldId } = await seedActivePromise(subject);
+    const newId = seedPendingPromise(accountId, { replaces: oldId });
+
+    // The owner revokes the old promise directly, before this replacement resolves.
+    const activeOld = getPromise(oldId)!;
+    savePromise({ ...activeOld, status: "revoked", reason: "revoked by owner", updatedAt: new Date().toISOString() });
+
+    await settlePromiseApproved(newId, { sub: subject, acr: "dev", authTime: Math.floor(Date.now() / 1000) });
+
+    const newPromise = getPromise(newId);
+    const oldPromise = getPromise(oldId);
+    expect(newPromise?.status).toBe("active");
+    // Untouched by the replacement — same reason as the manual revoke above,
+    // and no replacedBy stamped on it.
+    expect(oldPromise?.status).toBe("revoked");
+    expect(oldPromise?.reason).toBe("revoked by owner");
+    expect(oldPromise?.replacedBy).toBeUndefined();
+  });
+});
+
+describe("serializePromiseSummary — lineage (promise-replacement fix)", () => {
+  test("replaces/replacedBy round-trip through the serialized summary once a replacement activates", async () => {
+    const subject = "world-id-subject-replace-serialize";
+    const { accountId, promiseId: oldId } = await seedActivePromise(subject);
+    const newId = seedPendingPromise(accountId, { replaces: oldId });
+    await settlePromiseApproved(newId, { sub: subject, acr: "dev", authTime: Math.floor(Date.now() / 1000) });
+
+    const newSummary = serializePromiseSummary(getPromise(newId)!);
+    const oldSummary = serializePromiseSummary(getPromise(oldId)!);
+    expect(newSummary.replaces).toBe(oldId);
+    expect(oldSummary.replacedBy).toBe(newId);
+  });
+
+  test("an ordinary promise serializes with no lineage fields", async () => {
+    const { promiseId } = await seedActivePromise("world-id-subject-replace-no-lineage");
+    const summary = serializePromiseSummary(getPromise(promiseId)!);
+    expect(summary.replaces).toBeUndefined();
+    expect(summary.replacedBy).toBeUndefined();
   });
 });

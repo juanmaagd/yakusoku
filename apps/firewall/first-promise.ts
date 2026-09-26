@@ -64,12 +64,19 @@ export type CreateFirstPromiseOutcome =
         summary: string;
       };
     }
-  | { ok: false; status: 400 | 429 | 502; error: string };
+  // 404/409 can never actually surface on this path in practice —
+  // `validatePromiseInput` only produces them for a `replaces` target, and
+  // this path has no `accountId` to validate one against (it fail-closed
+  // refuses `replaces` outright with a 400 instead). The union is widened to
+  // match `ValidatedPromiseInput`'s status type exactly, rather than
+  // narrowing it back down with an unreachable-branch assertion.
+  | { ok: false; status: 400 | 404 | 409 | 429 | 502; error: string };
 
 /** `POST /promises/first` (index.ts, no auth). Validates the exact same caps
  * as an ordinary promise (`validatePromiseInput`, promises.ts) — minus the
  * per-account pending-promise count, since no account exists yet (a brand
- * new one always has zero) — then starts a fresh World ID device flow. */
+ * new one always has zero), and `replaces` is always refused here (no
+ * account yet to scope it to) — then starts a fresh World ID device flow. */
 export async function createFirstPromiseRequestOutcome(input: CreatePromiseInput): Promise<CreateFirstPromiseOutcome> {
   const validated = validatePromiseInput(input);
   if (!validated.ok) return validated;

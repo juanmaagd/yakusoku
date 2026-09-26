@@ -20,10 +20,12 @@ import { publish } from "./events-bus";
 import { normalizeMerchantOrigin } from "./merchant";
 import { signPromiseAttestation } from "./promise-attestation";
 import {
+  activatePromiseReplacement,
   countPendingPromisesForAccount,
   createPromise,
   getAccount,
   getIntent,
+  getPendingReplacementFor,
   getPromise,
   listPromisesByStatus,
   savePromise,
@@ -126,11 +128,17 @@ export interface CreatePromiseInput {
    * merchant pipeline stage (merchant.ts) refuses any `resourceUrl` whose
    * origin isn't exactly this one. */
   merchant: string;
+  /** Promise-replacement fix — the id of an existing promise this new one
+   * replaces. Only valid on the ordinary (already-has-an-account) `POST
+   * /promises` path — `validatePromiseInput` fail-closed refuses it on the
+   * first-time no-credential path (`POST /promises/first`, first-promise.ts),
+   * where there is no account yet to own either promise. */
+  replaces?: string;
 }
 
 export type CreatePromiseOutcome =
   | { ok: true; promise: StoredPromise }
-  | { ok: false; status: 400 | 429 | 502; error: string };
+  | { ok: false; status: 400 | 404 | 409 | 429 | 502; error: string };
 
 /** Exported so `first-promise.ts` (P9.6) builds the identical human-facing
  * approval text for its combined account+promise flow. */
@@ -140,25 +148,37 @@ export function buildPromiseSummary(
   categories: string[],
   expirySeconds: bigint,
   merchantOrigin: string,
+  /** Promise-replacement fix — when this promise replaces another, the
+   * approval text World App shows makes that change explicit BEFORE the
+   * new task/budget line, so the human approves the swap, not just the new
+   * terms in isolation. Server-written, same as the rest of this summary —
+   * the agent has no way to alter it. */
+  replaces?: { task: string; budgetUsdc: number },
 ): string {
   const expiryIso = new Date(Number(expirySeconds) * 1000).toISOString();
   // `merchantOrigin` is already validated http(s) (see `createPromiseRequest`),
   // so `new URL` here never throws; `.host` drops the scheme for a shorter,
   // human-facing "…at localhost:4000" (task text per the H1 fix).
   const merchantHost = new URL(merchantOrigin).host;
-  return `Approve "${task}" — up to $${budgetUsdc.toFixed(2)} USDC across ${categories.join(", ")}, expiring ${expiryIso}, at ${merchantHost}.`;
+  const replacesPrefix = replaces ? `Replaces "${replaces.task}" ($${replaces.budgetUsdc.toFixed(2)} USDC). ` : "";
+  return `${replacesPrefix}Approve "${task}" — up to $${budgetUsdc.toFixed(2)} USDC across ${categories.join(", ")}, expiring ${expiryIso}, at ${merchantHost}.`;
 }
 
-export type ValidatedPromiseInput = { ok: true; merchantOrigin: string } | { ok: false; status: 400 | 429; error: string };
+export type ValidatedPromiseInput =
+  | { ok: true; merchantOrigin: string }
+  | { ok: false; status: 400 | 404 | 409 | 429; error: string };
 
 /**
  * Shared cap/shape validation for a promise request — budget bounds,
- * category count, expiry bounds, and merchant-origin normalization (H1 fix).
- * Exported so `first-promise.ts` (P9.6's single-World-ID-approval combined
+ * category count, expiry bounds, merchant-origin normalization (H1 fix), and
+ * (promise-replacement fix) an optional `replaces` target. Exported so
+ * `first-promise.ts` (P9.6's single-World-ID-approval combined
  * account+promise flow) validates its own input identically, rather than
  * duplicating these constants and rules. `accountId` is optional: the P9.6
  * flow calls this BEFORE an account exists yet, so it has no pending-promise
- * count to check against (a brand-new account can only ever have zero).
+ * count to check against (a brand-new account can only ever have zero) — and,
+ * for the same reason, can never validate a `replaces` target either (there's
+ * no account yet to own it), so `replaces` is refused outright on that path.
  */
 export function validatePromiseInput(input: CreatePromiseInput, accountId?: string): ValidatedPromiseInput {
   if (!Number.isFinite(input.budgetUsdc) || input.budgetUsdc <= 0) {
@@ -179,6 +199,31 @@ export function validatePromiseInput(input: CreatePromiseInput, accountId?: stri
   const merchantResult = normalizeMerchantOrigin(input.merchant);
   if (!merchantResult.ok) {
     return { ok: false, status: 400, error: `invalid merchant: ${merchantResult.reason}` };
+  }
+
+  if (input.replaces !== undefined) {
+    // Promise-replacement fix — fail-closed validation, in order:
+    if (accountId === undefined) {
+      // No account exists yet on this path (P9.6) — nothing for `replaces`
+      // to be scoped to.
+      return { ok: false, status: 400, error: "replaces_not_allowed_first_promise" };
+    }
+    const target = getPromise(input.replaces);
+    // Same shape as every other owner-scoped lookup in this firewall
+    // (e.g. `GET /promises/:id`, index.ts): an unknown id and an id that
+    // belongs to a DIFFERENT account return the exact same error, so a
+    // caller can never use this to probe whether some other account's
+    // promise id exists.
+    if (!target || target.accountId !== accountId) {
+      return { ok: false, status: 404, error: "replaces_not_found" };
+    }
+    const remainingBudget = target.budget - target.spent;
+    if (target.status !== "active" || remainingBudget <= 0n) {
+      return { ok: false, status: 409, error: "replaces_not_active" };
+    }
+    if (getPendingReplacementFor(target.id)) {
+      return { ok: false, status: 409, error: "replacement_already_pending" };
+    }
   }
 
   if (accountId !== undefined) {
@@ -217,6 +262,16 @@ export async function createPromiseRequest(account: StoredAccount, input: Create
   const deadlineMs = requestedAt.getTime() + Math.min(device.expiresIn, approvalTimeoutSeconds()) * 1000;
   const expiresAt = new Date(deadlineMs).toISOString();
 
+  // Promise-replacement fix — re-fetch for display purposes only; validation
+  // already confirmed `input.replaces` exists, is this account's own, and is
+  // active. This text is best-effort human-readable framing shown while the
+  // approval is pending — the actual enforcement (revoking the old promise)
+  // happens later, at settlement, against a fresh re-fetch of its own.
+  const replacesTarget = input.replaces ? getPromise(input.replaces) : undefined;
+  const replacesSummary = replacesTarget
+    ? { task: replacesTarget.task, budgetUsdc: Number(replacesTarget.budget) / 10 ** USDC_DECIMALS }
+    : undefined;
+
   const promise: StoredPromise = {
     id: promiseId,
     accountId: account.id,
@@ -228,7 +283,8 @@ export async function createPromiseRequest(account: StoredAccount, input: Create
     merchant: merchantOrigin,
     spent: 0n,
     status: "pending_approval",
-    summary: buildPromiseSummary(input.task, input.budgetUsdc, input.categories, expirySeconds, merchantOrigin),
+    summary: buildPromiseSummary(input.task, input.budgetUsdc, input.categories, expirySeconds, merchantOrigin, replacesSummary),
+    replaces: input.replaces,
     deviceCode: device.deviceCode,
     verificationUri: device.verificationUri,
     verificationUriComplete: device.verificationUriComplete,
@@ -297,7 +353,31 @@ export async function settlePromiseApproved(promiseId: string, claims: FreshAppr
       acr: claims.acr ?? ACR_ORB_V3,
       authTimeSeconds: claims.authTime,
     });
-    savePromise({ ...fresh, status: "active", reason: "approved", attestation, updatedAt: new Date().toISOString() });
+    const activated: StoredPromise = { ...fresh, status: "active", reason: "approved", attestation, updatedAt: new Date().toISOString() };
+
+    // Promise-replacement fix — re-fetch the replaced promise fresh, right
+    // before activating, and only build an update for it when it's STILL
+    // `active` at this exact moment: it may have expired, been revoked by
+    // its owner, or been consumed by some other path since this replacement
+    // was requested. Either way the new promise activates on its own terms
+    // (design: "if the old one is no longer active at that moment, still
+    // activate the new one") — `oldToRevoke` stays `undefined` and the old
+    // row is left completely untouched.
+    let oldToRevoke: StoredPromise | undefined;
+    if (fresh.replaces) {
+      const target = getPromise(fresh.replaces);
+      if (target && target.status === "active") {
+        oldToRevoke = {
+          ...target,
+          status: "revoked",
+          reason: `replaced by promise ${fresh.id}`,
+          replacedBy: fresh.id,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    }
+
+    activatePromiseReplacement(activated, oldToRevoke);
     publish("promise.approved", { promiseId: fresh.id, accountId: fresh.accountId });
   } catch (err) {
     await settlePromiseRefused(promiseId, "error", `signing the PromiseAttestation failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -410,6 +490,12 @@ export interface PromiseSummaryDto {
   /** H1 fix — the normalized origin this promise may pay; `undefined` only
    * for a promise created before merchant binding existed. */
   merchant?: string;
+  /** Promise-replacement fix — the id of the promise THIS promise replaces,
+   * `undefined` for an ordinary (non-replacing) promise. */
+  replaces?: string;
+  /** Promise-replacement fix — the id of the promise that replaced THIS one,
+   * `undefined` unless a replacement for it has already activated. */
+  replacedBy?: string;
 }
 
 export function serializePromiseSummary(promise: StoredPromise): PromiseSummaryDto {
@@ -423,6 +509,8 @@ export function serializePromiseSummary(promise: StoredPromise): PromiseSummaryD
     categories: promise.categories,
     expiry: promise.expiry.toString(),
     merchant: promise.merchant,
+    replaces: promise.replaces,
+    replacedBy: promise.replacedBy,
     createdAt: promise.createdAt,
   };
 }

@@ -440,6 +440,12 @@ const createPromiseSchema = z.object({
   /** H1 fix — the store's URL; `createPromiseRequest` (promises.ts)
    * normalizes it to an origin and binds this promise to it. */
   merchant: z.string().min(1),
+  /** Promise-replacement fix — the id of an existing promise this new one
+   * replaces. Shared by both `POST /promises` and `POST /promises/first`:
+   * `validatePromiseInput` (promises.ts) is what actually fail-closed
+   * refuses it on the first-time no-credential path, since there's no
+   * account yet on that path to own either promise. */
+  replaces: z.string().min(1).optional(),
 });
 
 app.post("/promises", async (c) => {

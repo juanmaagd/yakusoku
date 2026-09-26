@@ -276,6 +276,18 @@ export interface StoredPromise {
   /** Approval-window deadline while `status === "pending_approval"`. */
   expiresAt?: string;
   attestation?: PromiseAttestation;
+  /** Promise-replacement fix — the id of the promise THIS promise replaces,
+   * set once at creation (`POST /promises`'s `replaces` input) and never
+   * changed. `undefined` for an ordinary (non-replacing) promise. */
+  replaces?: string;
+  /** Promise-replacement fix — set on the OLD promise, at the moment a
+   * replacement for it activates, to the NEW promise's id — but ONLY when
+   * this promise was still `active` and got revoked as part of that same
+   * transaction (`activatePromiseReplacement`). A promise that left `active`
+   * on its own before a pending replacement resolved is never touched, so
+   * `replacedBy` stays `undefined` even though a replacement exists (its own
+   * `replaces` field still points back here). */
+  replacedBy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -403,6 +415,8 @@ db.exec(`
     gate_started_at_ms INTEGER,
     expires_at TEXT,
     attestation_json TEXT,
+    replaces TEXT,
+    replaced_by TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -485,7 +499,25 @@ db.exec(`
   if (!existingPromiseColumns.has("merchant")) {
     db.exec(`ALTER TABLE promises ADD COLUMN merchant TEXT`);
   }
+  // Promise-replacement fix — same story for the `replaces`/`replaced_by`
+  // lineage columns: nullable, so a pre-existing promise row simply reads
+  // back as "never replaced anything, never replaced by anything" — exactly
+  // what it actually is. `existingPromiseColumns` was already read above
+  // this same PRAGMA call, before either ALTER TABLE runs, so checking it
+  // twice for two independent columns is safe and cheap.
+  if (!existingPromiseColumns.has("replaces")) {
+    db.exec(`ALTER TABLE promises ADD COLUMN replaces TEXT`);
+  }
+  if (!existingPromiseColumns.has("replaced_by")) {
+    db.exec(`ALTER TABLE promises ADD COLUMN replaced_by TEXT`);
+  }
 }
+// Only safe once `replaces` is guaranteed to exist (a fresh CREATE TABLE
+// above already has it; an existing DB just got it via ALTER TABLE) — this
+// index creation must run AFTER that migration, never inside the
+// unconditional CREATE-TABLE block above, or it would fail indexing a
+// not-yet-existing column on a pre-replacement-fix database.
+db.exec(`CREATE INDEX IF NOT EXISTS promises_replaces ON promises (replaces);`);
 
 // P11.3a migration: `accounts` may already exist from before the deployment
 // columns did (a live dev sqlite file under data/) — add them by hand,
@@ -614,21 +646,24 @@ const insertPromiseStmt = db.prepare(
   `INSERT INTO promises (
      id, account_id, task, budget, categories_json, expiry, nonce, merchant, spent, status, reason, summary,
      device_code, verification_uri, verification_uri_complete, user_code, interval_seconds, requested_at,
-     gate_started_at_ms, expires_at, attestation_json, created_at, updated_at
+     gate_started_at_ms, expires_at, attestation_json, replaces, created_at, updated_at
    ) VALUES (
      $id, $accountId, $task, $budget, $categoriesJson, $expiry, $nonce, $merchant, $spent, $status, $reason, $summary,
      $deviceCode, $verificationUri, $verificationUriComplete, $userCode, $intervalSeconds, $requestedAt,
-     $gateStartedAtMs, $expiresAt, $attestationJson, $createdAt, $updatedAt
+     $gateStartedAtMs, $expiresAt, $attestationJson, $replaces, $createdAt, $updatedAt
    )`,
 );
 // Full-row update for every mutable field — same "rewrite everything on each
 // transition" pattern `savePendingApproval` uses for a `PendingApproval`.
+// `replaces` is NOT here — it's immutable after creation (set once, above),
+// unlike `replaced_by`, which only ever gets its first value well after
+// creation (`activatePromiseReplacement`).
 const updatePromiseStmt = db.prepare(
   `UPDATE promises SET
      status = $status, reason = $reason, spent = $spent, device_code = $deviceCode,
      verification_uri = $verificationUri, verification_uri_complete = $verificationUriComplete,
      user_code = $userCode, interval_seconds = $intervalSeconds, expires_at = $expiresAt,
-     attestation_json = $attestationJson, updated_at = $updatedAt
+     attestation_json = $attestationJson, replaced_by = $replacedBy, updated_at = $updatedAt
    WHERE id = $id`,
 );
 // Narrow statement `recordSpend` uses so a budget reservation/release never
@@ -645,6 +680,12 @@ const countPromisesByAccountAndStatusStmt = db.prepare(
   `SELECT COUNT(*) as count FROM promises WHERE account_id = $accountId AND status = $status`,
 );
 const listPromisesByStatusStmt = db.prepare(`SELECT * FROM promises WHERE status = $status`);
+// Promise-replacement fix — is there already a pending promise that names
+// this one as the promise it replaces? `validatePromiseInput` uses this to
+// refuse stacking two pending replacements on the same target.
+const getPendingReplacementForStmt = db.prepare(
+  `SELECT * FROM promises WHERE replaces = $replaces AND status = 'pending_approval' LIMIT 1`,
+);
 
 // --- Row <-> domain mapping ----------------------------------------------
 
@@ -1282,6 +1323,8 @@ interface PromiseRow {
   gate_started_at_ms: number | null;
   expires_at: string | null;
   attestation_json: string | null;
+  replaces: string | null;
+  replaced_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1309,6 +1352,8 @@ function rowToPromise(row: PromiseRow): StoredPromise {
     gateStartedAtMs: row.gate_started_at_ms ?? undefined,
     expiresAt: row.expires_at ?? undefined,
     attestation: parseStoredAttestation(row.attestation_json),
+    replaces: row.replaces ?? undefined,
+    replacedBy: row.replaced_by ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1351,6 +1396,7 @@ export function createPromise(promise: StoredPromise): void {
     $gateStartedAtMs: promise.gateStartedAtMs ?? null,
     $expiresAt: promise.expiresAt ?? null,
     $attestationJson: promise.attestation ? JSON.stringify(promise.attestation) : null,
+    $replaces: promise.replaces ?? null,
     $createdAt: promise.createdAt,
     $updatedAt: promise.updatedAt,
   });
@@ -1373,8 +1419,28 @@ export function savePromise(promise: StoredPromise): void {
     $intervalSeconds: promise.intervalSeconds ?? null,
     $expiresAt: promise.expiresAt ?? null,
     $attestationJson: promise.attestation ? JSON.stringify(promise.attestation) : null,
+    $replacedBy: promise.replacedBy ?? null,
     $updatedAt: promise.updatedAt,
   });
+}
+
+/** Activates a replacement promise and, if the promise it replaces is still
+ * `active` at this exact moment, revokes that one in the SAME SQLite
+ * transaction (promise-replacement fix) — either both rows change or
+ * neither does, never a new active promise with no lineage recorded on a
+ * stale-but-still-active old one. `oldPromise` is `undefined` when there's
+ * nothing to revoke: an ordinary (non-replacing) approval, or a replacement
+ * whose target already left `active` on its own (denied/expired/revoked
+ * independently) before this transaction ran — either way the new promise
+ * still activates on its own terms (`settlePromiseApproved`, promises.ts),
+ * and the old row (if any) is passed in already fully updated by the
+ * caller. */
+export function activatePromiseReplacement(newPromise: StoredPromise, oldPromise: StoredPromise | undefined): void {
+  const run = db.transaction(() => {
+    savePromise(newPromise);
+    if (oldPromise) savePromise(oldPromise);
+  });
+  run();
 }
 
 export function getPromise(id: string): StoredPromise | undefined {
@@ -1410,6 +1476,15 @@ export function countPendingPromisesForAccount(accountId: string): number {
 export function listPromisesByStatus(status: PromiseStatus): StoredPromise[] {
   const rows = listPromisesByStatusStmt.all({ $status: status }) as PromiseRow[];
   return rows.map(rowToPromise);
+}
+
+/** The pending promise (if any) that already names `promiseId` as the
+ * promise it replaces — `validatePromiseInput` (promises.ts) uses this to
+ * refuse a second concurrent replacement (`replacement_already_pending`)
+ * before a first one has resolved. */
+export function getPendingReplacementFor(promiseId: string): StoredPromise | undefined {
+  const row = getPendingReplacementForStmt.get({ $replaces: promiseId }) as PromiseRow | null;
+  return row ? rowToPromise(row) : undefined;
 }
 
 // --- Setup tokens (P11.3a) ----------------------------------------------------
