@@ -163,6 +163,119 @@ describe("check_approval — cross-session ownership (T8 fix B)", () => {
   });
 });
 
+// --- WU: purchase ref — pay_x402 forwards purchaseRef to /sign; rejected
+// when malformed (odd/tasks/standing-rules.md T7) ---------------------------
+
+describe("pay_x402 — purchaseRef (WU: purchase ref)", () => {
+  function paymentRequiredHeaderFor(amount = "1000000") {
+    return encodePaymentRequiredHeader({
+      x402Version: 1,
+      accepts: [
+        {
+          scheme: "exact",
+          network: "eip155:84532",
+          amount,
+          asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          payTo: "0x1111111111111111111111111111111111111111",
+          maxTimeoutSeconds: 60,
+        },
+      ],
+    } as unknown as Parameters<typeof encodePaymentRequiredHeader>[0]);
+  }
+
+  test("forwards purchaseRef to POST /sign's request body when provided", async () => {
+    const signRequestBodies: Record<string, unknown>[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method ?? "GET";
+
+      if (url === "http://store.test/item") {
+        return new Response("{}", { status: 402, headers: { "PAYMENT-REQUIRED": paymentRequiredHeaderFor() } });
+      }
+      if (url === "http://firewall.test/mandate") {
+        return Response.json({
+          id: "intent_1",
+          task: "buy a $1 gift card",
+          budget: "1000000",
+          remainingBudget: "1000000",
+          categories: ["gift_card:amazon"],
+          expiry: "9999999999",
+          revoked: false,
+        });
+      }
+      if (url === "http://firewall.test/sign" && method === "POST") {
+        signRequestBodies.push(JSON.parse(String(init?.body)));
+        return Response.json({ verdict: "refuse", reason: "test refusal", receiptId: "receipt_purchase_ref" });
+      }
+      throw new Error(`unexpected fetch in test: ${method} ${url}`);
+    }) as typeof fetch;
+
+    const client = await wireSession("yk_test_purchase_ref");
+    await client.callTool({
+      name: "pay_x402",
+      arguments: { url: "http://store.test/item", justification: "matches the human's request", purchaseRef: "amazon-1-first" },
+    });
+    await client.close();
+
+    expect(signRequestBodies).toHaveLength(1);
+    expect(signRequestBodies[0]?.purchaseRef).toBe("amazon-1-first");
+  });
+
+  test("omitting purchaseRef forwards no field at all (unchanged pre-existing behavior)", async () => {
+    const signRequestBodies: Record<string, unknown>[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method ?? "GET";
+
+      if (url === "http://store.test/item") {
+        return new Response("{}", { status: 402, headers: { "PAYMENT-REQUIRED": paymentRequiredHeaderFor() } });
+      }
+      if (url === "http://firewall.test/mandate") {
+        return Response.json({
+          id: "intent_1",
+          task: "buy a $1 gift card",
+          budget: "1000000",
+          remainingBudget: "1000000",
+          categories: ["gift_card:amazon"],
+          expiry: "9999999999",
+          revoked: false,
+        });
+      }
+      if (url === "http://firewall.test/sign" && method === "POST") {
+        signRequestBodies.push(JSON.parse(String(init?.body)));
+        return Response.json({ verdict: "refuse", reason: "test refusal", receiptId: "receipt_no_ref" });
+      }
+      throw new Error(`unexpected fetch in test: ${method} ${url}`);
+    }) as typeof fetch;
+
+    const client = await wireSession("yk_test_no_purchase_ref");
+    await client.callTool({ name: "pay_x402", arguments: { url: "http://store.test/item", justification: "matches the human's request" } });
+    await client.close();
+
+    expect(signRequestBodies[0]?.purchaseRef).toBeUndefined();
+  });
+
+  test("rejects a malformed purchaseRef before ever reaching the firewall", async () => {
+    let fetchCalled = false;
+    globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
+      fetchCalled = true;
+      throw new Error("fetch should never be called for a malformed purchaseRef");
+    }) as typeof fetch;
+
+    const client = await wireSession("yk_test_bad_purchase_ref");
+    // The MCP SDK validates `inputSchema` before invoking the tool handler
+    // (server/mcp.js's `validateToolInput`) and reports a schema mismatch as
+    // an error CallToolResult (`isError: true`), not a rejected/thrown call.
+    const result = await client.callTool({
+      name: "pay_x402",
+      arguments: { url: "http://store.test/item", justification: "matches the human's request", purchaseRef: "not a valid ref!" },
+    });
+    expect(result.isError).toBe(true);
+    expect(fetchCalled).toBe(false);
+    await client.close();
+  });
+});
+
 // --- Promise-replacement fix --------------------------------------------------
 
 describe("request_promise — replaces passthrough (promise-replacement fix)", () => {

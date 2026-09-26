@@ -45,7 +45,9 @@ const SERVER_INSTRUCTIONS =
   "buy what fits, and for what does not, tell the human why and only call request_promise with replaces if " +
   "they agree to widen the rules. " +
   "If pay_x402 returns needs_human_approval, show the link and code and wait, then call check_approval. A " +
-  "refusal is final: never retry with different wording.";
+  "refusal is final: never retry with different wording. " +
+  "Give each distinct purchase its own purchaseRef, so buying the same item twice under one promise settles as " +
+  "two separate payments instead of replaying the first.";
 
 function buildServer(session: SessionState, httpMode: boolean): McpServer {
   const server = new McpServer({ name: "omamorisan", version: "0.1.0" }, { instructions: SERVER_INSTRUCTIONS });

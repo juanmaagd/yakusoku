@@ -14,6 +14,11 @@
 
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+// WU: purchase ref — mirrors apps/firewall's `purchaseRefSchema`
+// (packages/shared/receipt.ts) exactly; this server doesn't depend on
+// @yakusoku/shared (see this file's other locally-mirrored response shapes,
+// e.g. `SignResponse` below), so the pattern is kept in sync here by hand.
+const PURCHASE_REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 import { decodePaymentRequiredHeader, decodePaymentResponseHeader } from "@x402/core/http";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -1003,7 +1008,11 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         "(fail-closed — never retry a refusal with different wording), or " +
         "require fresh human approval via World ID, in which case this returns immediately with a " +
         "verificationUri and you should call check_approval later. `justification` must state, in your own " +
-        "words, why this specific purchase matches what the human actually asked for.",
+        "words, why this specific purchase matches what the human actually asked for. Give each distinct " +
+        "purchase its own purchaseRef (e.g. \"amazon-1-first\", \"amazon-1-second\") so buying the same item " +
+        "twice under one promise settles as two separate payments; reuse the SAME purchaseRef only to retry " +
+        "that same purchase (after a timeout, or while waiting on check_approval) — a refusal is final for " +
+        "that item under that promise no matter the purchaseRef.",
       inputSchema: {
         url: z.string().describe("the http(s) URL of the x402-protected resource to buy"),
         justification: z.string().describe("why this purchase matches the human's original request"),
@@ -1011,9 +1020,18 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
           .string()
           .optional()
           .describe("which promise to spend from (World ID account only) — required unless exactly one active promise exists"),
+        purchaseRef: z
+          .string()
+          .regex(PURCHASE_REF_PATTERN)
+          .optional()
+          .describe(
+            "a short opaque tag for THIS purchase (e.g. \"amazon-1-first\"), 1-64 chars of letters/digits/_/- — " +
+              "give a NEW purchase of the same item a NEW purchaseRef; reuse the same one only to retry the same " +
+              "purchase. Omit for a one-off purchase (unchanged behavior).",
+          ),
       },
     },
-    async ({ url, justification, promiseId }) => {
+    async ({ url, justification, promiseId, purchaseRef }) => {
       try {
         assertHttpUrl(url);
         if (!session.hasAgentKey()) {
@@ -1062,7 +1080,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         const signRes = await fetch(`${config.firewallUrl}/sign`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${agentKey}` },
-          body: JSON.stringify({ intentId, paymentRequiredHeader, resourceUrl: url, context }),
+          body: JSON.stringify({ intentId, paymentRequiredHeader, resourceUrl: url, context, purchaseRef }),
         });
         const signBody = (await signRes.json().catch(() => undefined)) as SignResponse | undefined;
         if (!signRes.ok || !signBody) {
