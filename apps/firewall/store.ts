@@ -313,7 +313,13 @@ export interface StoredPromise {
 const DATA_DIR = process.env.FIREWALL_DATA_DIR ?? join(import.meta.dir, "data");
 mkdirSync(DATA_DIR, { recursive: true });
 
-const db = new Database(join(DATA_DIR, "firewall.sqlite"));
+/** The file this process's single connection opened, resolved once at
+ * module load. Tests that inspect raw rows must open THIS path: in a full
+ * `bun test` run the first test file to import this module pins the
+ * connection, and later files' `FIREWALL_DATA_DIR` no longer matches it. */
+export const FIREWALL_DB_PATH = join(DATA_DIR, "firewall.sqlite");
+
+const db = new Database(FIREWALL_DB_PATH);
 db.exec("PRAGMA journal_mode = WAL;");
 
 db.exec(`

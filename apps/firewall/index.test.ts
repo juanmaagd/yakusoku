@@ -40,7 +40,7 @@ process.env.OMAMORISAN_DEFAULT_RECIPIENTS ??= JSON.stringify([
   { address: "0x000000000000000000000000000000000000dEaD", label: "Test recipient" },
 ]);
 
-const { createIntent, createSession, findOrCreateAccountBySubjectHash, savePendingApproval, saveReceipt } = await import("./store");
+const { FIREWALL_DB_PATH, createIntent, createSession, findOrCreateAccountBySubjectHash, savePendingApproval, saveReceipt } = await import("./store");
 const { createSetupLink, fillSetupMessage, linkOwner, setupMessageTemplate } = await import("./account-setup");
 const firewallConfig = (await import("./index")).default;
 const server = Bun.serve({ ...firewallConfig, port: 0 });
@@ -222,7 +222,9 @@ test("gift card code is delivered only to the signed-in receipt owner", async ()
   expect(ownerResponse.headers.get("cache-control")).toContain("no-store");
   expect((await ownerResponse.json() as { code: string }).code).toBe(code);
 
-  const database = new Database(join(process.env.FIREWALL_DATA_DIR!, "firewall.sqlite"), { readonly: true });
+  // The store's own file, not this file's FIREWALL_DATA_DIR: in the full
+  // suite another test file opened the shared connection first.
+  const database = new Database(FIREWALL_DB_PATH, { readonly: true });
   const stored = database.prepare("SELECT encrypted_code FROM gift_card_fulfillments WHERE receipt_id = ?").get(receiptId) as { encrypted_code: string };
   expect(stored.encrypted_code).not.toContain(code);
   database.close();
