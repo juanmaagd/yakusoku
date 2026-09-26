@@ -182,7 +182,10 @@ function PromiseCard({ mandate, onRevoke }: { mandate: SerializedMandate; onRevo
               message="Revoke this promise? Its agent key stops working immediately."
               confirmLabel="Revoke"
               busyLabel="Revoking…"
-              onConfirm={() => onRevoke(mandate.id)}
+              onConfirm={async () => {
+                await onRevoke(mandate.id);
+                setConfirming(false);
+              }}
               onCancel={() => setConfirming(false)}
             />
           ) : (
