@@ -23,18 +23,21 @@ const ATTACK_STATIC: Record<string, "pass" | "fail" | "skip"> = {
   sign: "skip",
 };
 
+// The site description, with the protocol folded in for the hero only.
+const SUBHEAD =
+  "A pre-signature firewall for AI agent payments over x402. The agent never holds a key: every payment is checked against the intent you signed, before anything is signed.";
+
 const STACK = ["x402", "Base Sepolia", "Intercepta", "World ID for Agents", "TypeSafe Jev"];
 ---
 
 <section class="relative" aria-labelledby="hero-heading">
-  <div class="grid grid-cols-1 items-center gap-14 px-6 pt-14 pb-16 md:px-16 md:pt-20 md:pb-24 lg:pt-36 lg:grid-cols-[0.92fr_1.08fr] lg:gap-10">
+  <div class="grid grid-cols-1 items-center gap-14 px-6 pt-12 pb-16 md:px-16 md:pt-16 md:pb-20 lg:pt-14 lg:grid-cols-[0.92fr_1.08fr] lg:gap-10">
     <div class="relative z-10 max-w-[560px]">
-      <p class="label text-graphite">Pre-signature firewall · x402</p>
-      <h1 id="hero-heading" class="headline mt-5 text-[44px] leading-[1.04] tracking-[-0.02em] text-ink sm:text-[56px] lg:text-display">
+      <h1 id="hero-heading" class="headline text-[44px] leading-[1.04] tracking-[-0.02em] text-ink sm:text-[56px] lg:text-display">
         Your agent pays <strong>only for what you promised.</strong>
       </h1>
       <p class="mt-6 max-w-[46ch] text-body-lg text-graphite">
-        {SITE.description}
+        {SUBHEAD}
       </p>
       <div class="mt-9 flex flex-col gap-3 sm:flex-row">
         <a href={SITE.appRoute} class="btn btn-primary">Launch app</a>
@@ -52,15 +55,15 @@ const STACK = ["x402", "Base Sepolia", "Intercepta", "World ID for Agents", "Typ
         loading="eager"
         decoding="async"
         fetchpriority="high"
-        class="pointer-events-none absolute -top-6 -right-4 z-0 w-[210px] select-none sm:-top-16 sm:w-[300px] lg:-top-36 lg:-right-36 lg:w-[420px]"
+        class="pointer-events-none absolute -top-6 -right-4 z-0 w-[210px] select-none sm:-top-16 sm:w-[300px] lg:-top-16 lg:-right-32 lg:w-[380px]"
       />
 
       <div
         id="console"
-        class="relative z-10 mt-40 rounded-card border border-hairline bg-surface shadow-console sm:mt-44 lg:mt-16"
+        class="relative z-10 mt-40 rounded-card border border-hairline bg-surface shadow-console sm:mt-44 lg:mt-10"
         aria-labelledby="console-title"
       >
-        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-hairline px-5 py-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-hairline px-5 py-2.5">
           <p id="console-title" class="label text-graphite">Replay · recorded firewall decisions</p>
           <div class="inline-flex rounded-btn border border-hairline bg-fog p-0.5" role="group" aria-label="Choose which recorded case to replay">
             <button type="button" data-case="attack" aria-pressed="true" class="console-toggle">Attack</button>
@@ -69,12 +72,12 @@ const STACK = ["x402", "Base Sepolia", "Intercepta", "World ID for Agents", "Typ
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2">
-          <article class="border-b border-hairline px-5 py-5 sm:border-r sm:border-b-0">
+          <article class="border-b border-hairline px-5 py-4 sm:border-r sm:border-b-0">
             <p class="label text-stone">What you signed</p>
             <p class="mt-2.5 text-body font-semibold leading-snug text-ink" data-field="intent-text">
               Buy a $25 Amazon gift card for my sister's birthday
             </p>
-            <dl class="mt-4 space-y-2 text-body-sm">
+            <dl class="mt-3 space-y-1.5 text-body-sm">
               <div class="flex items-baseline justify-between gap-4">
                 <dt class="text-graphite">Budget</dt>
                 <dd class="font-mono text-caption text-ink" data-field="intent-budget">25 USDC</dd>
@@ -84,23 +87,23 @@ const STACK = ["x402", "Base Sepolia", "Intercepta", "World ID for Agents", "Typ
                 <dd class="font-mono text-caption text-ink" data-field="intent-category">gift_card:amazon</dd>
               </div>
               <div class="flex items-baseline justify-between gap-4">
-                <dt class="text-graphite">Signed with</dt>
-                <dd class="text-right text-ink">Your wallet (EIP-712)</dd>
+                <dt class="whitespace-nowrap text-graphite">Signed with</dt>
+                <dd class="whitespace-nowrap text-right text-ink">Your wallet (EIP-712)</dd>
               </div>
             </dl>
           </article>
 
-          <article class="px-5 py-5">
+          <article class="px-5 py-4">
             <p class="label text-stone">What the agent asks to pay</p>
             <p class="mt-2.5 text-body font-semibold leading-snug text-ink" data-field="request-text">Steam Gift Card — 25 USDC</p>
-            <dl class="mt-4 space-y-2 text-body-sm">
+            <dl class="mt-3 space-y-1.5 text-body-sm">
               <div>
                 <dt class="text-graphite">Paid to</dt>
                 <dd class="mt-0.5 text-ink" data-field="request-recipient">The store's own wallet (same as the Amazon checkout)</dd>
               </div>
               <div>
                 <dt class="text-graphite">Justified by</dt>
-                <dd class="mt-1 rounded-sm border border-hairline bg-fog px-3 py-2 text-caption leading-relaxed text-charcoal" data-field="request-justification">
+                <dd class="mt-1 rounded-sm border border-hairline bg-fog px-2.5 py-1.5 text-caption leading-snug text-charcoal" data-field="request-justification">
                   “Complete your order! Add a Steam Gift Card to the same checkout — same trusted store wallet, same secure payment, one click.”
                 </dd>
               </div>
@@ -108,8 +111,8 @@ const STACK = ["x402", "Base Sepolia", "Intercepta", "World ID for Agents", "Typ
           </article>
         </div>
 
-        <div class="border-t border-hairline px-5 py-4">
-          <ol class="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2" id="console-checks">
+        <div class="border-t border-hairline px-5 py-3">
+          <ol class="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2" id="console-checks">
             {
               CHECKS.map((c) => (
                 <li data-check={c.key} data-state={ATTACK_STATIC[c.key]} class="console-check flex items-center gap-2.5 text-body-sm">
@@ -145,12 +148,12 @@ const STACK = ["x402", "Base Sepolia", "Intercepta", "World ID for Agents", "Typ
           </ol>
         </div>
 
-        <div class="border-t border-hairline px-5 py-5">
-          <div data-field="verdict" data-tone="refuse" class="verdict rounded-card px-4 py-3.5" role="status" aria-live="polite">
+        <div class="border-t border-hairline px-5 py-4">
+          <div data-field="verdict" data-tone="refuse" class="verdict rounded-card px-4 py-3" role="status" aria-live="polite">
             <p class="label" data-field="verdict-kicker">Verdict</p>
             <p class="mt-1 text-heading-sm font-semibold" data-field="verdict-text">Refused — not what you signed</p>
           </div>
-          <p class="mt-3 text-body-sm text-graphite" data-field="verdict-note">Nothing was paid. The budget is untouched.</p>
+          <p class="mt-2.5 text-body-sm text-graphite" data-field="verdict-note">Nothing was paid. The budget is untouched.</p>
         </div>
       </div>
     </div>

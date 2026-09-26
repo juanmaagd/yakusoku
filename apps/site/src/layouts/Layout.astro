@@ -36,10 +36,13 @@ const { title = SITE.name, description = SITE.description } = Astro.props;
   <body class="min-h-screen bg-canvas font-sans text-ink antialiased">
     <slot />
     <script>
-      // Scroll reveal for [data-reveal] (styles in global.css). Content stays
-      // visible if this never runs.
-      const targets = document.querySelectorAll<HTMLElement>("[data-reveal]");
-      if (targets.length && "IntersectionObserver" in window) {
+      // Marks product fragments ([data-inview]) once they scroll into view;
+      // each component styles its own entrance off `.is-in`. Every hidden
+      // start state is scoped under html.js, so content stays visible if
+      // this never runs.
+      const targets = document.querySelectorAll<HTMLElement>("[data-inview]");
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (targets.length && "IntersectionObserver" in window && !reduce) {
         const io = new IntersectionObserver(
           (entries) => {
             for (const entry of entries) {
@@ -48,7 +51,7 @@ const { title = SITE.name, description = SITE.description } = Astro.props;
               io.unobserve(entry.target);
             }
           },
-          { rootMargin: "0px 0px -8% 0px", threshold: 0.12 },
+          { rootMargin: "0px 0px -10% 0px", threshold: 0.2 },
         );
         targets.forEach((el) => io.observe(el));
       } else {

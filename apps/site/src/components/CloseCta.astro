@@ -1,15 +1,43 @@
 ---
 import { SITE } from "../config";
+
+// Relay diagram node positions, as a share of the 600-unit viewBox width.
+const NODES = [
+  { label: "Agent", x: 20 },
+  { label: "Firewall", x: 300 },
+  { label: "Store", x: 580 },
+] as const;
 ---
 
 <section class="band text-center" aria-labelledby="close-heading">
-  <div data-reveal>
-    <h2 id="close-heading" class="headline mx-auto max-w-[18ch] text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
-      Give your agent a budget, <strong>not your keys.</strong>
-    </h2>
-    <div class="mt-9 flex justify-center">
-      <a href={SITE.appRoute} class="btn btn-primary">Launch app</a>
+  <div class="relay mx-auto max-w-[560px] px-5 sm:px-0" data-inview aria-hidden="true">
+    <svg viewBox="0 0 600 40" class="block h-auto w-full overflow-visible" fill="none">
+      <line x1="26" y1="20" x2="290" y2="20" class="relay-line" vector-effect="non-scaling-stroke" />
+      <line x1="310" y1="20" x2="574" y2="20" class="relay-line relay-line-dim" stroke-dasharray="4 5" vector-effect="non-scaling-stroke" />
+      <rect x="14" y="14" width="12" height="12" class="relay-node" vector-effect="non-scaling-stroke" />
+      <rect x="574" y="14" width="12" height="12" class="relay-node relay-node-dim" vector-effect="non-scaling-stroke" />
+      <rect x="290" y="10" width="20" height="20" class="relay-ring" vector-effect="non-scaling-stroke" />
+      <rect x="290" y="10" width="20" height="20" class="relay-node relay-gate" vector-effect="non-scaling-stroke" />
+      <rect x="296" y="16" width="8" height="8" class="relay-gate-core" />
+      <circle cx="20" cy="20" r="4.5" class="relay-dot" />
+    </svg>
+    <div class="relative mt-2 h-10">
+      {
+        NODES.map((node) => (
+          <span class="absolute top-0 flex -translate-x-1/2 flex-col items-center gap-1.5" style={`left: ${(node.x / 600) * 100}%`}>
+            <span class="label text-graphite">{node.label}</span>
+            {node.label === "Firewall" && <span class="relay-tag">refuse</span>}
+          </span>
+        ))
+      }
     </div>
+  </div>
+
+  <h2 id="close-heading" class="headline mx-auto mt-10 max-w-[18ch] text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:mt-12 md:text-heading-lg">
+    Give your agent a budget, <strong>not your keys.</strong>
+  </h2>
+  <div class="mt-9 flex justify-center">
+    <a href={SITE.appRoute} class="btn btn-primary">Launch app</a>
   </div>
 </section>
 
@@ -26,5 +54,190 @@ import { SITE } from "../config";
     line-height: 0.78;
     color: #eef0f3;
     transform: translateY(14%);
+  }
+
+  /* Relay: a payment leaves the agent, is stopped at the firewall and turns
+     into a refusal; the store is never reached. Loops slowly. */
+  .relay-line {
+    stroke: var(--color-hairline-strong);
+    stroke-width: 1;
+  }
+  .relay-node {
+    stroke: var(--color-ink);
+    stroke-width: 1;
+    fill: var(--color-surface);
+  }
+  .relay-node-dim {
+    stroke: var(--color-hairline-strong);
+  }
+  .relay-gate-core {
+    fill: var(--color-ink);
+  }
+  .relay-ring {
+    stroke: var(--color-refuse);
+    stroke-width: 1;
+    opacity: 0;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .relay-dot {
+    fill: var(--color-ink);
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .relay-tag {
+    border-radius: var(--radius-sm);
+    background: var(--color-refuse-wash);
+    padding: 1px 7px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-stretch: 90%;
+    color: var(--color-refuse-ink);
+    opacity: 0;
+  }
+
+  .relay-dot,
+  .relay-gate,
+  .relay-gate-core,
+  .relay-ring,
+  .relay-tag {
+    animation-duration: 7s;
+    animation-iteration-count: infinite;
+    animation-fill-mode: both;
+  }
+  .relay-dot {
+    animation-name: relay-dot;
+  }
+  .relay-gate {
+    animation-name: relay-gate;
+  }
+  .relay-gate-core {
+    animation-name: relay-gate-core;
+  }
+  .relay-ring {
+    animation-name: relay-ring;
+  }
+  .relay-tag {
+    animation-name: relay-tag;
+  }
+  :global(.js) .relay:not(.is-in) * {
+    animation-play-state: paused;
+  }
+
+  @keyframes relay-dot {
+    0% {
+      transform: translateX(0);
+      fill: var(--color-ink);
+      opacity: 0;
+    }
+    6% {
+      transform: translateX(10px);
+      opacity: 1;
+      animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1);
+    }
+    44% {
+      transform: translateX(266px);
+      fill: var(--color-ink);
+    }
+    48% {
+      transform: translateX(266px) scale(1.4);
+      fill: var(--color-refuse);
+    }
+    54%,
+    86% {
+      transform: translateX(266px) scale(1);
+      fill: var(--color-refuse);
+      opacity: 1;
+    }
+    94%,
+    100% {
+      transform: translateX(266px);
+      fill: var(--color-refuse);
+      opacity: 0;
+    }
+  }
+  @keyframes relay-gate {
+    0%,
+    44% {
+      stroke: var(--color-ink);
+    }
+    48%,
+    88% {
+      stroke: var(--color-refuse);
+    }
+    96%,
+    100% {
+      stroke: var(--color-ink);
+    }
+  }
+  @keyframes relay-gate-core {
+    0%,
+    44% {
+      fill: var(--color-ink);
+    }
+    48%,
+    88% {
+      fill: var(--color-refuse);
+    }
+    96%,
+    100% {
+      fill: var(--color-ink);
+    }
+  }
+  @keyframes relay-ring {
+    0%,
+    46% {
+      opacity: 0;
+      transform: scale(1);
+    }
+    48% {
+      opacity: 0.7;
+      transform: scale(1);
+    }
+    72%,
+    100% {
+      opacity: 0;
+      transform: scale(2.4);
+    }
+  }
+  @keyframes relay-tag {
+    0%,
+    46% {
+      opacity: 0;
+      transform: translateY(-3px);
+    }
+    52%,
+    86% {
+      opacity: 1;
+      transform: none;
+    }
+    94%,
+    100% {
+      opacity: 0;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .relay-dot,
+    .relay-gate,
+    .relay-gate-core,
+    .relay-ring,
+    .relay-tag {
+      animation: none !important;
+    }
+    .relay-dot {
+      transform: translateX(266px);
+      fill: var(--color-refuse);
+    }
+    .relay-gate {
+      stroke: var(--color-refuse);
+    }
+    .relay-gate-core {
+      fill: var(--color-refuse);
+    }
+    .relay-tag {
+      opacity: 1;
+    }
   }
 </style>

@@ -208,20 +208,6 @@
       padding: 96px 64px;
     }
   }
-
-  /* Scroll reveal: progressive enhancement, content is visible without JS. */
-  .js [data-reveal] {
-    opacity: 0;
-    transform: translateY(12px);
-    transition:
-      opacity 450ms var(--ease-out-soft),
-      transform 450ms var(--ease-out-soft);
-    transition-delay: calc(var(--reveal-i, 0) * 70ms);
-  }
-  .js [data-reveal].is-in {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -232,9 +218,5 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
-  }
-  .js [data-reveal] {
-    opacity: 1;
-    transform: none;
   }
 }

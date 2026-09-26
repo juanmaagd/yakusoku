@@ -9,7 +9,7 @@ const DETERMINISTIC_CHECKS = [
 
 <section class="band" aria-labelledby="why-heading">
   <div class="grid grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-16">
-    <div data-reveal>
+    <div>
       <h2 id="why-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
         Why deterministic rules <strong>miss it.</strong>
       </h2>
@@ -20,7 +20,7 @@ const DETERMINISTIC_CHECKS = [
       </p>
     </div>
 
-    <div class="relative pt-24 sm:pt-28" data-reveal style="--reveal-i: 1">
+    <div class="relative pt-24 sm:pt-28">
       <img
         src="/art/bait.webp"
         alt=""
@@ -30,10 +30,10 @@ const DETERMINISTIC_CHECKS = [
         decoding="async"
         class="pointer-events-none absolute -top-6 right-0 z-0 w-[190px] select-none sm:w-[240px] lg:-top-10 lg:-right-6 lg:w-[270px]"
       />
-      <ul class="relative z-10 divide-y divide-hairline overflow-hidden rounded-card border border-hairline bg-surface">
+      <ul class="rules relative z-10 divide-y divide-hairline overflow-hidden rounded-card border border-hairline bg-surface" data-inview>
         {
-          DETERMINISTIC_CHECKS.map((label) => (
-            <li class="flex items-center gap-3 px-4 py-3.5 text-body-sm text-ink">
+          DETERMINISTIC_CHECKS.map((label, i) => (
+            <li class="rule flex items-center gap-3 px-4 py-3.5 text-body-sm text-ink" style={`--i: ${i}`}>
               <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" class="h-[18px] w-[18px] shrink-0 text-graphite">
                 <circle cx="9" cy="9" r="7.25" stroke="currentColor" stroke-opacity=".35" stroke-width="1.5" />
                 <path d="M5.3 9.3L7.7 11.6L12.7 6.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
@@ -43,7 +43,7 @@ const DETERMINISTIC_CHECKS = [
             </li>
           ))
         }
-        <li class="flex items-center gap-3 bg-refuse-wash px-4 py-3.5 text-body-sm text-ink">
+        <li class="rule rule-miss flex items-center gap-3 bg-refuse-wash px-4 py-3.5 text-body-sm text-ink" style={`--i: ${DETERMINISTIC_CHECKS.length}`}>
           <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" class="h-[18px] w-[18px] shrink-0 text-refuse">
             <circle cx="9" cy="9" r="7.25" fill="currentColor" />
             <path d="M6.2 6.2L11.8 11.8M11.8 6.2L6.2 11.8" stroke="#fff" stroke-width="1.7" stroke-linecap="round" />
@@ -55,3 +55,25 @@ const DETERMINISTIC_CHECKS = [
     </div>
   </div>
 </section>
+
+<style>
+  /* The four rules pass one by one; the intent row lands last, as the miss. */
+  :global(.js) .rules .rule {
+    transition:
+      opacity 380ms var(--ease-out-soft),
+      transform 380ms var(--ease-out-soft),
+      background-color 500ms var(--ease-out-soft);
+    transition-delay: calc(var(--i) * 140ms);
+  }
+  :global(.js) .rules:not(.is-in) .rule {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  :global(.js) .rules .rule-miss {
+    transition-delay: calc(var(--i) * 140ms + 260ms);
+  }
+  :global(.js) .rules:not(.is-in) .rule-miss {
+    background-color: var(--color-surface);
+    transform: none;
+  }
+</style>

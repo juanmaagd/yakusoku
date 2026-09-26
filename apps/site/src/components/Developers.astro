@@ -32,7 +32,7 @@ const FLOW = [
     text: "Authenticates with a scoped credential that can only ever ask the firewall to sign.",
   },
   {
-    art: "/brand/mark.svg",
+    art: "/art/firewall.webp",
     name: "The firewall",
     text: "Checks the payment against the mandate you signed, then signs or refuses.",
   },
@@ -51,7 +51,7 @@ const PANELS = [
 
 <section id="developers" class="band" aria-labelledby="dev-heading">
   <div class="grid grid-cols-1 items-end gap-10 md:grid-cols-[1fr_auto]">
-    <div data-reveal>
+    <div>
       <h2 id="dev-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
         Your agent <strong>never gets a key.</strong>
       </h2>
@@ -68,18 +68,14 @@ const PANELS = [
       loading="lazy"
       decoding="async"
       class="pointer-events-none mx-auto w-[200px] select-none md:-mb-4 md:w-[250px]"
-      data-reveal
-      style="--reveal-i: 1"
     />
   </div>
 
   <ol class="mt-12 grid grid-cols-1 overflow-hidden rounded-card border border-hairline sm:grid-cols-2 lg:grid-cols-4">
     {
-      FLOW.map((step, i) => (
+      FLOW.map((step) => (
         <li
           class="flow-step relative flex items-start gap-4 border-hairline px-5 py-5 max-sm:[&:not(:first-child)]:border-t sm:max-lg:[&:nth-child(n+3)]:border-t sm:max-lg:[&:nth-child(even)]:border-l lg:flex-col lg:gap-3 lg:[&:not(:first-child)]:border-l"
-          data-reveal
-          style={`--reveal-i: ${i}`}
         >
           <img
             src={step.art}
@@ -88,7 +84,7 @@ const PANELS = [
             height="1024"
             loading="lazy"
             decoding="async"
-            class:list={["shrink-0 select-none", step.art.endsWith(".svg") ? "h-16 w-16 p-3 lg:h-24 lg:w-24 lg:p-6" : "h-16 w-16 lg:h-24 lg:w-24"]}
+            class="h-16 w-16 shrink-0 select-none lg:h-24 lg:w-24"
           />
           <div>
             <p class="text-body font-semibold text-ink">{step.name}</p>
@@ -101,8 +97,8 @@ const PANELS = [
 
   <div class="mt-6 grid grid-cols-1 gap-6">
     {
-      PANELS.map((panel, i) => (
-        <figure class="min-w-0 overflow-hidden rounded-card bg-ink" data-reveal style={`--reveal-i: ${i}`}>
+      PANELS.map((panel) => (
+        <figure class="min-w-0 overflow-hidden rounded-card bg-ink">
           <figcaption class="flex items-center justify-between border-b border-white/10 px-5 py-3">
             <span class="text-body-sm font-medium text-white">{panel.title}</span>
             <span class="label text-white/60">http</span>

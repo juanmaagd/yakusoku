@@ -30,7 +30,7 @@ const STAGES = [
 
 <section id="how-it-works" class="band" aria-labelledby="how-heading">
   <div class="grid grid-cols-1 items-end gap-10 md:grid-cols-[1fr_auto]">
-    <div data-reveal>
+    <div>
       <h2 id="how-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
         Six stages. <strong>All of them before any signature.</strong>
       </h2>
@@ -46,15 +46,13 @@ const STAGES = [
       loading="lazy"
       decoding="async"
       class="pointer-events-none mx-auto w-[220px] select-none md:-mb-6 md:w-[280px]"
-      data-reveal
-      style="--reveal-i: 1"
     />
   </div>
 
-  <ol class="pipeline mt-14 grid grid-cols-1 lg:grid-cols-6">
+  <ol class="pipeline mt-14 grid grid-cols-1 lg:grid-cols-6" data-inview>
     {
       STAGES.map((stage, i) => (
-        <li class="pipeline-node relative pb-8 pl-10 lg:pb-0 lg:pl-0 lg:pr-5" data-reveal style={`--reveal-i: ${i}`}>
+        <li class="pipeline-node relative pb-8 pl-10 lg:pb-0 lg:pl-0 lg:pr-5" style={`--i: ${i}`}>
           <span class="pipeline-dot" data-final={i === STAGES.length - 1 ? "" : undefined} aria-hidden="true" />
           <p class="font-mono text-caption text-stone lg:pt-8">{String(i + 1).padStart(2, "0")}</p>
           <h3 class="mt-1.5 text-body-lg font-semibold text-ink">{stage.name}</h3>
@@ -64,7 +62,7 @@ const STAGES = [
     }
   </ol>
 
-  <div class="mt-14 flex flex-col gap-2 rounded-card border border-hairline bg-fog px-5 py-4 md:flex-row md:items-center md:justify-between md:px-6" data-reveal>
+  <div class="mt-14 flex flex-col gap-2 rounded-card border border-hairline bg-fog px-5 py-4 md:flex-row md:items-center md:justify-between md:px-6">
     <p class="text-body text-ink">
       Fail-closed: any error or doubt ends in
       <span class="state-tag bg-refuse-wash text-refuse-ink">refuse</span>
@@ -98,7 +96,7 @@ const STAGES = [
     width: 11px;
     height: 11px;
     border: 1px solid var(--color-ink);
-    background: var(--color-surface);
+    background: var(--color-ink);
   }
   .pipeline-dot[data-final] {
     border-color: var(--color-verified);
@@ -120,6 +118,37 @@ const STAGES = [
     }
     .pipeline-dot {
       top: 2px;
+    }
+  }
+
+  /* Entrance: each stage lights up in order, the connector drawing on from
+     one to the next. Without JS the diagram renders fully lit. */
+  :global(.js) .pipeline-node::before {
+    transform-origin: top;
+    transition: transform 260ms linear;
+    transition-delay: calc(var(--i) * 260ms + 120ms);
+  }
+  :global(.js) .pipeline-dot {
+    transition:
+      background-color 220ms var(--ease-out-soft),
+      border-color 220ms var(--ease-out-soft),
+      transform 320ms var(--ease-out-soft);
+    transition-delay: calc(var(--i) * 260ms);
+  }
+  :global(.js) .pipeline:not(.is-in) .pipeline-node::before {
+    transform: scaleY(0);
+  }
+  :global(.js) .pipeline:not(.is-in) .pipeline-dot {
+    border-color: var(--color-hairline-strong);
+    background: var(--color-surface);
+    transform: scale(0.7);
+  }
+  @media (min-width: 1024px) {
+    :global(.js) .pipeline-node::before {
+      transform-origin: left;
+    }
+    :global(.js) .pipeline:not(.is-in) .pipeline-node::before {
+      transform: scaleX(0);
     }
   }
 
