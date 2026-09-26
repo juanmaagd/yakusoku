@@ -241,18 +241,23 @@ test("gift card code is delivered only to the signed-in receipt owner", async ()
 // pattern) — no gas, no real transaction — so this only ever proves the
 // route's own auth/scoping, never anything about a live deploy.
 
-describe("GET /owner/accounts (owner account panel A2)", () => {
-  async function deployOwnedAccount() {
-    const owner = privateKeyToAccount(generatePrivateKey());
-    const account = findOrCreateAccountBySubjectHash(hashWorldIdSubject(`owner-accounts-test-${crypto.randomUUID()}`));
-    const link = createSetupLink(account.id);
-    const message = fillSetupMessage(setupMessageTemplate(account.id, link.token), owner.address);
-    const signature = await owner.signMessage({ message });
-    const outcome = await linkOwner(link.token, owner.address, signature);
-    if (!outcome.ok) throw new Error(`test setup: linkOwner failed (${outcome.reason})`);
-    return { owner, smartAccount: outcome.smartAccount };
-  }
+/** Deploys a fresh owned account via the stub deployer (account-setup.test.ts's
+ * own pattern) — no gas, no real transaction. Shared by the owner-account-panel
+ * (A2) suite below and the connect-your-agent (K1) suite further down, both of
+ * which need a real deployed `smartAccount` bound to a wallet's own SIWE
+ * session. */
+async function deployOwnedAccount() {
+  const owner = privateKeyToAccount(generatePrivateKey());
+  const account = findOrCreateAccountBySubjectHash(hashWorldIdSubject(`owner-accounts-test-${crypto.randomUUID()}`));
+  const link = createSetupLink(account.id);
+  const message = fillSetupMessage(setupMessageTemplate(account.id, link.token), owner.address);
+  const signature = await owner.signMessage({ message });
+  const outcome = await linkOwner(link.token, owner.address, signature);
+  if (!outcome.ok) throw new Error(`test setup: linkOwner failed (${outcome.reason})`);
+  return { owner, smartAccount: outcome.smartAccount };
+}
 
+describe("GET /owner/accounts (owner account panel A2)", () => {
   test("no credential at all -> 401", async () => {
     const res = await fetch(`${BASE_URL}/owner/accounts`);
     expect(res.status).toBe(401);
@@ -286,5 +291,134 @@ describe("GET /owner/accounts (owner account panel A2)", () => {
     expect(Array.isArray(body[0]?.knownMerchants)).toBe(true);
     // Never leaks a different owner's account into this owner's list.
     expect(body.some((a) => a.smartAccount.toLowerCase() === theirs.smartAccount.toLowerCase())).toBe(false);
+  });
+});
+
+// --- Connect your agent: POST /owner/agent-key, GET /owner/agent-keys, POST
+// /owner/agent-keys/:id/revoke (K1 / Settings) -------------------------------
+// Same "boot the real Hono app, drive it over real HTTP" style as the two
+// suites above. A minted agent key is an ordinary account key (`ya_...`) —
+// it authenticates through the exact same path `GET /account`
+// (`authenticateAccount`) and the MCP's `get_mandate` already use for any
+// other account credential (P9.3), so this suite proves that path end to end
+// rather than re-testing `findAccountByAccountKey` in isolation.
+
+describe("POST /owner/agent-key / GET /owner/agent-keys / revoke (K1)", () => {
+  test("no session at all -> 401 on every route", async () => {
+    expect((await fetch(`${BASE_URL}/owner/agent-key`, { method: "POST" })).status).toBe(401);
+    expect((await fetch(`${BASE_URL}/owner/agent-keys`)).status).toBe(401);
+    expect((await fetch(`${BASE_URL}/owner/agent-keys/000000000000/revoke`, { method: "POST" })).status).toBe(401);
+  });
+
+  test("a session with no linked account can't mint a key, but sees an empty list (never a 500)", async () => {
+    const { token } = createSession(`0x${"77".repeat(20)}`);
+    const mint = await fetch(`${BASE_URL}/owner/agent-key`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+    expect(mint.status).toBe(404);
+    expect(await mint.json()).toEqual({ error: "no_account" });
+
+    const list = await fetch(`${BASE_URL}/owner/agent-keys`, { headers: { authorization: `Bearer ${token}` } });
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual([]);
+  });
+
+  test("mints a labeled key that authenticates this account exactly like any other account key, with no key material ever listed back", async () => {
+    const { owner, smartAccount } = await deployOwnedAccount();
+    const { token } = createSession(owner.address);
+
+    const mint = await fetch(`${BASE_URL}/owner/agent-key`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ label: "Claude Code on my laptop" }),
+    });
+    expect(mint.status).toBe(201);
+    const minted = (await mint.json()) as { agentKey: string; accountId: string; smartAccount?: string };
+    expect(minted.agentKey.startsWith("ya_")).toBe(true);
+    expect(minted.smartAccount?.toLowerCase()).toBe(smartAccount.toLowerCase());
+
+    // Same path `GET /account` (and the MCP's `get_mandate`, account branch)
+    // already use for any other account key.
+    const accountRes = await fetch(`${BASE_URL}/account`, { headers: { authorization: `Bearer ${minted.agentKey}` } });
+    expect(accountRes.status).toBe(200);
+    expect(((await accountRes.json()) as { accountId: string }).accountId).toBe(minted.accountId);
+
+    const list = await fetch(`${BASE_URL}/owner/agent-keys`, { headers: { authorization: `Bearer ${token}` } });
+    expect(list.status).toBe(200);
+    const keys = (await list.json()) as { id: string; label?: string; createdAt: string; revoked: boolean }[];
+    expect(keys).toHaveLength(1);
+    expect(keys[0]?.label).toBe("Claude Code on my laptop");
+    expect(keys[0]?.revoked).toBe(false);
+    expect(typeof keys[0]?.id).toBe("string");
+    const listText = JSON.stringify(keys);
+    expect(listText).not.toContain(minted.agentKey);
+    expect(listText).not.toContain("ya_");
+  });
+
+  test("a different owner's minted key never authenticates as this account, and never appears in this owner's list", async () => {
+    const mine = await deployOwnedAccount();
+    const theirs = await deployOwnedAccount();
+    const mineToken = createSession(mine.owner.address).token;
+    const theirsToken = createSession(theirs.owner.address).token;
+
+    const mineMint = (await (
+      await fetch(`${BASE_URL}/owner/agent-key`, { method: "POST", headers: { authorization: `Bearer ${mineToken}` } })
+    ).json()) as { agentKey: string; accountId: string };
+    const theirsMint = (await (
+      await fetch(`${BASE_URL}/owner/agent-key`, { method: "POST", headers: { authorization: `Bearer ${theirsToken}` } })
+    ).json()) as { agentKey: string; accountId: string };
+
+    const crossAccount = await fetch(`${BASE_URL}/account`, { headers: { authorization: `Bearer ${theirsMint.agentKey}` } });
+    expect(((await crossAccount.json()) as { accountId: string }).accountId).not.toBe(mineMint.accountId);
+
+    const mineList = (await (
+      await fetch(`${BASE_URL}/owner/agent-keys`, { headers: { authorization: `Bearer ${mineToken}` } })
+    ).json()) as { id: string }[];
+    expect(mineList).toHaveLength(1);
+  });
+
+  test("revoke: unknown id and a foreign owner's own key id both -> 404 (indistinguishable); the real owner's revoke stops the key immediately", async () => {
+    const mine = await deployOwnedAccount();
+    const theirs = await deployOwnedAccount();
+    const mineToken = createSession(mine.owner.address).token;
+    const theirsToken = createSession(theirs.owner.address).token;
+
+    const mineMint = (await (
+      await fetch(`${BASE_URL}/owner/agent-key`, { method: "POST", headers: { authorization: `Bearer ${mineToken}` } })
+    ).json()) as { agentKey: string };
+    const mineList = (await (
+      await fetch(`${BASE_URL}/owner/agent-keys`, { headers: { authorization: `Bearer ${mineToken}` } })
+    ).json()) as { id: string }[];
+    const mineId = mineList[0]?.id;
+    if (!mineId) throw new Error("test setup: expected a minted key id");
+
+    const unknown = await fetch(`${BASE_URL}/owner/agent-keys/${"0".repeat(12)}/revoke`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${mineToken}` },
+    });
+    expect(unknown.status).toBe(404);
+
+    const foreign = await fetch(`${BASE_URL}/owner/agent-keys/${mineId}/revoke`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${theirsToken}` },
+    });
+    expect(foreign.status).toBe(404);
+
+    // The foreign attempt above must never have actually revoked it.
+    const stillWorks = await fetch(`${BASE_URL}/account`, { headers: { authorization: `Bearer ${mineMint.agentKey}` } });
+    expect(stillWorks.status).toBe(200);
+
+    const own = await fetch(`${BASE_URL}/owner/agent-keys/${mineId}/revoke`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${mineToken}` },
+    });
+    expect(own.status).toBe(200);
+    expect(await own.json()).toEqual({ id: mineId, revoked: true });
+
+    const afterRevoke = await fetch(`${BASE_URL}/account`, { headers: { authorization: `Bearer ${mineMint.agentKey}` } });
+    expect(afterRevoke.status).toBe(401);
+
+    const listAfter = (await (
+      await fetch(`${BASE_URL}/owner/agent-keys`, { headers: { authorization: `Bearer ${mineToken}` } })
+    ).json()) as { id: string; revoked: boolean }[];
+    expect(listAfter.find((k) => k.id === mineId)?.revoked).toBe(true);
   });
 });

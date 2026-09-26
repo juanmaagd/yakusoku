@@ -20,6 +20,7 @@ import {
   type DecisionReceipt,
 } from "@yakusoku/shared";
 import {
+  createAccountKey,
   createIntent,
   createNonce,
   createSession,
@@ -34,6 +35,7 @@ import {
   getReceipt,
   getGiftCardForReceipt,
   getSessionByToken,
+  listAccountKeysByAccountId,
   listAccountsByOwner,
   listAllPromises,
   listIntents,
@@ -41,6 +43,7 @@ import {
   listPromisesByAccount,
   listReceipts,
   remainingBudget,
+  revokeAccountKeyByFingerprint,
   revokeIntent,
   revokeSession,
   saveReceipt,
@@ -984,6 +987,65 @@ app.get("/owner/accounts", async (c) => {
   const accounts = listAccountsByOwner(auth.address);
   const described = await Promise.all(accounts.map(describeOwnerAccount));
   return c.json(described.filter((a): a is OwnerAccountDto => a !== undefined));
+});
+
+// --- Connect your agent (K1 / Settings) --------------------------------------
+// Lets the human mint a hosted-MCP credential from `/app` instead of
+// re-approving World ID on every new MCP session (the hosted MCP keeps each
+// session's credential in memory only, apps/mcp/index.ts's T8 fix): paste
+// `Authorization: Bearer <key>` into the MCP client once, and every session
+// that sends it resumes this same account — same credential kind (`ya_...`)
+// and same auth path (`authenticateAccount`/`GET /account`,
+// `authenticateMandateCredential`) as any other account key, e.g. the one
+// `POST /connect/poll` issues.
+
+/** The account these routes act on: the most recently created account this
+ * session's wallet linked as owner (`listAccountsByOwner`). A wallet can in
+ * principle own more than one deployed account, but there is no per-account
+ * picker in this UI yet — documented limitation, same one every route below
+ * accepts. `undefined` when the wallet has linked none. */
+function resolveOwnerAgentKeyAccount(ownerAddress: `0x${string}`): StoredAccount | undefined {
+  const accounts = listAccountsByOwner(ownerAddress);
+  if (accounts.length === 0) return undefined;
+  return [...accounts].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+}
+
+const createAgentKeySchema = z.object({ label: z.string().trim().min(1).max(80).optional() }).optional();
+
+app.post("/owner/agent-key", async (c) => {
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const account = resolveOwnerAgentKeyAccount(auth.address);
+  if (!account) return c.json({ error: "no_account" }, 404);
+  const body = await c.req.json().catch(() => undefined);
+  const parsed = createAgentKeySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_agent_key_request", issues: parsed.error.issues }, 400);
+  }
+  // Returned exactly once — never logged (T1's request log above prints only
+  // the pathname), never persisted in plaintext (`createAccountKey` stores
+  // only its SHA-256 hash, store.ts).
+  const agentKey = createAccountKey(account.id, parsed.data?.label);
+  return c.json({ agentKey, accountId: account.id, smartAccount: account.smartAccount }, 201);
+});
+
+app.get("/owner/agent-keys", (c) => {
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const account = resolveOwnerAgentKeyAccount(auth.address);
+  if (!account) return c.json([]);
+  return c.json(listAccountKeysByAccountId(account.id));
+});
+
+app.post("/owner/agent-keys/:id/revoke", (c) => {
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const account = resolveOwnerAgentKeyAccount(auth.address);
+  const id = c.req.param("id");
+  if (!account || !revokeAccountKeyByFingerprint(account.id, id)) {
+    return c.json({ error: "agent_key_not_found" }, 404);
+  }
+  return c.json({ id, revoked: true });
 });
 
 // --- GET /receipts/:id/attestation (WU12) -------------------------------
