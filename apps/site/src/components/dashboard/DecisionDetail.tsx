@@ -8,7 +8,7 @@ import { formatUsdcFixed, shortAddress, shortHex } from "../../lib/format";
 import { formatMs, formatPercent, resourcePath } from "../../lib/receiptView";
 import { smallButton } from "../../lib/ui";
 import { createPublicReadClient } from "../../lib/wallet";
-import { IconExternal, StatusMark } from "../ui/Icons";
+import { IconChevronDown, IconExternal, StatusMark } from "../ui/Icons";
 import { VerdictStamp } from "./DecisionFeed";
 
 type AttestationState =
@@ -94,7 +94,8 @@ export default function DecisionDetail({ receipt }: { receipt: DecisionReceipt }
         </dl>
         {receipt.justification && (
           <details className="group mt-3">
-            <summary className="cursor-pointer text-body-sm font-medium text-ink underline decoration-hairline-strong underline-offset-4 hover:decoration-ink">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-body-sm font-medium text-ink [&::-webkit-details-marker]:hidden">
+              <IconChevronDown size={14} className="-rotate-90 text-graphite transition-transform duration-200 group-open:rotate-0" />
               Why the agent tried
             </summary>
             <blockquote className="mt-2 border-l border-hairline-strong pl-3 text-body-sm text-graphite">&ldquo;{receipt.justification}&rdquo;</blockquote>
@@ -163,8 +164,11 @@ export default function DecisionDetail({ receipt }: { receipt: DecisionReceipt }
         </section>
       )}
 
-      <details className="border-t border-hairline pt-4">
-        <summary className="cursor-pointer text-body-sm font-semibold text-ink">Technical details</summary>
+      <details className="group border-t border-hairline pt-4">
+        <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-body-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
+          <IconChevronDown size={14} className="-rotate-90 text-graphite transition-transform duration-200 group-open:rotate-0" />
+          Technical details
+        </summary>
         <div className="mt-4 space-y-5 text-caption">
           <table className="w-full">
             <thead>
