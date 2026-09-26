@@ -1,0 +1,139 @@
+---
+// The twist: the same deterministic rules the key-case attack passes (see
+// PRODUCT.md "Evidence on Hand" — Jev matches_intent 0.02 on this exact
+// case). Reused verbatim from the pre-refocus hero card.
+const PASSED_RULES = ["budget", "wallet", "address"];
+
+const OUTCOMES = [
+  {
+    tag: "pays",
+    tagClass: "bg-verified-wash text-verified",
+    body: "Matches what you asked: paid, with a receipt.",
+  },
+  {
+    tag: "asks you",
+    tagClass: "bg-ask-wash text-ask-ink",
+    body: "Unsure: your phone lights up. A fresh World ID check, bound to that exact payment, before anything is signed. A denial refuses it and restores the budget.",
+  },
+  {
+    tag: "refuses",
+    tagClass: "bg-refuse-wash text-refuse-ink",
+    body: "Doesn't match: nothing is paid. A refusal from any check wins.",
+  },
+] as const;
+---
+
+<section id="security" class="band" aria-labelledby="security-heading">
+  <div class="grid grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-16">
+    <div>
+      <h2 id="security-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
+        Agents can be talked into anything. <strong>Your budget can't.</strong>
+      </h2>
+      <p class="mt-6 max-w-[52ch] text-body-lg text-graphite">
+        Hidden text in a page or a product description can steer an agent into paying for something else — to a
+        clean address, inside the budget. Spending caps and allowlists let it through. Omamori checks every payment
+        against what you asked, before anything is signed.
+      </p>
+    </div>
+
+    <div class="relative pt-24 sm:pt-28">
+      <img
+        src="/art/bait.webp"
+        alt=""
+        width="1024"
+        height="1024"
+        loading="lazy"
+        decoding="async"
+        class="pointer-events-none absolute -top-6 right-0 z-0 w-[190px] select-none sm:w-[240px] lg:-top-10 lg:-right-6 lg:w-[270px]"
+      />
+
+      <!-- The old intent-diff artifact, relabeled: no console shadow (the
+           hero's errand card owns the one-shadow rule) and no animation
+           (the hero owns the page's one authored sequence) — its final,
+           fully-revealed state only. -->
+      <figure class="relative z-10 rounded-card border border-hairline bg-surface" aria-label="A refused payment">
+        <dl class="space-y-3.5 px-5 pt-5 pb-4">
+          <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[86px_1fr_auto]">
+            <dt class="label col-span-2 text-stone sm:col-span-1">You asked</dt>
+            <dd class="text-body text-ink">Amazon gift card · 25 USDC</dd>
+            <dd class="text-graphite">
+              <svg viewBox="0 0 18 18" fill="none" class="h-[18px] w-[18px]" aria-hidden="true">
+                <circle cx="9" cy="9" r="7.25" stroke="currentColor" stroke-opacity=".35" stroke-width="1.5" />
+                <path d="M5.3 9.3L7.7 11.6L12.7 6.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span class="sr-only">Matches</span>
+            </dd>
+          </div>
+
+          <div>
+            <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[86px_1fr_auto]">
+              <dt class="label col-span-2 text-stone sm:col-span-1">Agent asks</dt>
+              <dd class="text-body text-ink"><mark class="s-diff">Steam</mark> gift card · 25 USDC</dd>
+              <dd class="text-refuse">
+                <svg viewBox="0 0 18 18" fill="none" class="h-[18px] w-[18px]" aria-hidden="true">
+                  <circle cx="9" cy="9" r="7.25" fill="currentColor" />
+                  <path d="M6.2 6.2L11.8 11.8M11.8 6.2L6.2 11.8" stroke="#fff" stroke-width="1.7" stroke-linecap="round" />
+                </svg>
+                <span class="sr-only">Does not match what you asked</span>
+              </dd>
+            </div>
+            <p class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-graphite sm:pl-[98px]">
+              {
+                PASSED_RULES.map((rule) => (
+                  <span class="inline-flex items-center gap-1">
+                    {rule}
+                    <svg viewBox="0 0 18 18" fill="none" class="h-3 w-3" aria-hidden="true">
+                      <path d="M5.3 9.3L7.7 11.6L12.7 6.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                    <span class="sr-only">passes</span>
+                  </span>
+                ))
+              }
+            </p>
+          </div>
+        </dl>
+
+        <figcaption class="border-t border-hairline px-5 py-4">
+          <p class="text-heading-sm leading-tight">
+            <span class="font-semibold text-refuse-ink">Refused</span><span class="text-graphite"> — not what you asked.</span>
+          </p>
+          <p class="mt-1.5 text-body-sm text-graphite">Nothing was paid.</p>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <dl class="mt-14 grid grid-cols-1 border-y border-hairline sm:grid-cols-3">
+    {
+      OUTCOMES.map((outcome) => (
+        <div class="border-hairline py-6 sm:px-6 sm:first:pl-0 sm:last:pr-0 max-sm:[&:not(:first-child)]:border-t sm:[&:not(:first-child)]:border-l">
+          <dt>
+            <span class={`state-tag ${outcome.tagClass}`}>{outcome.tag}</span>
+          </dt>
+          <dd class="mt-3 text-body-sm text-graphite">{outcome.body}</dd>
+        </div>
+      ))
+    }
+  </dl>
+</section>
+
+<style>
+  /* Static final state only — no transition, no hidden state: the hero's
+     errand card owns the page's one authored sequence. */
+  .s-diff {
+    border-radius: 2px;
+    padding: 0 2px;
+    margin: 0 -2px;
+    color: inherit;
+    background-image:
+      linear-gradient(var(--color-refuse), var(--color-refuse)),
+      linear-gradient(var(--color-refuse-wash), var(--color-refuse-wash));
+    background-repeat: no-repeat;
+    background-position:
+      left bottom,
+      left center;
+    background-size:
+      100% 1.5px,
+      100% 100%;
+  }
+</style>
