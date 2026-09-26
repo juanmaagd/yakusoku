@@ -1267,10 +1267,24 @@ function rowToPromise(row: PromiseRow): StoredPromise {
     requestedAt: row.requested_at ?? undefined,
     gateStartedAtMs: row.gate_started_at_ms ?? undefined,
     expiresAt: row.expires_at ?? undefined,
-    attestation: row.attestation_json ? promiseAttestationSchema.parse(JSON.parse(row.attestation_json)) : undefined,
+    attestation: parseStoredAttestation(row.attestation_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/** Attestations signed before H1 have no `merchant` field and no longer match
+ * the schema. Reading one must not crash every listing of the account's
+ * promises: drop it instead. Those promises have no merchant either, so the
+ * pipeline already refuses them (fail-closed). */
+function parseStoredAttestation(json: string | null): ReturnType<typeof promiseAttestationSchema.parse> | undefined {
+  if (!json) return undefined;
+  try {
+    const parsed = promiseAttestationSchema.safeParse(JSON.parse(json));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function createPromise(promise: StoredPromise): void {
