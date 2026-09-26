@@ -50,7 +50,7 @@ const app = new Hono();
 // Bearer calls; the dashboard is same-origin (served off this same process)
 // so it never goes through CORS at all. Env-configurable so a deployed site
 // origin doesn't require a code change.
-const SITE_ORIGINS = (process.env.OMAMORISAN_SITE_ORIGINS ?? "http://localhost:4321")
+const SITE_ORIGINS = (process.env.OMAMORISAN_SITE_ORIGINS ?? "http://localhost:4321,http://localhost:4322")
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
@@ -269,12 +269,40 @@ app.get("/intents", (c) => {
   );
 });
 
-// --- GET /intents/:id ----------------------------------------------------
+// --- GET /intents/:id (P5: no longer public) --------------------------------
+// Closed per the P5 brief: this used to answer any caller with the full
+// intent (including its `remainingBudget`). Three ways in now, same shape as
+// every other owner-scoped route in this file: the operator path (loopback +
+// admin header, full authority), the mandate's own owner via a SIWE session
+// (404 for a real id owned by someone else — never confirms existence to a
+// non-owner, same pattern as `GET /receipts/:id`), or the mandate's own agent
+// key (what `apps/agent/scripts/attack.ts` and the scenarios harness use to
+// read a mandate's task/budget before asking `/sign`).
 
 app.get("/intents/:id", (c) => {
-  const intent = getIntent(c.req.param("id"));
-  if (!intent) return c.json({ error: "intent_not_found" }, 404);
-  return c.json(serializeIntent(intent));
+  const id = c.req.param("id");
+  if (isLocalAdminRequest(c)) {
+    const intent = getIntent(id);
+    if (!intent) return c.json({ error: "intent_not_found" }, 404);
+    return c.json(serializeIntent(intent));
+  }
+
+  const sessionAuth = authenticateSession(c);
+  if (sessionAuth.ok) {
+    const intent = getIntent(id);
+    if (!intent || intent.signer.toLowerCase() !== sessionAuth.address.toLowerCase()) {
+      return c.json({ error: "intent_not_found" }, 404);
+    }
+    return c.json(serializeIntent(intent));
+  }
+
+  const agentAuth = authenticateAgent(c, id);
+  if (agentAuth.ok) return c.json(serializeIntent(agentAuth.mandate));
+
+  // Neither path accepted a credential at all -> 401; a credential that
+  // authenticates but names the wrong mandate -> 403 (authenticateAgent's
+  // own mismatch signal, same as /sign's).
+  return c.json(agentAuth.body, agentAuth.status);
 });
 
 // --- POST /intents/:id/revoke (WU13, WU-P3 owner path) ----------------------

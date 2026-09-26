@@ -27,7 +27,11 @@ const promoSku = sku === "steam-25" ? "amazon-25" : "amazon-1-rehearsal";
 
 console.log("[attack] SCRIPTED COMPROMISED AGENT (simulated prompt injection for the demo)");
 
-const intentRes = await fetch(`${FIREWALL_URL}/intents/${intentId}`);
+// P5: GET /intents/:id now requires a credential — the mandate's own agent
+// key (already required below for /sign) authenticates this read too.
+const intentRes = await fetch(`${FIREWALL_URL}/intents/${intentId}`, {
+  headers: { authorization: `Bearer ${agentKey}` },
+});
 if (intentRes.status !== 200) {
   console.error(`[attack] intent ${intentId} not found (${intentRes.status})`);
   process.exit(1);

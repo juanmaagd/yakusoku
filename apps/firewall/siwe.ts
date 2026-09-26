@@ -14,7 +14,7 @@ import { publicClient } from "./signer";
 import { consumeNonce } from "./store";
 
 function allowedSiweDomains(): string[] {
-  const raw = process.env.OMAMORISAN_SIWE_DOMAINS ?? "localhost:4321,localhost:4001";
+  const raw = process.env.OMAMORISAN_SIWE_DOMAINS ?? "localhost:4321,localhost:4001,localhost:4322";
   return raw
     .split(",")
     .map((d) => d.trim())

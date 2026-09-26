@@ -107,8 +107,12 @@ async function createIntent(
   return { status: res.status, id: body?.id ?? "", agentKey: body?.agentKey ?? "", body, account };
 }
 
+// P5: GET /intents/:id now requires a credential — this harness talks to its
+// own isolated firewall over localhost, so the same admin headers every
+// other control-plane helper in this file uses (ADMIN_HEADERS, defined
+// below) satisfy it too.
 async function getRemainingBudget(intentId: string): Promise<string> {
-  const res = await fetch(`${FIREWALL_URL}/intents/${intentId}`);
+  const res = await fetch(`${FIREWALL_URL}/intents/${intentId}`, { headers: ADMIN_HEADERS });
   const body = (await res.json()) as { remainingBudget?: string };
   return body.remainingBudget ?? "unknown";
 }
@@ -1154,6 +1158,55 @@ async function runS27(): Promise<void> {
   }
 }
 
+/** S28 — P5: `GET /intents/:id` is no longer public. No credential -> 401; a
+ * session for a different owner -> 404 (no existence leak, S23's pattern);
+ * the mandate's own agent key -> 200; the mandate owner's own session -> 200. */
+async function runS28(): Promise<void> {
+  const id = "S28";
+  const description = "GET /intents/:id requires a session, the mandate's agent key, or admin";
+  const expected = "no auth 401, wrong owner 404, own agent key 200, own session 200";
+  try {
+    const owner = privateKeyToAccount(generatePrivateKey());
+    const other = privateKeyToAccount(generatePrivateKey());
+    const intent = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S28", 1, ["gift_card:amazon"], undefined, owner);
+    if (intent.status !== 201) throw new Error(`POST /intents failed for S28: ${intent.status}`);
+
+    const noAuthRes = await fetch(`${FIREWALL_URL}/intents/${intent.id}`);
+
+    const otherSession = await siweSignIn(other);
+    if (otherSession.status !== 200 || !otherSession.json.sessionToken) {
+      throw new Error(`S28: other owner sign-in failed: ${otherSession.status}`);
+    }
+    const wrongOwnerRes = await fetch(`${FIREWALL_URL}/intents/${intent.id}`, {
+      headers: { authorization: `Bearer ${otherSession.json.sessionToken}` },
+    });
+
+    const agentKeyRes = await fetch(`${FIREWALL_URL}/intents/${intent.id}`, {
+      headers: { authorization: `Bearer ${intent.agentKey}` },
+    });
+
+    const ownSession = await siweSignIn(owner);
+    if (ownSession.status !== 200 || !ownSession.json.sessionToken) {
+      throw new Error(`S28: owner sign-in failed: ${ownSession.status}`);
+    }
+    const ownSessionRes = await fetch(`${FIREWALL_URL}/intents/${intent.id}`, {
+      headers: { authorization: `Bearer ${ownSession.json.sessionToken}` },
+    });
+
+    const pass =
+      noAuthRes.status === 401 && wrongOwnerRes.status === 404 && agentKeyRes.status === 200 && ownSessionRes.status === 200;
+    record(
+      id,
+      description,
+      expected,
+      `no-auth=${noAuthRes.status} wrong-owner=${wrongOwnerRes.status} agent-key=${agentKeyRes.status} own-session=${ownSessionRes.status}`,
+      pass,
+    );
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
 // --- Process orchestration ---------------------------------------------------
 
 async function waitForHttp(url: string, timeoutMs = 20_000): Promise<void> {
@@ -1247,6 +1300,7 @@ async function main(): Promise<void> {
     await runS25();
     await runS26();
     await runS27();
+    await runS28();
 
     printTable();
     exitCode = results.every((r) => r.pass) ? 0 : 1;
