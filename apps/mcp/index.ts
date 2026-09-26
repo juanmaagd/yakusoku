@@ -23,8 +23,20 @@ import { registerTools } from "./tools";
 const FIREWALL_URL = process.env.OMAMORISAN_FIREWALL_URL ?? "http://localhost:4001";
 const HTTP_PORT = 4010;
 
+// Promise-replacement fix — self-contained within the first 512 chars
+// (verified against the installed @modelcontextprotocol/sdk@1.30.1's
+// `ServerOptions.instructions?: string`, server/index.d.ts): the flow, the
+// fail-closed "never retry a refusal" rule, and the one instruction this
+// fix adds — request a replacement promise before paying once the human's
+// plan has changed, rather than trying to force the old promise through.
+const SERVER_INSTRUCTIONS =
+  "Payment flow: connect (World ID) -> request_promise (task+budget+merchant) -> wait for human approval in " +
+  "World App -> pay_x402 only once active. A refusal is final: never retry the same payment with different " +
+  "wording. If the human changes what they want mid-task, call request_promise again with replaces set to the " +
+  "current promiseId BEFORE paying — never keep paying under the old promise once the plan has changed.";
+
 function buildServer(session: SessionState, httpMode: boolean): McpServer {
-  const server = new McpServer({ name: "omamorisan", version: "0.1.0" });
+  const server = new McpServer({ name: "omamorisan", version: "0.1.0" }, { instructions: SERVER_INSTRUCTIONS });
   registerTools(server, { firewallUrl: FIREWALL_URL, httpMode }, session);
   return server;
 }

@@ -162,3 +162,156 @@ describe("check_approval — cross-session ownership (T8 fix B)", () => {
     await Promise.all([clientA.close(), clientB.close()]);
   });
 });
+
+// --- Promise-replacement fix --------------------------------------------------
+
+describe("request_promise — replaces passthrough (promise-replacement fix)", () => {
+  test("forwards replaces to POST /promises when provided, and surfaces it once active", async () => {
+    const requestBodies: Record<string, unknown>[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method ?? "GET";
+
+      if (url === "http://firewall.test/promises" && method === "POST") {
+        requestBodies.push(JSON.parse(String(init?.body)));
+        return Response.json({
+          promiseId: "promise_new",
+          status: "pending_approval",
+          verificationUri: "https://sandbox.auth.world.org/device",
+          userCode: "ABC-123",
+          expiresAt: "2999-01-01T00:00:00.000Z",
+          summary: 'Replaces "old task" ($1.00 USDC). Approve "new task" — up to $2.00 USDC across gift_card:steam, at store.test.',
+        });
+      }
+      if (url === "http://firewall.test/promises/promise_new" && method === "GET") {
+        return Response.json({
+          id: "promise_new",
+          task: "buy a steam gift card instead",
+          status: "active",
+          budget: "2000000",
+          remainingBudget: "2000000",
+          categories: ["gift_card:steam"],
+          expiry: "9999999999",
+          createdAt: new Date().toISOString(),
+          summary: 'Replaces "old task" ($1.00 USDC). Approve "new task" — up to $2.00 USDC across gift_card:steam, at store.test.',
+          replaces: "promise_old",
+        });
+      }
+      throw new Error(`unexpected fetch in test: ${method} ${url}`);
+    }) as typeof fetch;
+
+    const client = await wireSession("ya_test_replaces");
+    const result = await client.callTool({
+      name: "request_promise",
+      arguments: {
+        task: "buy a steam gift card instead",
+        budgetUsdc: 2,
+        categories: ["gift_card:steam"],
+        expiresInMinutes: 60,
+        merchant: "http://store.test",
+        replaces: "promise_old",
+      },
+    });
+
+    expect(requestBodies[0]?.replaces).toBe("promise_old");
+    const body = JSON.parse(textOf(result)) as { status: string; replaces?: string };
+    expect(body.status).toBe("active");
+    expect(body.replaces).toBe("promise_old");
+    await client.close();
+  });
+});
+
+describe("pay_x402 — Jev intent-mismatch refusal hint (promise-replacement fix)", () => {
+  /** Wires one session with an already-active promise (`promise_1`, task
+   * "buy a $1 amazon gift card") and a `/sign` stub that refuses with the
+   * given reason — every test below only differs in that reason. */
+  async function payAndRefuseWithReason(reason: string): Promise<{ status: string; reason: string; actionableHint?: string }> {
+    const paymentRequiredHeader = encodePaymentRequiredHeader({
+      x402Version: 1,
+      accepts: [
+        {
+          scheme: "exact",
+          network: "eip155:84532",
+          amount: "1000000",
+          asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          payTo: "0x1111111111111111111111111111111111111111",
+          maxTimeoutSeconds: 60,
+        },
+      ],
+    } as unknown as Parameters<typeof encodePaymentRequiredHeader>[0]);
+
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method ?? "GET";
+
+      if (url === "http://store.test/item") {
+        return new Response("{}", { status: 402, headers: { "PAYMENT-REQUIRED": paymentRequiredHeader } });
+      }
+      if (url === "http://firewall.test/promises/promise_1") {
+        return Response.json({
+          id: "promise_1",
+          task: "buy a $1 amazon gift card",
+          status: "active",
+          budget: "1000000",
+          remainingBudget: "1000000",
+          categories: ["gift_card:amazon"],
+          expiry: "9999999999",
+          createdAt: new Date().toISOString(),
+          summary: 'Approve "buy a $1 amazon gift card" — up to $1.00 USDC across gift_card:amazon, at store.test.',
+        });
+      }
+      if (url === "http://firewall.test/sign" && method === "POST") {
+        return Response.json({ verdict: "refuse", reason, receiptId: "receipt_jev" });
+      }
+      if (url === "http://firewall.test/accounts/setup-link" && method === "POST") {
+        // Only reached by the funding-hint case's best-effort setupUrl fetch.
+        return Response.json({ setupUrl: "http://setup.test/x", token: "t", expiresAt: "2999-01-01T00:00:00.000Z" });
+      }
+      throw new Error(`unexpected fetch in test: ${method} ${url}`);
+    }) as typeof fetch;
+
+    const client = await wireSession("ya_test_jev");
+    const result = await client.callTool({
+      name: "pay_x402",
+      arguments: { url: "http://store.test/item", justification: "matches the human's request", promiseId: "promise_1" },
+    });
+    const body = JSON.parse(textOf(result)) as { status: string; reason: string; actionableHint?: string };
+    await client.close();
+    return body;
+  }
+
+  test("present, and points at request_promise/replaces, for the exact Jev intent-mismatch reason", async () => {
+    const body = await payAndRefuseWithReason("jev: does not match the signed intent");
+    expect(body.status).toBe("refused");
+    expect(body.actionableHint).toBeDefined();
+    expect(body.actionableHint).toContain("request_promise");
+    expect(body.actionableHint).toContain('replaces="promise_1"');
+    expect(body.actionableHint).toContain("buy a $1 amazon gift card");
+  });
+
+  test("absent for Jev's OTHER refuse reason (a general action judgment, not specifically an intent mismatch)", async () => {
+    const body = await payAndRefuseWithReason("jev: model recommends refuse with high confidence");
+    expect(body.actionableHint).toBeUndefined();
+  });
+
+  test("absent for a provenance refusal", async () => {
+    const body = await payAndRefuseWithReason("provenance: resourceUrl host does not match the PAYMENT-REQUIRED response");
+    expect(body.actionableHint).toBeUndefined();
+  });
+
+  test("absent for an intercepta refusal", async () => {
+    const body = await payAndRefuseWithReason("intercepta: recipient flagged high risk");
+    expect(body.actionableHint).toBeUndefined();
+  });
+
+  test("absent for a policy refusal", async () => {
+    const body = await payAndRefuseWithReason("policy: amount exceeds remaining budget");
+    expect(body.actionableHint).toBeUndefined();
+  });
+
+  test("a funding refusal still gets its OWN hint, never the promise-replacement one", async () => {
+    const body = await payAndRefuseWithReason("funding: insufficient_funds: balance too low");
+    expect(body.actionableHint).toBeDefined();
+    expect(body.actionableHint).not.toContain("request_promise");
+  });
+});

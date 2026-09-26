@@ -140,6 +140,11 @@ interface PromiseSummary {
   createdAt: string;
   /** H1 fix — the store origin this promise may pay. */
   merchant?: string;
+  /** Promise-replacement fix — the id of the promise THIS promise replaces. */
+  replaces?: string;
+  /** Promise-replacement fix — the id of the promise that replaced THIS one,
+   * once a replacement for it has activated. */
+  replacedBy?: string;
 }
 
 interface PromiseDetail extends PromiseSummary {
@@ -295,6 +300,40 @@ function fundingRefusalHint(code: string, setupUrl: string | undefined): string 
   }
 }
 
+// --- Promise-replacement fix: Jev intent-mismatch refusals -------------------
+//
+// Same "prefixed with the stage name" shape as funding above (pipeline.ts's
+// `evaluateStages` wraps every refuse-stage reason as `${stageName}: ${reason}`)
+// — jev.ts's stage name is "jev" (`jevStage.name`), and `decideJevVerdict`
+// (jev.ts) has exactly one `refuse` reason that means an outright intent
+// mismatch: "does not match the signed intent" (a hard refuse when
+// `matches_intent` is very low). Its OTHER `refuse` reason ("model
+// recommends refuse with high confidence") is Jev's own general action
+// judgment across possibly many signals, not specifically "this doesn't
+// match what was asked for" — deliberately NOT matched here, so this hint
+// stays precise to the one scenario the design calls out (a clean,
+// in-budget payment for something never requested) rather than firing on
+// every Jev refusal.
+
+const JEV_INTENT_MISMATCH_REASON = "jev: does not match the signed intent";
+
+function isJevIntentMismatchRefusal(reason: string): boolean {
+  return reason === JEV_INTENT_MISMATCH_REASON;
+}
+
+/** `promise` is only known when the payment was resolved against a World ID
+ * promise (`resolvePromiseForPayment`, pay_x402) — never for the legacy
+ * wallet-mandate path, which has no `request_promise`/`replaces` concept to
+ * suggest at all. Never invents a task or promiseId it wasn't given. */
+function jevIntentMismatchHint(promise: { id: string; task: string } | undefined): string | undefined {
+  if (!promise) return undefined;
+  return (
+    `This purchase does not match the approved promise ("${promise.task}"). If the human asked for something ` +
+    `different, confirm with them, then call request_promise with replaces="${promise.id}" describing exactly ` +
+    "what they now want. Do not retry this payment under the current promise."
+  );
+}
+
 async function fetchPromise(firewallUrl: string, accountKey: string, promiseId: string): Promise<PromiseDetail> {
   const res = await fetch(`${firewallUrl}/promises/${promiseId}`, { headers: { authorization: `Bearer ${accountKey}` } });
   const body = await res.json().catch(() => undefined);
@@ -355,13 +394,16 @@ async function completePayment(
 
 /** Shapes a fresh `/sign` verdict into the tool's return value. `pay` settles
  * immediately; `ask_human` records the pending url so `check_approval` can
- * finish the purchase later; `refuse` is terminal — never retried around. */
+ * finish the purchase later; `refuse` is terminal — never retried around.
+ * `promise` (promise-replacement fix) is only present for an account-path
+ * payment resolved against a specific promise — see `jevIntentMismatchHint`. */
 async function handleSignVerdict(
   httpMode: boolean,
   firewallUrl: string,
   agentKey: string,
   resourceUrl: string,
   sign: SignResponse,
+  promise?: { id: string; task: string },
 ): Promise<Record<string, unknown>> {
   if (sign.verdict === "pay") {
     if (!sign.paymentSignature) throw new Error("firewall verdict was pay but returned no signature");
@@ -388,6 +430,21 @@ async function handleSignVerdict(
       receiptId: sign.receiptId,
       actionableHint: fundingRefusalHint(fundingCode, setupUrl),
       ...(setupUrl ? { setupUrl } : {}),
+    };
+  }
+  // Promise-replacement fix — ONLY for a Jev intent-mismatch refusal
+  // (never provenance, Intercepta, policy, or merchant refusals, and never
+  // Jev's OTHER refuse reason): never invite a promise change for anything
+  // else, since that's the one scenario where the fix actually applies —
+  // the payment itself is clean and in-budget, but for something never
+  // requested under the currently approved promise.
+  if (isJevIntentMismatchRefusal(sign.reason)) {
+    const hint = jevIntentMismatchHint(promise);
+    return {
+      status: "refused",
+      reason: sign.reason,
+      receiptId: sign.receiptId,
+      ...(hint ? { actionableHint: hint } : {}),
     };
   }
   return { status: "refused", reason: sign.reason, receiptId: sign.receiptId };
@@ -503,7 +560,12 @@ async function waitForPromiseOutcome(firewallUrl: string, accountKey: string, pr
       promiseId,
       summary: detail.summary,
       remainingBudget: detail.remainingBudget,
-      message: "Approved — pay_x402 can now spend against this promise.",
+      // Promise-replacement fix — once active, say so plainly: an agent
+      // (or a human reading the tool result) should never keep treating
+      // `detail.replaces` as still live.
+      ...(detail.replaces
+        ? { replaces: detail.replaces, message: `Approved — this replaces promise ${detail.replaces}, which is no longer active. pay_x402 can now spend against this promise.` }
+        : { message: "Approved — pay_x402 can now spend against this promise." }),
     });
   }
   return ok({ status: detail.status, promiseId, reason: detail.reason ?? `promise resolved as ${detail.status}` });
@@ -680,7 +742,11 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         "clean/in-budget one. Shows the human a summary (task, budget, categories, expiry, merchant) to approve " +
         "in World App; once approved, pay_x402 can spend against it with zero further taps until it runs out or " +
         "expires. Waits briefly for approval; if the human hasn't responded yet, returns 'pending' and the " +
-        "promiseId to pass to check_promise.",
+        "promiseId to pass to check_promise. When the human changes what they want mid-task (the item they asked " +
+        "for is unavailable, they chose an alternative, or they want a different budget/store), call this again " +
+        "with replaces set to the CURRENT promiseId BEFORE paying, describing exactly what they now want — the " +
+        "human approves that change on their phone, and once approved the old promise stops working. Never keep " +
+        "trying to pay under the old promise once the plan has changed.",
       inputSchema: {
         task: z.string().min(1).describe("what this promise authorizes, in plain language (e.g. 'buy a $1 Amazon gift card')"),
         budgetUsdc: z.number().positive().describe("maximum total USDC this promise may spend, across all purchases"),
@@ -692,9 +758,17 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
           .describe(
             "the store's base URL (e.g. http://localhost:4000) — this promise can only ever pay a resource on this exact origin",
           ),
+        replaces: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "the promiseId of an existing promise this one replaces — set this when the human changed what they " +
+              "want mid-task; requires an already-connected account (never on the very first promise)",
+          ),
       },
     },
-    async ({ task, budgetUsdc, categories, expiresInMinutes, merchant }) => {
+    async ({ task, budgetUsdc, categories, expiresInMinutes, merchant, replaces }) => {
       try {
         if (session.hasAgentKey() && credentialKind(session.getAgentKey()) === "wallet") {
           return fail("request_promise needs a connected World ID account — the legacy wallet mandate path doesn't use promises.");
@@ -704,12 +778,16 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
 
         // P9.6 — no credential at all yet: create the account AND this
         // promise together under one World ID approval, instead of asking
-        // for connect first.
+        // for connect first. `replaces` can never apply here (no account,
+        // no prior promise to replace) — the firewall fail-closed refuses
+        // it if a caller sends one anyway; forwarded as-is rather than
+        // special-cased so that refusal comes from the same single source
+        // of truth as every other `replaces` validation rule.
         if (!session.hasAgentKey()) {
           const res = await fetch(`${config.firewallUrl}/promises/first`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ task, budgetUsdc, categories, expiresInSeconds, merchant }),
+            body: JSON.stringify({ task, budgetUsdc, categories, expiresInSeconds, merchant, replaces }),
           });
           const body = (await res.json().catch(() => undefined)) as (FirstPromiseStartResponse & { error?: string }) | undefined;
           if (!res.ok || !body?.promiseId || !body.pollSecret) {
@@ -724,7 +802,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         const res = await fetch(`${config.firewallUrl}/promises`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${accountKey}` },
-          body: JSON.stringify({ task, budgetUsdc, categories, expiresInSeconds, merchant }),
+          body: JSON.stringify({ task, budgetUsdc, categories, expiresInSeconds, merchant, replaces }),
         });
         const body = (await res.json().catch(() => undefined)) as (CreatePromiseResponse & { error?: string }) | undefined;
         if (!res.ok || !body?.promiseId) {
@@ -952,7 +1030,10 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
           );
         }
 
-        const result = await handleSignVerdict(config.httpMode, config.firewallUrl, agentKey, url, signBody);
+        // Promise-replacement fix — only the account/promise path has an
+        // `intentId` to attach; the legacy wallet-mandate path passes
+        // `undefined` and gets no replacement hint (see `jevIntentMismatchHint`).
+        const result = await handleSignVerdict(config.httpMode, config.firewallUrl, agentKey, url, signBody, intentId ? { id: intentId, task: userRequest } : undefined);
         if (intentId) return ok({ ...result, promiseId: intentId, ...(autoSelectedPromise ? { autoSelectedPromise: true } : {}) });
         return ok(result);
       } catch (err) {
