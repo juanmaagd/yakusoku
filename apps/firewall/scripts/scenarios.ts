@@ -791,6 +791,21 @@ async function runS19(): Promise<void> {
   }
 }
 
+/** S20 — WU-P2: `GET /mandate` without an Authorization header -> 401. */
+async function runS20(): Promise<void> {
+  const id = "S20";
+  const description = "/mandate without an Authorization header";
+  const expected = "401 unauthorized";
+  try {
+    const res = await fetch(`${FIREWALL_URL}/mandate`);
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    const pass = res.status === 401 && json.error === "unauthorized";
+    record(id, description, expected, `${res.status} ${json.error ?? ""}`.trim(), pass);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
 // --- Process orchestration ---------------------------------------------------
 
 async function waitForHttp(url: string, timeoutMs = 20_000): Promise<void> {
@@ -876,6 +891,7 @@ async function main(): Promise<void> {
     await runS17();
     await runS18();
     await runS19();
+    await runS20();
 
     printTable();
     exitCode = results.every((r) => r.pass) ? 0 : 1;

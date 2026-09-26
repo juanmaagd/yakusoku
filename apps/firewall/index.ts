@@ -218,6 +218,27 @@ app.post("/control/resume", requireLocalAdmin, (c) => {
   return c.json(control);
 });
 
+// --- GET /mandate (WU-P2) -----------------------------------------------------
+// Lets an authenticated agent introspect what the human actually authorized —
+// the MCP server's `get_mandate` tool is the first stop for any agent client.
+// Same auth as `/sign`: an unknown, missing, or revoked-mandate key never
+// reaches this handler's body.
+
+app.get("/mandate", (c) => {
+  const auth = authenticateAgent(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const mandate = auth.mandate;
+  return c.json({
+    id: mandate.id,
+    task: mandate.message.task,
+    budget: mandate.message.budget.toString(),
+    remainingBudget: remainingBudget(mandate).toString(),
+    categories: mandate.message.categories,
+    expiry: mandate.message.expiry.toString(),
+    revoked: mandate.revoked,
+  });
+});
+
 // --- POST /sign --------------------------------------------------------------
 
 const signRequestSchema = z
