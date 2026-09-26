@@ -399,7 +399,8 @@ db.exec(`
     key_hash TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    revoked INTEGER NOT NULL DEFAULT 0
+    revoked INTEGER NOT NULL DEFAULT 0,
+    label TEXT
   );
   CREATE INDEX IF NOT EXISTS account_keys_account_id ON account_keys (account_id);
   CREATE TABLE IF NOT EXISTS connect_requests (
@@ -564,6 +565,19 @@ db.exec(`CREATE INDEX IF NOT EXISTS promises_replaces ON promises (replaces);`);
   }
 }
 
+// Connect-your-agent (K1) migration: `account_keys` may already exist from
+// before the `label` column did (a live dev sqlite file under data/) — add it
+// by hand, nullable, when missing. A pre-existing key row then reads back
+// with no label, exactly like a key minted before labeling existed.
+{
+  const existingAccountKeyColumns = new Set(
+    (db.prepare(`PRAGMA table_info(account_keys)`).all() as { name: string }[]).map((row) => row.name),
+  );
+  if (!existingAccountKeyColumns.has("label")) {
+    db.exec(`ALTER TABLE account_keys ADD COLUMN label TEXT`);
+  }
+}
+
 // Exactly one control row, ever — `INSERT OR IGNORE` makes this idempotent
 // across restarts instead of erroring on a re-run.
 db.exec(`INSERT OR IGNORE INTO control (id, paused, paused_at, reason) VALUES (1, 0, NULL, NULL)`);
@@ -647,12 +661,38 @@ const upsertAccountHealthOverrideStmt = db.prepare(
 );
 const getAccountHealthOverrideStmt = db.prepare(`SELECT * FROM account_health_overrides WHERE account_id = $accountId`);
 
+/** Length (hex chars) of the non-reversible fingerprint every owner-facing
+ * agent-key API uses as `id` — see `AccountKeySummary`. 12 hex chars is 48
+ * bits of the underlying SHA-256 `key_hash`: a collision between two keys
+ * minted for the SAME account is astronomically unlikely at the handful of
+ * keys one account will ever hold, and a collision across DIFFERENT accounts
+ * is harmless (`getAccountKeyByFingerprintStmt`/`revokeAccountKeyByFingerprintStmt`
+ * always scope by `account_id` first). */
+const ACCOUNT_KEY_FINGERPRINT_LENGTH = 12;
+
 const insertAccountKeyStmt = db.prepare(
-  `INSERT INTO account_keys (key_hash, account_id, created_at, revoked) VALUES ($keyHash, $accountId, $createdAt, 0)`,
+  `INSERT INTO account_keys (key_hash, account_id, created_at, revoked, label) VALUES ($keyHash, $accountId, $createdAt, 0, $label)`,
 );
 // Only unrevoked keys can ever authenticate — same dataset-stays-small
 // constant-time-scan tradeoff `findIntentByAgentKey` documents.
 const listActiveAccountKeysStmt = db.prepare(`SELECT * FROM account_keys WHERE revoked = 0`);
+// Settings (Connect your agent) — every key (revoked or not) this ACCOUNT
+// minted, newest first, so `GET /owner/agent-keys` can show a revoked key's
+// history instead of silently dropping it from the list.
+const listAccountKeysByAccountIdStmt = db.prepare(
+  `SELECT * FROM account_keys WHERE account_id = $accountId ORDER BY created_at DESC`,
+);
+// A key's `id` in every owner-facing API is a fingerprint (see
+// `AccountKeySummary`), never the full hash — this looks one up scoped to a
+// single account, so a fingerprint that happens to belong to a DIFFERENT
+// account's key is never found (`revokeAccountKeyByFingerprint` relies on
+// this to make a foreign id indistinguishable from an unknown one, both 404).
+const getAccountKeyByFingerprintStmt = db.prepare(
+  `SELECT * FROM account_keys WHERE account_id = $accountId AND substr(key_hash, 1, ${ACCOUNT_KEY_FINGERPRINT_LENGTH}) = $fingerprint`,
+);
+const revokeAccountKeyByFingerprintStmt = db.prepare(
+  `UPDATE account_keys SET revoked = 1 WHERE account_id = $accountId AND substr(key_hash, 1, ${ACCOUNT_KEY_FINGERPRINT_LENGTH}) = $fingerprint`,
+);
 
 // P9.1 connect requests.
 const insertConnectRequestStmt = db.prepare(
@@ -1268,14 +1308,18 @@ export function setAccountHealthOverride(accountId: string, override: AccountHea
 }
 
 /** Mints a fresh account credential (`ya_...`) bound to `accountId` — the raw
- * key is returned so the caller (accounts.ts) can deliver it exactly once via
- * `POST /connect/poll`; only its SHA-256 hash is persisted. */
-export function createAccountKey(accountId: string): string {
+ * key is returned so the caller (accounts.ts's `POST /connect/poll`, or
+ * index.ts's owner-session `POST /owner/agent-key`, K1) can deliver it
+ * exactly once; only its SHA-256 hash is persisted. `label` is an optional,
+ * owner-supplied name (e.g. "Claude Code on my laptop") shown back by `GET
+ * /owner/agent-keys` — purely descriptive, never checked by any auth path. */
+export function createAccountKey(accountId: string, label?: string): string {
   const accountKey = generateAccountKey();
   insertAccountKeyStmt.run({
     $keyHash: hashAccountKey(accountKey),
     $accountId: accountId,
     $createdAt: new Date().toISOString(),
+    $label: label ?? null,
   });
   return accountKey;
 }
@@ -1283,6 +1327,9 @@ export function createAccountKey(accountId: string): string {
 interface AccountKeyRow {
   account_id: string;
   key_hash: string;
+  created_at: string;
+  revoked: number;
+  label: string | null;
 }
 
 /** Constant-time scan against every unrevoked account key — same
@@ -1295,6 +1342,49 @@ export function findAccountByAccountKey(accountKey: string): StoredAccount | und
     if (hashesEqual(row.key_hash, providedHash)) return getAccount(row.account_id);
   }
   return undefined;
+}
+
+/** K1/Settings — an owner-facing view of one minted account key. `id` is a
+ * non-reversible fingerprint (see `ACCOUNT_KEY_FINGERPRINT_LENGTH`), never
+ * the full hash and never the raw key itself, which is shown to the owner
+ * exactly once at mint time and never persisted in plaintext. */
+export interface AccountKeySummary {
+  id: string;
+  label?: string;
+  createdAt: string;
+  revoked: boolean;
+}
+
+function accountKeyRowToSummary(row: AccountKeyRow): AccountKeySummary {
+  return {
+    id: row.key_hash.slice(0, ACCOUNT_KEY_FINGERPRINT_LENGTH),
+    label: row.label ?? undefined,
+    createdAt: row.created_at,
+    revoked: row.revoked === 1,
+  };
+}
+
+/** Every key (active or revoked) this account has ever minted, newest first —
+ * `GET /owner/agent-keys` (index.ts, K1/Settings). Never includes key
+ * material: only the fingerprint `id`, the owner's own `label`, and status. */
+export function listAccountKeysByAccountId(accountId: string): AccountKeySummary[] {
+  const rows = listAccountKeysByAccountIdStmt.all({ $accountId: accountId }) as AccountKeyRow[];
+  return rows.map(accountKeyRowToSummary);
+}
+
+/** `POST /owner/agent-keys/:id/revoke` (index.ts, K1/Settings). `false` for
+ * BOTH an unknown fingerprint and one belonging to a DIFFERENT account (the
+ * lookup is scoped by `accountId` from the start), so the route can answer
+ * the same 404 for both — never confirming to a caller that some other
+ * owner's key exists. Idempotent: revoking an already-revoked key still
+ * returns `true`. Because `findAccountByAccountKey` only ever scans
+ * `revoked = 0` rows, a revoked key stops authenticating on its very next
+ * request — there is no separate cache or session to invalidate. */
+export function revokeAccountKeyByFingerprint(accountId: string, fingerprint: string): boolean {
+  const existing = getAccountKeyByFingerprintStmt.get({ $accountId: accountId, $fingerprint: fingerprint }) as AccountKeyRow | null;
+  if (!existing) return false;
+  revokeAccountKeyByFingerprintStmt.run({ $accountId: accountId, $fingerprint: fingerprint });
+  return true;
 }
 
 // --- Connect requests (Phase 3, P9.1) ---------------------------------------
