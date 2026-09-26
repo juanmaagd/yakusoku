@@ -4,58 +4,71 @@ Not served by the site — internal reference for anyone touching `public/brand/
 
 ## What it means
 
-A fountain-pen nib with a checkmark emerging from its tip: **signed, then verified.** The nib
-stands for the user's EIP-712 intent signature; the checkmark stands for the firewall's
-verification of an agent's payment against that signature before it releases funds. No Japanese
-motifs (see `PRODUCT.md` → Brand Commitments, `DESIGN.md` header) — the mark is a plain,
-geometric pen-nib pictogram.
+A solid circle split by one centered vertical slot: a gate that only lets the right payment
+through. It is also the "o" of omamorisan. No pen, no checkmark, no Japanese motifs (see
+`PRODUCT.md` → Brand Commitments, `DESIGN.md` header) — just the gate.
 
 ## Files (`apps/site/public/brand/`)
 
 | File | Use |
 |---|---|
-| `mark.svg` | Nib + check, ink black only. Standalone icon use (e.g. loading states, avatars). |
-| `mark-blue.svg` | Same nib, checkmark in `#0075de`. Use where a single accent color reads better than all-black. |
-| `favicon.svg` | Simplified mark (no slit, no shoulder groove) for legibility at 16–32 px. Ink on transparent. |
-| `favicon-32.png`, `icon-512.png` | Raster fallbacks of the favicon/mark for browsers and PWA manifests that need a PNG. |
-| `apple-touch-icon.png` | 180×180, mark padded ~20% on the canvas color (`#f6f5f4`), per Apple's icon convention. |
-| `logo.svg` | Horizontal lockup — mark left, "omamorisan" wordmark right. Used in `Nav.astro`. |
+| `mark.svg` | The gate, ink black only. Standalone icon use (e.g. loading states, avatars). |
+| `favicon.svg` | Same mark with a wider slot for legibility at 16–32 px. Ink on transparent. |
+| `favicon-32.png`, `icon-512.png` | Raster fallbacks of the favicon/mark for browsers and PWA manifests that need a PNG. Transparent background. |
+| `apple-touch-icon.png` | 180×180, mark padded ~20% on white (`#ffffff`), per Apple's icon convention. |
+| `logo.svg` | Horizontal lockup — mark left, "omamorisan" wordmark right. Used in `Nav.astro` and `AppShell.tsx`. |
 | `logo-stacked.svg` | Mark above the wordmark, centered. Use for square/vertical placements (README, share cards). |
-| `og.png` | 1200×630 Open Graph / Twitter card image: canvas background, stacked logo, tagline. |
+| `og.png` | 1200×630 Open Graph / Twitter card image: white canvas, hairline frame, lockup + tagline. |
 
 ## Geometry
 
-The mark is authored directly as hand-placed SVG paths in a 100×100 viewBox — it is **not** a
-traced raster. It has three layers:
+The mark is a circle, `viewBox="0 0 100 100"`, centered at `(50,50)` with `r=50`, split by two
+arc paths that leave a centered vertical slot between them:
 
-1. **Nib silhouette** — a single `fill-rule="evenodd"` path: the outer nib outline, a circular
-   breather hole, a thin vertical slit, and a shoulder groove line, all as literal cut-out
-   counters (so the mark stays correct on any background, not just the canvas color).
-2. **Checkmark** — a separate stroked path (`stroke-linecap`/`linejoin: round`), vertex touching
-   the nib's tip, short leg down-left / long leg up-right.
-3. The wordmark in `logo.svg` / `logo-stacked.svg` is **Inter SemiBold (600) converted to outlined
-   paths** (extracted from the project's `@fontsource-variable/inter` package with `fontTools`,
-   instanced at weight 600, then each glyph's outline exported as an SVG path and hand-tracked at
-   18 font units). The SVG needs no font at render time.
+```
+<path d="M45 .251A50 50 0 0 0 45 99.749Z"/>
+<path d="M55 .251A50 50 0 0 1 55 99.749Z"/>
+```
+
+The slot is 10% of the diameter (10 units wide, `x` 45→55 in the 100-unit viewBox), centered on
+the circle. Each path is a 50-radius arc from one chord endpoint to the other (large-arc-flag 0,
+opposite sweep flags for the left/right halves), closed with a straight line along the chord —
+that straight edge is what creates the slot.
+
+`favicon.svg` widens the slot to 12% of the diameter (`x` 44→56) so it stays legible at 16–32 px.
+The arc endpoints are recomputed for the new chord distance from center (`d=6` instead of `5`):
+`y = 50 ± sqrt(2500 − 36)` ≈ `0.361` / `99.639`. Same two-path structure, same fill, no groove or
+extra ornament — it stays a clean two-path SVG at every size.
+
+The wordmark in `logo.svg` / `logo-stacked.svg` is **Mona Sans weight 600, outlined to paths**
+(extracted from the project's `@fontsource-variable/mona-sans` package with `fontTools`: the
+variable font instanced at `wght=600`/`wdth=100`, each glyph's outline exported with
+`fontTools.pens.svgPathPen.SVGPathPen`, and the ten glyphs of "omamorisan" assembled using the
+font's own advance widths with `-0.02em` letter-spacing applied between characters — no kerning
+pairs apply to this word at this weight). The SVG needs no font at render time. Mark height is
+cap height × 1.25, vertically centered on the cap-height band; the gap between mark and wordmark
+is ≈ 0.3 × the mark's height. The same mark-height and gap rule is reused for the stacked lockup,
+with the mark horizontally centered over the wordmark instead.
 
 ## Clear space & minimum size
 
-- Keep clear space around the mark equal to at least the width of the nib's shoulder (roughly
-  30% of the mark's own height) on every side.
-- Don't render `mark.svg` (the detailed version, with slit/hole/groove) below ~40 px — use
-  `favicon.svg` instead, which is deliberately simplified for small sizes.
+- Keep clear space around the mark equal to at least the slot width × 2 (i.e. ≥20% of the mark's
+  diameter) on every side — enough that the slot itself always reads as intentional negative
+  space, not crowding.
+- Don't render `mark.svg` below ~40 px — use `favicon.svg` instead, which is deliberately widened
+  for small sizes.
 - Don't stretch non-uniformly; always scale `width`/`height` (or just `height`) together.
 
 ## Colors
 
-- Ink `#000000` — default color for the nib and, in `mark.svg`, the checkmark too.
-- Primary blue `#0075de` — the only accent, used solely for the checkmark in `mark-blue.svg`. Never
-  recolor the nib itself.
-- Canvas `#f6f5f4` — background for padded square icons (`apple-touch-icon.png`, `icon-512.png`,
-  `og.png`). No gradients, no drop shadows, anywhere.
+- Ink `#0b0d12` — the only color the mark or wordmark ever uses.
+- Never recolor the mark into a state color (verified/refuse/ask, etc.) or brand blue — it stays
+  ink-only in every context.
+- Canvas `#ffffff` — background for `og.png` and `apple-touch-icon.png`. No gradients, no drop
+  shadows, anywhere.
 
 ## Provenance
 
-Vector redrawn by hand (hand-placed path coordinates, no auto-trace) from Codex `image_gen`
-concept 07 ("pen + check"). The reference raster (`assets/logo-concepts/concept-07-pen-check.png`,
-outside this repo) was used only as a compositional reference and is not shipped.
+Concept generated with Codex `image_gen` as `assets/logo-v2/01-slot.png` (outside this repo); the
+shipped vector geometry was authored by hand from measurements on that concept, not auto-traced.
+The wordmark is Mona Sans 600, outlined to paths with `fontTools` as described above.
