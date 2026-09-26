@@ -23,9 +23,9 @@ import { registerTools } from "./tools";
 const FIREWALL_URL = process.env.OMAMORISAN_FIREWALL_URL ?? "http://localhost:4001";
 const HTTP_PORT = 4010;
 
-function buildServer(session: SessionState): McpServer {
+function buildServer(session: SessionState, httpMode: boolean): McpServer {
   const server = new McpServer({ name: "omamorisan", version: "0.1.0" });
-  registerTools(server, { firewallUrl: FIREWALL_URL }, session);
+  registerTools(server, { firewallUrl: FIREWALL_URL, httpMode }, session);
   return server;
 }
 
@@ -44,7 +44,7 @@ async function runStdio(): Promise<void> {
   const stored = envKey ? undefined : await loadStoredCredential(FIREWALL_URL);
   const credential: CredentialRef = { current: envKey ?? stored?.agentKey };
   const session = createSessionState(FIREWALL_URL, credential);
-  await buildServer(session).connect(new StdioServerTransport());
+  await buildServer(session, false).connect(new StdioServerTransport());
   console.error(
     `[omamorisan-mcp] stdio ready (firewall ${FIREWALL_URL}) — ` +
       (credential.current ? "using a stored credential" : "not connected yet: the agent should call the connect tool"),
@@ -105,19 +105,40 @@ async function handleMcpRequest(req: Request): Promise<Response> {
     if (transport.sessionId) httpSessions.delete(transport.sessionId);
   };
 
-  await buildServer(session).connect(transport);
+  await buildServer(session, true).connect(transport);
   return transport.handleRequest(req, { parsedBody });
 }
 
+// --- T1 request logging (odd/tasks/dokploy-deploy.md) ------------------------
+// No framework here (raw Bun.serve routes), so a tiny wrapper stands in for
+// what hono/logger gives the firewall — method, path, status, ms, to stdout.
+
+function withRequestLog(handler: (req: Request) => Promise<Response> | Response): (req: Request) => Promise<Response> {
+  return async (req: Request): Promise<Response> => {
+    const start = Date.now();
+    const res = await handler(req);
+    console.log(`${req.method} ${new URL(req.url).pathname} ${res.status} ${Date.now() - start}ms`);
+    return res;
+  };
+}
+
+function health(): Response {
+  return Response.json({ ok: true });
+}
+
 function runHttp(): void {
+  const loggedMcp = withRequestLog(handleMcpRequest);
   Bun.serve({
     port: HTTP_PORT,
     // Bun's default idleTimeout (10 s) is shorter than the ~30 s that
     // connect / request_promise wait for a World ID approval; clients then
     // see ECONNRESET mid-call.
     idleTimeout: 120,
-    routes: { "/mcp": { POST: handleMcpRequest, GET: handleMcpRequest, DELETE: handleMcpRequest } },
-    fetch: () => new Response("not found", { status: 404 }),
+    routes: {
+      "/mcp": { POST: loggedMcp, GET: loggedMcp, DELETE: loggedMcp },
+      "/health": { GET: withRequestLog(health) },
+    },
+    fetch: withRequestLog(() => new Response("not found", { status: 404 })),
   });
   console.error(`[omamorisan-mcp] Streamable HTTP ready on http://localhost:${HTTP_PORT}/mcp (firewall ${FIREWALL_URL})`);
 }
