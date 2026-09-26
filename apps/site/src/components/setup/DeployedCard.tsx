@@ -127,14 +127,27 @@ export default function DeployedCard({ info, justDeployedTxHash }: Props) {
       {!address && (
         <section className="mt-6 rounded-card border border-hairline bg-surface p-5 md:p-6">
           <h2 className="text-subheading font-medium">Connect a wallet</h2>
-          <p className="mt-2 text-body-sm text-graphite">Connect the wallet you want to deposit from, or your owner wallet to manage this account.</p>
+          <p className="mt-2 text-body-sm text-graphite">Connect the owner wallet to deposit into and manage this account.</p>
           <div className="mt-3">
             <WalletConnectPrompt wallet={wallet} />
           </div>
         </section>
       )}
 
-      {address && <DepositSection usdc={info.usdc} smartAccount={info.smartAccount} from={address} onDeposited={refreshBalance} />}
+      {/* Deposits are owner-only in the UI: the setup link reaches the human through the agent, so a
+          compromised agent could link its own wallet first. Never invite a deposit into an account the
+          connected wallet doesn't control. */}
+      {address && !isOwner && (
+        <section className="mt-6 rounded-card bg-refuse-wash p-5 text-refuse-ink md:p-6">
+          <h2 className="text-subheading font-medium">This account isn't owned by your wallet</h2>
+          <p className="mt-2 text-body-sm">
+            It's owned by <span className="font-mono">{shortAddress(info.owner)}</span>. Don't deposit into an account you don't
+            control. If you didn't link that wallet, ask your agent for a new setup link.
+          </p>
+        </section>
+      )}
+
+      {address && isOwner && <DepositSection usdc={info.usdc} smartAccount={info.smartAccount} from={address} onDeposited={refreshBalance} />}
 
       {address && isOwner && (
         <OwnerControls smartAccount={info.smartAccount} owner={address} paused={paused} onPausedChange={setPaused} onWithdrawn={refreshBalance} />
@@ -162,7 +175,7 @@ function parsePositiveUsdc(input: string): bigint | undefined {
   }
 }
 
-// --- Deposit (anyone) ------------------------------------------------------
+// --- Deposit (owner) -------------------------------------------------------
 
 function DepositSection({ usdc, smartAccount, from, onDeposited }: { usdc: Address; smartAccount: Address; from: Address; onDeposited: () => void }) {
   const [amount, setAmount] = useState("");
