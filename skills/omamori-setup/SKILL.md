@@ -26,7 +26,7 @@ Load this skill when a human asks to connect their agent to Omamori (the `omamor
 | Claude Code | `claude mcp add --transport http ... --header "Authorization: Bearer <key>"` | `claude mcp add omamorisan -- bun apps/mcp/index.ts` |
 | Claude Desktop | `mcp-remote` bridge (stdio-only client) | direct `bun` command in `claude_desktop_config.json` |
 | Cursor | `url` + `headers` in `mcp.json` | `command`/`args` in `mcp.json` |
-| Codex | `[mcp_servers.omamori]` + `bearer_token_env_var` in `~/.codex/config.toml` | same block, no bearer field |
+| Codex | `[mcp_servers.omamorisan]` + `bearer_token_env_var` in `~/.codex/config.toml` | same block, no bearer field |
 | Other MCP client | any Streamable-HTTP-capable client, or the `mcp-remote` bridge | stdio per `apps/mcp/README.md` |
 
 Already connected (a fresh session's `get_mandate` returns the account, no World ID prompt) → skip straight to step 5 (Verify).
