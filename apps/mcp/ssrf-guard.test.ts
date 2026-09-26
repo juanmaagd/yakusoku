@@ -58,12 +58,17 @@ describe("isBlockedIp — IPv6", () => {
     ["::ffff:127.0.0.1", "IPv4-mapped loopback"],
     ["::ffff:169.254.169.254", "IPv4-mapped metadata"],
     ["::ffff:10.0.0.1", "IPv4-mapped private"],
+    ["64:ff9b::a9fe:a9fe", "NAT64 well-known /96, embedded metadata (169.254.169.254)"],
+    ["64:ff9b::7f00:1", "NAT64 well-known /96, embedded loopback (127.0.0.1)"],
+    ["64:ff9b:1:a9fe:a9:fe00::", "NAT64 local-use /48, embedded metadata (169.254.169.254)"],
   ]);
 
   expectAllowed([
     ["2606:4700:4700::1111", "public (Cloudflare)"],
     ["2001:4860:4860::8888", "public (Google)"],
     ["::ffff:8.8.8.8", "IPv4-mapped public"],
+    ["64:ff9b::808:808", "NAT64 well-known /96, embedded public (8.8.8.8)"],
+    ["64:ff9b:1:808:8:800::", "NAT64 local-use /48, embedded public (8.8.8.8)"],
   ]);
 });
 

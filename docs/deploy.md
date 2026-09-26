@@ -136,6 +136,32 @@ docker compose exec firewall bun -e "fetch('https://<store-domain>/catalog').the
 
 If that fails from inside the `firewall` container but works from your own machine, it's the hairpin issue — the fix is host/network-level (e.g. enabling NAT loopback, or asking your VPS provider), not a code change.
 
+The T2 fetch guard (`apps/mcp/ssrf-guard.ts`) has a known, documented limitation: it resolves DNS and checks the result, then lets `fetch` re-resolve DNS itself a moment later for the actual connection — a DNS answer that changes in between (DNS rebinding) could still slip through; closing that needs pinning the connection to the checked address, out of scope for this pass.
+
+## Admin endpoints (kill switch)
+
+The firewall's operator controls (`GET /control`, `POST /control/pause`, `POST /control/resume`) and the unfiltered admin SSE stream (`GET /events?admin=1`) require a loopback caller (127.0.0.1/::1) **and** the `x-yakusoku-admin: 1` header — by design, Traefik (and any other reverse proxy) never originates a loopback connection to the container, so these are unreachable from `https://<firewall-domain>` no matter what you send. This isn't a bug to route around; it's the same "local-admin-only" bar the code already documents (`apps/firewall/index.ts`'s `isLocalAdminRequest`).
+
+To use them, run `curl` **inside** the firewall container instead, where `localhost` really is loopback:
+
+```bash
+# Find the container name/id first:
+docker compose ps firewall   # or: docker ps --filter name=firewall
+
+# Read the kill switch's current state:
+docker exec <firewall-container> curl -s http://localhost:4001/control -H 'x-yakusoku-admin: 1'
+
+# Pause (refuses every payment fail-closed until resumed):
+docker exec <firewall-container> curl -s -X POST http://localhost:4001/control/pause \
+  -H 'x-yakusoku-admin: 1' -H 'content-type: application/json' -d '{"reason":"maintenance"}'
+
+# Resume:
+docker exec <firewall-container> curl -s -X POST http://localhost:4001/control/resume -H 'x-yakusoku-admin: 1'
+
+# Unfiltered admin event stream (every account's decisions, not just one owner's):
+docker exec <firewall-container> curl -sN 'http://localhost:4001/events?admin=1'
+```
+
 ## Sources
 
 - [Docker Compose overview][dokploy-compose-overview]

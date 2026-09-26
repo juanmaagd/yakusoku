@@ -118,11 +118,14 @@ const app = express();
 // T1 request log (odd/tasks/dokploy-deploy.md) — no logging framework here
 // (express, not Hono), so a tiny equivalent: method, path, status and ms, to
 // stdout, one line per request. Registered first so it wraps every route
-// below, including the x402 payment middleware.
+// below, including the x402 payment middleware. `req.path` (pathname only),
+// never `req.originalUrl` (path + query string) — security review: this
+// store has no query-string secrets today, but logging only the pathname
+// matches the firewall/MCP loggers and never becomes a leak if one is added.
 app.use((req, res, next) => {
   const start = Date.now();
   res.on("finish", () => {
-    console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - start}ms`);
+    console.log(`${req.method} ${req.path} ${res.statusCode} ${Date.now() - start}ms`);
   });
   next();
 });

@@ -5,7 +5,6 @@
 
 import { Hono, type Context, type Next } from "hono";
 import { cors } from "hono/cors";
-import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
 import { getConnInfo } from "hono/bun";
 import { z } from "zod";
@@ -65,11 +64,25 @@ const SSE_HEARTBEAT_MS = 15_000;
 const app = new Hono();
 
 // --- T1 request log + health (odd/tasks/dokploy-deploy.md) ------------------
-// `hono/logger` prints two lines per request ("<-- METHOD path" then
-// "--> METHOD path status Nms") to stdout — method, path, status and ms, as
-// requested. Registered first so it wraps every route below, including CORS
-// preflights and the SSE stream.
-app.use(logger());
+// Method, path, status and ms, to stdout — mirrors apps/mcp/index.ts's own
+// `withRequestLog` (one line, pathname only). Originally used `hono/logger`,
+// but that prints the full URL INCLUDING the query string, which would leak
+// `GET /events?session=<SIWE bearer token>` straight to stdout — and one
+// path segment is itself a bearer credential (`GET /setup/:token`, `POST
+// /setup/:token/owner`: "the token itself is the credential", this file's
+// own comment on that route). `redactLoggedPath` strips both. Registered
+// first so it wraps every route below, including CORS preflights and the
+// SSE stream.
+function redactLoggedPath(pathname: string): string {
+  const setupMatch = /^\/setup\/[^/]+(\/owner)?$/.exec(pathname);
+  return setupMatch ? `/setup/:token${setupMatch[1] ?? ""}` : pathname;
+}
+
+app.use(async (c, next) => {
+  const start = Date.now();
+  await next();
+  console.log(`${c.req.method} ${redactLoggedPath(new URL(c.req.url).pathname)} ${c.res.status} ${Date.now() - start}ms`);
+});
 
 app.get("/health", (c) => c.json({ ok: true }));
 

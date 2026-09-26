@@ -14,6 +14,22 @@ WORKDIR /app
 COPY . .
 RUN bun install --frozen-lockfile
 
+# Security review (odd/tasks/dokploy-deploy.md) — run as the image's
+# built-in non-root `bun` user (uid/gid 1000), not root. `bun install` still
+# runs as root above (running it as `bun` hits a "failed to link package"
+# ENOENT for several platform-optional native deps — a bun/non-root
+# interaction, not something this app controls), so `/app` needs an explicit
+# chown afterward. `/data` (the firewall's SQLite dir, FIREWALL_DATA_DIR=/data
+# in docker-compose.yml) is created and chowned here too, as root, before the
+# `USER bun` switch below: `/` itself isn't writable by a non-root user, and
+# a named volume mounted at a path with no prior content in the image
+# inherits that path's ownership from the image on its first mount — an
+# unprepared /data would come up root-owned, and the firewall's own
+# `mkdirSync`/sqlite open would fail to write as `bun`.
+RUN mkdir -p /data && chown -R bun:bun /app /data
+
+USER bun
+
 # firewall (:4001), store (:4000), mcp HTTP (:4010) — see docker-compose.yml
 # for which port(s) each service actually publishes.
 EXPOSE 4000 4001 4010

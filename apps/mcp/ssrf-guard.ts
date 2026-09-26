@@ -145,10 +145,49 @@ function ipv6InRange(ip: bigint, cidr: Cidr6): boolean {
   return ip >> shift === cidr.base >> shift;
 }
 
+// --- NAT64-embedded IPv4 (security review, odd/tasks/dokploy-deploy.md) -----
+// RFC 6052's Well-Known Prefix (64:ff9b::/96) and RFC 8215's Local-Use
+// prefix (64:ff9b:1::/48) both embed an IPv4 address inside an IPv6 one for
+// NAT64 — checked against the same IPv4 blocklist so e.g. a NAT64-embedded
+// 169.254.169.254 doesn't slip past the IPv6-only ranges above. Only these
+// two specific, well-known prefixes are handled (not every prefix length
+// RFC 6052 §2.2 allows) — that covers the NAT64 address space seen in
+// practice, without building a general encoder for prefix lengths nothing
+// here ever produces or receives.
+
+function requiredIpv6(candidate: string): bigint {
+  const n = ipv6ToBigInt(candidate);
+  if (n === undefined) throw new Error(`invalid built-in NAT64 prefix: ${candidate}`);
+  return n;
+}
+
+const NAT64_WELL_KNOWN_96 = requiredIpv6("64:ff9b::");
+const NAT64_LOCAL_48 = requiredIpv6("64:ff9b:1::");
+
+/** Byte `index` (0 = most significant) of a 128-bit address held as a bigint. */
+function byteAt(n: bigint, index: number): number {
+  return Number((n >> BigInt((15 - index) * 8)) & 0xffn);
+}
+
+/** `undefined` when `n` isn't inside either handled NAT64 prefix. */
+function extractNat64Ipv4(n: bigint): number | undefined {
+  if (n >> 32n === NAT64_WELL_KNOWN_96 >> 32n) {
+    // /96 — the embedded IPv4 is simply the low 32 bits, like ::ffff:0:0/96.
+    return Number(n & 0xffffffffn) >>> 0;
+  }
+  if (n >> 80n === NAT64_LOCAL_48 >> 80n) {
+    // /48 (RFC 6052 §2.2): v4 octets 1-2 at bytes 6-7, a reserved zero "u"
+    // byte at byte 8, v4 octets 3-4 at bytes 9-10.
+    return ((byteAt(n, 6) << 24) | (byteAt(n, 7) << 16) | (byteAt(n, 9) << 8) | byteAt(n, 10)) >>> 0;
+  }
+  return undefined;
+}
+
 export function isBlockedIpv6(ip: string): boolean {
   const n = ipv6ToBigInt(ip);
   if (n === undefined) return true; // unparseable — fail closed
   if (BLOCKED_IPV6_RANGES.some((r) => ipv6InRange(n, r))) return true;
+
   // An IPv4-mapped address (::ffff:0:0/96) inherits the embedded IPv4
   // address's own classification, so "::ffff:169.254.169.254" is caught too.
   const top96 = n >> 32n;
@@ -156,6 +195,12 @@ export function isBlockedIpv6(ip: string): boolean {
     const embeddedIpv4 = Number(n & 0xffffffffn) >>> 0;
     return BLOCKED_IPV4_RANGES.some((r) => ipv4InRange(embeddedIpv4, r));
   }
+
+  const nat64Ipv4 = extractNat64Ipv4(n);
+  if (nat64Ipv4 !== undefined) {
+    return BLOCKED_IPV4_RANGES.some((r) => ipv4InRange(nat64Ipv4, r));
+  }
+
   return false;
 }
 

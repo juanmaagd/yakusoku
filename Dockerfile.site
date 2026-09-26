@@ -22,8 +22,12 @@ RUN bun run --cwd apps/site build
 FROM oven/bun:1-slim AS run
 
 WORKDIR /app
-COPY --from=build /app/apps/site/dist ./dist
-COPY apps/site/serve.ts ./serve.ts
+COPY --from=build --chown=bun:bun /app/apps/site/dist ./dist
+COPY --chown=bun:bun apps/site/serve.ts ./serve.ts
+
+# Security review (odd/tasks/dokploy-deploy.md) — the image's built-in
+# non-root `bun` user; this server only ever reads dist/, no volume to prepare.
+USER bun
 
 EXPOSE 4321
 CMD ["bun", "run", "serve.ts"]

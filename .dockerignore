@@ -25,3 +25,11 @@ apps/firewall/data
 # Astro's own build output — Dockerfile.site produces this fresh in the
 # build stage; never trust a stale local dist/ from the host.
 apps/site/dist
+
+# Security review (odd/tasks/dokploy-deploy.md) — never let a real .env file
+# (this project's own .env.hackathon convention or any other) end up inside
+# a built image; docker-compose.yml/Dokploy's own env pass real values in as
+# container env vars instead. .env.example has no real values — keep it.
+.env
+.env.*
+!.env.example
