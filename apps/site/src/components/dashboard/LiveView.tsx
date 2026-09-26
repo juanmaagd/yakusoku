@@ -23,7 +23,6 @@ import Skeleton from "../ui/Skeleton";
 import ApprovalBanner, { ApprovalResolved, type ApprovalOutcome } from "./ApprovalBanner";
 import DecisionDetail from "./DecisionDetail";
 import DecisionFeed from "./DecisionFeed";
-import PromisesSection from "./PromisesSection";
 
 // --- Live state: GET /receipts + GET /intents once, then SSE forever -------
 
@@ -337,8 +336,6 @@ export default function LiveView({ sessionToken, onUnauthorized, onLiveStatus, f
         </div>
         {mandates.length > 0 && <PromiseFilter mandates={mandates} selectedId={selectedMandateId} onSelect={selectPromise} />}
       </div>
-
-      <PromisesSection promises={promises} />
 
       <div className="mt-6 space-y-4">
         {ownerControl?.control.paused && <PausedBanner onResume={ownerControl.resume} />}

@@ -170,12 +170,17 @@ function worldIdStatus(p: OwnerPromise): WorldIdStatus {
   return Number(p.expiry) * 1000 <= Date.now() ? "expired" : "active";
 }
 
+/** Pending approvals first (the only ones waiting on the owner), then active,
+ * then everything else; newest first within each group. */
+function worldIdSortRank(p: OwnerPromise): number {
+  const status = worldIdStatus(p);
+  if (status === "pending") return 0;
+  if (status === "active") return 1;
+  return 2;
+}
+
 function sortWorldIdPromises(promises: OwnerPromise[]): OwnerPromise[] {
-  return [...promises].sort((a, b) => {
-    const aLive = worldIdStatus(a) === "active" ? 0 : 1;
-    const bLive = worldIdStatus(b) === "active" ? 0 : 1;
-    return aLive - bLive || b.createdAt.localeCompare(a.createdAt);
-  });
+  return [...promises].sort((a, b) => worldIdSortRank(a) - worldIdSortRank(b) || b.createdAt.localeCompare(a.createdAt));
 }
 
 function merchantHost(merchant: string | undefined): string | undefined {
