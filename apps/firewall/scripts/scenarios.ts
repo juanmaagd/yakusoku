@@ -22,6 +22,9 @@
 // INTERCEPTA_API_KEY is set in the environment this script was launched
 // with: unset (tonight) -> the legit purchase escalates to `ask_human`
 // (Intercepta not configured); set -> it auto-pays.
+//
+// P6 adds S29 (~1 more World ID sandbox device-authorization call, same cost
+// as S13).
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -107,8 +110,12 @@ async function createIntent(
   return { status: res.status, id: body?.id ?? "", agentKey: body?.agentKey ?? "", body, account };
 }
 
+// P5: GET /intents/:id now requires a credential — this harness talks to its
+// own isolated firewall over localhost, so the same admin headers every
+// other control-plane helper in this file uses (ADMIN_HEADERS, defined
+// below) satisfy it too.
 async function getRemainingBudget(intentId: string): Promise<string> {
-  const res = await fetch(`${FIREWALL_URL}/intents/${intentId}`);
+  const res = await fetch(`${FIREWALL_URL}/intents/${intentId}`, { headers: ADMIN_HEADERS });
   const body = (await res.json()) as { remainingBudget?: string };
   return body.remainingBudget ?? "unknown";
 }
@@ -1154,6 +1161,110 @@ async function runS27(): Promise<void> {
   }
 }
 
+/** S28 — P5: `GET /intents/:id` is no longer public. No credential -> 401; a
+ * session for a different owner -> 404 (no existence leak, S23's pattern);
+ * the mandate's own agent key -> 200; the mandate owner's own session -> 200. */
+async function runS28(): Promise<void> {
+  const id = "S28";
+  const description = "GET /intents/:id requires a session, the mandate's agent key, or admin";
+  const expected = "no auth 401, wrong owner 404, own agent key 200, own session 200";
+  try {
+    const owner = privateKeyToAccount(generatePrivateKey());
+    const other = privateKeyToAccount(generatePrivateKey());
+    const intent = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S28", 1, ["gift_card:amazon"], undefined, owner);
+    if (intent.status !== 201) throw new Error(`POST /intents failed for S28: ${intent.status}`);
+
+    const noAuthRes = await fetch(`${FIREWALL_URL}/intents/${intent.id}`);
+
+    const otherSession = await siweSignIn(other);
+    if (otherSession.status !== 200 || !otherSession.json.sessionToken) {
+      throw new Error(`S28: other owner sign-in failed: ${otherSession.status}`);
+    }
+    const wrongOwnerRes = await fetch(`${FIREWALL_URL}/intents/${intent.id}`, {
+      headers: { authorization: `Bearer ${otherSession.json.sessionToken}` },
+    });
+
+    const agentKeyRes = await fetch(`${FIREWALL_URL}/intents/${intent.id}`, {
+      headers: { authorization: `Bearer ${intent.agentKey}` },
+    });
+
+    const ownSession = await siweSignIn(owner);
+    if (ownSession.status !== 200 || !ownSession.json.sessionToken) {
+      throw new Error(`S28: owner sign-in failed: ${ownSession.status}`);
+    }
+    const ownSessionRes = await fetch(`${FIREWALL_URL}/intents/${intent.id}`, {
+      headers: { authorization: `Bearer ${ownSession.json.sessionToken}` },
+    });
+
+    const pass =
+      noAuthRes.status === 401 && wrongOwnerRes.status === 404 && agentKeyRes.status === 200 && ownSessionRes.status === 200;
+    record(
+      id,
+      description,
+      expected,
+      `no-auth=${noAuthRes.status} wrong-owner=${wrongOwnerRes.status} agent-key=${agentKeyRes.status} own-session=${ownSessionRes.status}`,
+      pass,
+    );
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S29 — P6: `GET /approvals/:receiptId` also accepts the mandate owner's own
+ * SIWE session, not just an admin header or the agent's own key — the site's
+ * `/app/dashboard` runs on a different origin than the legacy admin-header
+ * `/dashboard`, so it needs its own way to read a pending approval's QR/user
+ * code. Same shape as S28: no credential -> 401; a session for a different
+ * owner -> 404 (no existence leak); the mandate's own agent key -> 200; the
+ * mandate owner's own session -> 200. */
+async function runS29(): Promise<void> {
+  const id = "S29";
+  const description = "GET /approvals/:receiptId also accepts the mandate owner's own session";
+  const expected = "no auth 401, wrong owner 404, own agent key 200, own session 200";
+  try {
+    const owner = privateKeyToAccount(generatePrivateKey());
+    const other = privateKeyToAccount(generatePrivateKey());
+    const intent = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S29", 1, ["gift_card:amazon"], undefined, owner);
+    if (intent.status !== 201) throw new Error(`POST /intents failed for S29: ${intent.status}`);
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    // No `context` -> every stage's escalation path funnels into the World ID
+    // gate regardless of INTERCEPTA_API_KEY (same trick S13 uses), so this
+    // scenario always has a pending approval to probe.
+    const { json: initial } = await signRequest({ intentId: intent.id, paymentRequiredHeader: header, resourceUrl }, intent.agentKey);
+    if (initial.verdict !== "ask_human" || initial.approval?.status !== "pending" || !initial.receiptId) {
+      record(id, description, expected, initial.verdict, false, `expected a pending World ID gate, got ${JSON.stringify(initial)}`);
+      return;
+    }
+
+    const noAuthRes = await fetch(`${FIREWALL_URL}/approvals/${initial.receiptId}`);
+
+    const otherSession = await siweSignIn(other);
+    if (otherSession.status !== 200 || !otherSession.json.sessionToken) {
+      throw new Error(`S29: other owner sign-in failed: ${otherSession.status}`);
+    }
+    const { status: wrongOwnerStatus } = await approvalStatusRequest(initial.receiptId, otherSession.json.sessionToken);
+
+    const { status: agentKeyStatus } = await approvalStatusRequest(initial.receiptId, intent.agentKey);
+
+    const ownSession = await siweSignIn(owner);
+    if (ownSession.status !== 200 || !ownSession.json.sessionToken) {
+      throw new Error(`S29: owner sign-in failed: ${ownSession.status}`);
+    }
+    const { status: ownSessionStatus } = await approvalStatusRequest(initial.receiptId, ownSession.json.sessionToken);
+
+    const pass = noAuthRes.status === 401 && wrongOwnerStatus === 404 && agentKeyStatus === 200 && ownSessionStatus === 200;
+    record(
+      id,
+      description,
+      expected,
+      `no-auth=${noAuthRes.status} wrong-owner=${wrongOwnerStatus} agent-key=${agentKeyStatus} own-session=${ownSessionStatus}`,
+      pass,
+    );
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
 // --- Process orchestration ---------------------------------------------------
 
 async function waitForHttp(url: string, timeoutMs = 20_000): Promise<void> {
@@ -1247,6 +1358,8 @@ async function main(): Promise<void> {
     await runS25();
     await runS26();
     await runS27();
+    await runS28();
+    await runS29();
 
     printTable();
     exitCode = results.every((r) => r.pass) ? 0 : 1;

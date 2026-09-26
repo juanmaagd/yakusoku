@@ -16,6 +16,8 @@ export interface ReceiptContext {
   paymentIdentifier: string;
   intentId: string;
   task?: string;
+  /** P6 dashboard's "justified by" field — see `DecisionReceipt.justification` (packages/shared/receipt.ts). */
+  justification?: string;
   resourceUrl: string;
   amount?: string;
   payTo?: string;
@@ -43,6 +45,7 @@ export interface FinalizeInput {
   paymentIdentifier: string;
   intentId: string;
   task?: string;
+  justification?: string;
   resourceUrl: string;
   amount?: string;
   payTo?: string;
@@ -72,6 +75,7 @@ export function buildReceipt(input: FinalizeInput): DecisionReceipt {
     verdict: input.verdict,
     reasons: [input.reason],
     task: input.task,
+    justification: input.justification,
     resourceUrl: input.resourceUrl,
     amount: input.amount,
     payTo: input.payTo,

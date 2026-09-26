@@ -146,6 +146,13 @@ export const decisionReceiptSchema = z.object({
   reasons: z.array(z.string()),
   /** The signed intent's task text, when the intent was resolved. */
   task: z.string().optional(),
+  /** The agent's own stated reason this specific request matches the signed
+   * task (P6 dashboard's "what your agent asks to pay" lane) — the same
+   * `context.justification` string apps/agent and the attack/scenario
+   * scripts already send to `/sign` (jev.ts reads it too); simply never
+   * carried onto the receipt before P6. `undefined` for a request that sent
+   * no context at all (e.g. S12's missing-context case). */
+  justification: z.string().optional(),
   /** The x402 resource URL this payment was for. */
   resourceUrl: z.string().optional(),
   /** Atomic-unit amount string, when the payment requirement parsed. */

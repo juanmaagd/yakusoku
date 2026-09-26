@@ -50,11 +50,19 @@ const app = new Hono();
 // Bearer calls; the dashboard is same-origin (served off this same process)
 // so it never goes through CORS at all. Env-configurable so a deployed site
 // origin doesn't require a code change.
-const SITE_ORIGINS = (process.env.OMAMORISAN_SITE_ORIGINS ?? "http://localhost:4321")
+const SITE_ORIGINS = (process.env.OMAMORISAN_SITE_ORIGINS ?? "http://localhost:4321,http://localhost:4322")
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
-app.use("/*", cors({ origin: SITE_ORIGINS, allowHeaders: ["Content-Type", "Authorization", "x-yakusoku-admin"] }));
+// P6: "Accept" wasn't on this list — harmless for a plain `fetch()`, but a
+// cross-origin `EventSource` (which always sends `Accept: text/event-stream`
+// itself, non-optionally per spec) preflights on it and then hangs instead of
+// failing fast when the preflight doesn't allow it back (confirmed while
+// QA'ing the P6 dashboard's live SSE stream). The dashboard's own fetch-based
+// SSE client (apps/site/src/lib/sse.ts) works around it by never sending that
+// header at all, but any other cross-origin consumer using a native
+// `EventSource` still needs this listed.
+app.use("/*", cors({ origin: SITE_ORIGINS, allowHeaders: ["Content-Type", "Authorization", "Accept", "x-yakusoku-admin"] }));
 
 app.onError((err, c) => {
   console.error("unhandled error", err);
@@ -269,12 +277,40 @@ app.get("/intents", (c) => {
   );
 });
 
-// --- GET /intents/:id ----------------------------------------------------
+// --- GET /intents/:id (P5: no longer public) --------------------------------
+// Closed per the P5 brief: this used to answer any caller with the full
+// intent (including its `remainingBudget`). Three ways in now, same shape as
+// every other owner-scoped route in this file: the operator path (loopback +
+// admin header, full authority), the mandate's own owner via a SIWE session
+// (404 for a real id owned by someone else — never confirms existence to a
+// non-owner, same pattern as `GET /receipts/:id`), or the mandate's own agent
+// key (what `apps/agent/scripts/attack.ts` and the scenarios harness use to
+// read a mandate's task/budget before asking `/sign`).
 
 app.get("/intents/:id", (c) => {
-  const intent = getIntent(c.req.param("id"));
-  if (!intent) return c.json({ error: "intent_not_found" }, 404);
-  return c.json(serializeIntent(intent));
+  const id = c.req.param("id");
+  if (isLocalAdminRequest(c)) {
+    const intent = getIntent(id);
+    if (!intent) return c.json({ error: "intent_not_found" }, 404);
+    return c.json(serializeIntent(intent));
+  }
+
+  const sessionAuth = authenticateSession(c);
+  if (sessionAuth.ok) {
+    const intent = getIntent(id);
+    if (!intent || intent.signer.toLowerCase() !== sessionAuth.address.toLowerCase()) {
+      return c.json({ error: "intent_not_found" }, 404);
+    }
+    return c.json(serializeIntent(intent));
+  }
+
+  const agentAuth = authenticateAgent(c, id);
+  if (agentAuth.ok) return c.json(serializeIntent(agentAuth.mandate));
+
+  // Neither path accepted a credential at all -> 401; a credential that
+  // authenticates but names the wrong mandate -> 403 (authenticateAgent's
+  // own mismatch signal, same as /sign's).
+  return c.json(agentAuth.body, agentAuth.status);
 });
 
 // --- POST /intents/:id/revoke (WU13, WU-P3 owner path) ----------------------
@@ -557,22 +593,38 @@ app.post("/receipts/:id/settlement", async (c) => {
 // --- GET /approvals/:receiptId (WU11, WU-P1 auth) -----------------------------
 
 app.get("/approvals/:receiptId", (c) => {
-  // The dashboard (WU10/WU13) also polls this route to show live approval
-  // status for any receipt — as a local admin, not as the agent that owns
-  // the mandate — so it authenticates the same way it already does for
-  // pause/resume/revoke (`isLocalAdminRequest`) instead of a Bearer token.
-  // Every other caller (the agent itself) needs the mandate's own key.
-  if (!isLocalAdminRequest(c)) {
-    const auth = authenticateAgent(c);
-    if (!auth.ok) return c.json(auth.body, auth.status);
+  // The legacy plain `/dashboard` (WU10/WU13) polls this route as a local
+  // admin, not as the agent that owns the mandate — same
+  // `isLocalAdminRequest` identity it already uses for pause/resume/revoke.
+  if (isLocalAdminRequest(c)) {
     const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
     if (!approval) return c.json({ error: "approval_not_found" }, 404);
-    if (approval.intentId !== auth.mandate.id) return c.json({ error: "forbidden" }, 403);
     return c.json(approvalStatusResponse(approval));
   }
 
+  // P6: the site's `/app/dashboard` runs on a different origin, so it's never
+  // a loopback+admin request — it needs its own way in. A SIWE session reads
+  // the World ID approval card for a receipt it owns, same "own session or
+  // own agent key" split (and the same 404-on-mismatch, never a 403, to
+  // avoid confirming another owner's receipt exists) as `GET /receipts/:id`
+  // above. Every other caller (the agent itself, e.g. approvals.test.ts's
+  // callers and apps/agent's polling) still needs the mandate's own key.
+  const sessionAuth = authenticateSession(c);
+  if (sessionAuth.ok) {
+    const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
+    if (!approval) return c.json({ error: "approval_not_found" }, 404);
+    const intent = getIntent(approval.intentId);
+    if (!intent || intent.signer.toLowerCase() !== sessionAuth.address.toLowerCase()) {
+      return c.json({ error: "approval_not_found" }, 404);
+    }
+    return c.json(approvalStatusResponse(approval));
+  }
+
+  const auth = authenticateAgent(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
   const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
   if (!approval) return c.json({ error: "approval_not_found" }, 404);
+  if (approval.intentId !== auth.mandate.id) return c.json({ error: "forbidden" }, 403);
   return c.json(approvalStatusResponse(approval));
 });
 
@@ -628,6 +680,9 @@ app.get("/events", (c) => {
       void stream.writeSSE({ data: JSON.stringify(evt.payload), event: evt.event, id: evt.id });
     });
     stream.onAbort(unsubscribe);
+    // Write a first frame right away so clients see the stream open without
+    // waiting for the first 15 s heartbeat.
+    await stream.writeSSE({ event: "heartbeat", data: "", id: crypto.randomUUID() });
     while (!stream.aborted) {
       await stream.sleep(SSE_HEARTBEAT_MS);
       if (!stream.aborted) {
