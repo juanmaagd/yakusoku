@@ -17,7 +17,8 @@ const { title = SITE.name, description = SITE.description } = Astro.props;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <meta name="theme-color" content="#f6f5f4" />
+    <meta name="theme-color" content="#ffffff" />
+    <script is:inline>document.documentElement.classList.add("js");</script>
     <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="/brand/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
@@ -34,5 +35,25 @@ const { title = SITE.name, description = SITE.description } = Astro.props;
   </head>
   <body class="min-h-screen bg-canvas font-sans text-ink antialiased">
     <slot />
+    <script>
+      // Scroll reveal for [data-reveal] (styles in global.css). Content stays
+      // visible if this never runs.
+      const targets = document.querySelectorAll<HTMLElement>("[data-reveal]");
+      if (targets.length && "IntersectionObserver" in window) {
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue;
+              entry.target.classList.add("is-in");
+              io.unobserve(entry.target);
+            }
+          },
+          { rootMargin: "0px 0px -8% 0px", threshold: 0.12 },
+        );
+        targets.forEach((el) => io.observe(el));
+      } else {
+        targets.forEach((el) => el.classList.add("is-in"));
+      }
+    </script>
   </body>
 </html>

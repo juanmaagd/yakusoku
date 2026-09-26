@@ -1,34 +1,29 @@
 ---
 import { EVIDENCE, basescanTx } from "../config";
+import Arrow from "./Arrow.astro";
 
 const STATS = [
   {
+    label: "End-to-end scenarios",
     headline: "19/19",
-    body: "end-to-end scenarios pass — legit purchase, the key attack case, provenance traps, budget and expiry edges.",
+    body: "pass — legit purchase, the key attack case, provenance traps, budget and expiry edges.",
   },
   {
+    label: "Jev matches_intent, key case",
     headline: "0.02",
-    body: "Jev's matches_intent score for the key case: refused. The legitimate rehearsal purchase pays.",
+    body: "refused. The legitimate rehearsal purchase pays.",
   },
   {
+    label: "Unexplained on-chain payments",
     headline: "0",
-    body: "unexplained on-chain payments: the independent verifier found none leaving the firewall wallet without a firewall decision.",
+    body: "the independent verifier found none leaving the firewall wallet without a firewall decision.",
   },
 ] as const;
 
 const TRANSACTIONS = [
-  {
-    label: "First firewall-signed payment",
-    hash: EVIDENCE.firstFirewallSignedPayment,
-  },
-  {
-    label: "Human-signed intent → purchase, with Jev live",
-    hash: EVIDENCE.humanSignedIntentPurchase,
-  },
-  {
-    label: "World ID approval → signed payment",
-    hash: EVIDENCE.worldIdApprovedPayment,
-  },
+  { label: "First firewall-signed payment", hash: EVIDENCE.firstFirewallSignedPayment },
+  { label: "Human-signed intent → purchase, with Jev live", hash: EVIDENCE.humanSignedIntentPurchase },
+  { label: "World ID approval → signed payment", hash: EVIDENCE.worldIdApprovedPayment },
 ] as const;
 
 function truncate(hash: string): string {
@@ -36,43 +31,67 @@ function truncate(hash: string): string {
 }
 ---
 
-<section id="proof" class="px-6 md:px-10">
-  <div class="mx-auto max-w-[1200px]">
-    <div class="mx-auto max-w-[60ch] text-center">
-      <h2 class="text-heading-lg font-semibold text-ink">Proof, not claims</h2>
-      <p class="mt-4 text-body text-graphite">Testnet only — every number below is reproducible from the repo.</p>
+<section id="proof" class="band" aria-labelledby="proof-heading">
+  <div class="grid grid-cols-1 items-end gap-10 md:grid-cols-[1fr_auto]">
+    <div data-reveal>
+      <h2 id="proof-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
+        Proof, <strong>not claims.</strong>
+      </h2>
+      <p class="mt-6 max-w-[52ch] text-body-lg text-graphite">
+        Testnet only — every number below is reproducible from the repo.
+      </p>
     </div>
+    <img
+      src="/art/receipt.webp"
+      alt=""
+      width="1024"
+      height="1024"
+      loading="lazy"
+      decoding="async"
+      class="pointer-events-none mx-auto w-[200px] select-none md:-mb-4 md:w-[250px]"
+      data-reveal
+      style="--reveal-i: 1"
+    />
+  </div>
 
-    <div class="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-3">
+  <dl class="mt-12 grid grid-cols-1 border-y border-hairline sm:grid-cols-3">
+    {
+      STATS.map((stat, i) => (
+        <div
+          class="border-hairline py-7 sm:px-6 sm:first:pl-0 sm:last:pr-0 max-sm:[&:not(:first-child)]:border-t sm:[&:not(:first-child)]:border-l"
+          data-reveal
+          style={`--reveal-i: ${i}`}
+        >
+          <dt class="label text-graphite">{stat.label}</dt>
+          <dd class="mt-3">
+            <span class="block text-[48px] leading-none font-medium tracking-[-0.03em] text-ink tabular-nums">{stat.headline}</span>
+            <span class="mt-3 block max-w-[34ch] text-body-sm text-graphite">{stat.body}</span>
+          </dd>
+        </div>
+      ))
+    }
+  </dl>
+
+  <div class="mt-10" data-reveal>
+    <p class="label text-graphite">Real transactions · Base Sepolia</p>
+    <ul class="mt-4 divide-y divide-hairline border-y border-hairline">
       {
-        STATS.map((stat) => (
-          <div class="rounded-card border border-black/[0.08] bg-surface p-6">
-            <p class="text-display-sm font-semibold text-primary">{stat.headline}</p>
-            <p class="mt-3 text-body-sm text-slate">{stat.body}</p>
-          </div>
+        TRANSACTIONS.map((tx) => (
+          <li class="flex flex-col gap-1 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+            <span class="text-body-sm text-ink">{tx.label}</span>
+            <a
+              href={basescanTx(tx.hash)}
+              target="_blank"
+              rel="noreferrer"
+              class="inline-flex items-center gap-2 font-mono text-caption text-ink underline decoration-hairline-strong decoration-1 underline-offset-4 transition-colors duration-200 ease-out hover:decoration-ink"
+            >
+              {truncate(tx.hash)}
+              <Arrow dir="up-right" />
+              <span class="sr-only">View on Basescan</span>
+            </a>
+          </li>
         ))
       }
-    </div>
-
-    <div class="mt-5 rounded-card border border-black/[0.08] bg-surface p-6">
-      <h3 class="text-body-sm font-medium text-stone">Real transactions, {"Base Sepolia"}</h3>
-      <ul class="mt-4 divide-y divide-black/[0.08]">
-        {
-          TRANSACTIONS.map((tx) => (
-            <li class="flex flex-col gap-1 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <span class="text-body-sm font-medium text-ink">{tx.label}</span>
-              <a
-                href={basescanTx(tx.hash)}
-                target="_blank"
-                rel="noreferrer"
-                class="font-mono text-body-sm text-primary underline decoration-1 underline-offset-4 hover:opacity-80"
-              >
-                {truncate(tx.hash)} ↗
-              </a>
-            </li>
-          ))
-        }
-      </ul>
-    </div>
+    </ul>
   </div>
 </section>

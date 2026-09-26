@@ -32,12 +32,13 @@ Existing guards are deterministic (spend caps, allow/deny lists, network/asset c
 - Testnet only; no mainnet funds. Control endpoints are localhost-guarded, not authenticated.
 - The key-case attack in the demo is a disclosed scripted compromised agent (`bun run attack`), because current LLMs are not fooled on cue.
 - Intercepta live screening pending the sandbox key; without it every payment escalates to World ID.
-- **Product name: "Omamorisan"** (decided Sat Sep 26, "for now"; may still change). Replaces the working name "Yakusoku". User-facing surfaces (site, dashboard, EIP-712 signing domain, agent output, README) use it; internal identifiers (package scope `@yakusoku/*`, repo and folder name) stay until the name is final. No logo or brand assets yet.
+- **Product name: "Omamorisan"** (decided Sat Sep 26, "for now"; may still change). Replaces the working name "Yakusoku". User-facing surfaces (site, dashboard, EIP-712 signing domain, agent output, README) use it; internal identifiers (package scope `@yakusoku/*`, repo and folder name) stay until the name is final. Logo: a pen nib with a checkmark ("signed, then verified"), see `apps/site/BRAND.md`.
 
 ## Brand Commitments
 - Name: Omamorisan (working name, may change).
-- **No Japanese aesthetic**, even though the name is Japanese: no kanji, torii, washi, seals, vermilion-as-Japan, cherry blossoms or similar motifs. The visual language is the warm paper-notebook reference in DESIGN.md.
-- No logo yet; never invent one that implies an existing brand.
+- **No Japanese aesthetic**, even though the name is Japanese: no kanji, torii, washi, seals, vermilion-as-Japan, cherry blossoms or similar motifs.
+- **Visual world (decided Sat Sep 26, replaces the warm paper-notebook reference):** sober, modern, security-grade. The builder pinned three reference products as the craft bar: clutch.security (leads: white gallery canvas, hairline-framed column, mixed-weight grotesk headlines, monochrome dithered 3D objects), base.org (technical line diagrams, mono uppercase labels) and neverhack.com (split hero with the live product, trust/evidence rows). Borrow grammar only: never their logos, fonts, exact brand colors or copy. Color is rationed and means state. DESIGN.md records the built system.
+- Use only the existing pen-nib + check mark; never invent another mark or one that implies an existing brand.
 
 ## Evidence on Hand
 All verified, nothing else may be claimed:

@@ -1,0 +1,24 @@
+---
+// One stroke weight for every directional glyph on the site.
+interface Props {
+  dir?: "right" | "up-right";
+  class?: string;
+}
+
+const { dir = "right", class: className = "" } = Astro.props;
+---
+
+<svg
+  viewBox="0 0 16 16"
+  fill="none"
+  aria-hidden="true"
+  class:list={["inline-block h-[0.9em] w-[0.9em] shrink-0", className]}
+>
+  {
+    dir === "right" ? (
+      <path d="M2.5 8h10.5M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+    ) : (
+      <path d="M4.5 11.5l7-7M5.5 4.5h6v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+    )
+  }
+</svg>

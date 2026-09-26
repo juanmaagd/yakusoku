@@ -2,16 +2,16 @@
 import { SITE } from "../config";
 
 const links = [
-  { href: "#how-it-works", label: "How it works" },
-  { href: "#proof", label: "Proof" },
-  { href: "#developers", label: "Developers" },
+  { href: "/#how-it-works", label: "How it works" },
+  { href: "/#proof", label: "Proof" },
+  { href: "/#developers", label: "Developers" },
   { href: SITE.githubUrl, label: "GitHub", external: true },
 ];
 ---
 
-<header class="sticky top-0 z-50 h-16 border-b border-black/[0.08] bg-canvas shadow-nav">
-  <div class="mx-auto grid h-16 max-w-[1440px] grid-cols-[auto_1fr_auto] items-center gap-4 px-6 md:px-10">
-    <a href="/" class="flex items-center" aria-label={SITE.name}>
+<header class="sticky top-0 z-50 border-b border-hairline bg-canvas">
+  <div class="mx-auto grid h-16 max-w-[1200px] grid-cols-[auto_1fr_auto] items-center gap-4 px-6 md:px-8">
+    <a href="/" class="flex items-center" aria-label={`${SITE.name} home`}>
       <img src="/brand/logo.svg" alt={SITE.name} width="116" height="24" class="h-6 w-auto" />
     </a>
 
@@ -24,7 +24,7 @@ const links = [
                 href={link.href}
                 target={link.external ? "_blank" : undefined}
                 rel={link.external ? "noreferrer" : undefined}
-                class="text-body-sm font-medium text-ink/54 transition-colors duration-200 ease-out hover:text-ink"
+                class="text-body-sm text-graphite transition-colors duration-200 ease-out hover:text-ink"
               >
                 {link.label}
               </a>
@@ -35,12 +35,7 @@ const links = [
     </nav>
 
     <div class="flex justify-end">
-      <a
-        href={SITE.appRoute}
-        class="rounded-btn bg-primary px-[15px] py-[6px] text-body-sm font-medium text-white transition-opacity duration-200 ease-out hover:opacity-90"
-      >
-        Launch app
-      </a>
+      <a href={SITE.appRoute} class="btn btn-primary">Launch app</a>
     </div>
   </div>
 </header>

@@ -1,88 +1,95 @@
 @import "tailwindcss";
 
 /* Self-hosted variable fonts (no external font requests). */
-@import "@fontsource-variable/inter";
-@import "@fontsource-variable/source-serif-4";
+@import "@fontsource-variable/mona-sans/standard.css";
+@import "@fontsource-variable/martian-mono/standard.css";
 
 @theme {
-  /* --- Colors (DESIGN.md "Implementation token mapping") --- */
-  --color-primary: #0075de;
-  --color-canvas: #f6f5f4;
+  /* --- Neutrals --- */
+  --color-canvas: #ffffff;
   --color-surface: #ffffff;
-  --color-ink: #000000;
-  --color-charcoal: #111111;
-  --color-stone: #757575;
-  --color-graphite: #615d59;
-  --color-slate: #696969;
-  --color-sky-tint: #e6f3fe;
-  --color-marigold: #ffb110;
-  --color-coral: #f64932;
-  --color-saffron: #e89d01;
-  --color-vermillion: #e32d14;
-  --color-mocha: #b18164;
-  --color-signal: #097fe8;
-  --color-sky: #62aef0;
-  --color-midnight: #02093a;
+  --color-fog: #f7f8fa;
+  --color-ink: #0b0d12;
+  --color-charcoal: #1a1d24;
+  --color-graphite: #5b606b;
+  --color-slate: #5b606b;
+  --color-stone: #8a8f99;
+  --color-hairline: #e6e8ec;
+  --color-hairline-strong: #d5d8de;
+
+  /* --- State colors: only ever mean a firewall state --- */
+  --color-verified: #1f5bff;
+  --color-verified-wash: #eaf0ff;
+  --color-refuse: #e5372a;
+  --color-refuse-wash: #fdeceb;
+  --color-refuse-ink: #b4231a; /* small text on white or wash (AA) */
+  --color-ask: #b87400;
+  --color-ask-wash: #fff4dc;
+  --color-ask-ink: #85530a; /* small text on white or wash (AA) */
+
+  /* Compatibility aliases used by /app. */
+  --color-primary: #1f5bff;
+  --color-sky-tint: #eaf0ff;
+  --color-sky: #8fb0ff;
+  --color-vermillion: #e5372a;
 
   /* --- Fonts --- */
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "Source Serif 4 Variable", ui-serif, Georgia, serif;
+  --font-sans: "Mona Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Martian Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* --- Type scale (DESIGN.md "Tokens — Typography") --- */
+  /* --- Type scale --- */
+  --text-label: 11px;
+  --text-label--line-height: 1.4;
+  --text-label--letter-spacing: 0.12em;
+
   --text-caption: 12px;
-  --text-caption--line-height: 1.33;
-  --text-caption--letter-spacing: 0.12px;
+  --text-caption--line-height: 1.4;
 
   --text-body-sm: 14px;
-  --text-body-sm--line-height: 1.43;
+  --text-body-sm--line-height: 1.5;
 
   --text-body: 16px;
-  --text-body--line-height: 1.5;
+  --text-body--line-height: 1.55;
+
+  --text-body-lg: 18px;
+  --text-body-lg--line-height: 1.55;
 
   --text-subheading: 20px;
   --text-subheading--line-height: 1.4;
 
-  --text-heading-sm: 22px;
-  --text-heading-sm--line-height: 1.27;
-  --text-heading-sm--letter-spacing: -0.242px;
+  --text-heading-sm: 24px;
+  --text-heading-sm--line-height: 1.25;
+  --text-heading-sm--letter-spacing: -0.01em;
 
-  --text-heading: 40px;
-  --text-heading--line-height: 1.15;
-  --text-heading--letter-spacing: -0.8px;
+  --text-heading: 38px;
+  --text-heading--line-height: 1.12;
+  --text-heading--letter-spacing: -0.015em;
 
-  --text-heading-lg: 48px;
-  --text-heading-lg--line-height: 1.1;
-  --text-heading-lg--letter-spacing: -1.2px;
+  --text-heading-lg: 52px;
+  --text-heading-lg--line-height: 1.06;
+  --text-heading-lg--letter-spacing: -0.02em;
 
-  --text-display-sm: 54px;
-  --text-display-sm--line-height: 1.04;
-  --text-display-sm--letter-spacing: -1.89px;
+  --text-display: 68px;
+  --text-display--line-height: 1.04;
+  --text-display--letter-spacing: -0.02em;
 
-  --text-display: 72px;
-  --text-display--line-height: 1.21;
-  --text-display--letter-spacing: -2.016px;
-
-  --text-display-lg: 96px;
-  --text-display-lg--line-height: 1.04;
-  --text-display-lg--letter-spacing: -4.608px;
-
-  /* --- Radii (DESIGN.md "Tokens — Spacing & Shapes") --- */
-  --radius-card: 12px;
-  --radius-btn: 8px;
+  /* --- Radii --- */
+  --radius-card: 6px;
+  --radius-btn: 6px;
   --radius-sm: 4px;
 
-  /* --- Shadows (DESIGN.md "Surfaces and elevation") --- */
-  --shadow-nav: 0px 0.7px 1.462px 0px rgba(0, 0, 0, 0.015), 0px 3px 9px 0px rgba(0, 0, 0, 0.03);
-  --shadow-mockup: 0px 4px 12px rgba(0, 0, 0, 0.1);
+  /* --- Elevation: only the hero verdict console carries one --- */
+  --shadow-console: 0 30px 60px -30px rgba(11, 13, 18, 0.28), 0 2px 6px rgba(11, 13, 18, 0.06);
 
   /* --- Motion --- */
-  --ease-notebook: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-soft: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
 @layer base {
   html {
-    scrollbar-color: rgba(0, 0, 0, 0.22) transparent;
+    scrollbar-color: rgba(11, 13, 18, 0.22) transparent;
     -webkit-text-size-adjust: 100%;
+    scroll-padding-top: 80px;
   }
 
   body {
@@ -91,16 +98,16 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
-    font-feature-settings: "lnum";
+    font-feature-settings: "tnum" 0;
   }
 
   ::selection {
-    background-color: var(--color-primary);
+    background-color: var(--color-ink);
     color: var(--color-surface);
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-primary);
+    outline: 2px solid var(--color-verified);
     outline-offset: 2px;
     border-radius: 2px;
   }
@@ -119,13 +126,101 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background-color: rgba(0, 0, 0, 0.2);
+    background-color: rgba(11, 13, 18, 0.18);
     border-radius: 9999px;
     border: 3px solid var(--color-canvas);
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(0, 0, 0, 0.32);
+    background-color: rgba(11, 13, 18, 0.3);
+  }
+}
+
+@layer components {
+  /* Uppercase mono label for data and metadata. */
+  .label {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    line-height: var(--text-label--line-height);
+    letter-spacing: var(--text-label--letter-spacing);
+    font-stretch: 90%;
+    font-weight: 400;
+    text-transform: uppercase;
+  }
+
+  /* Mixed-weight headlines: the sentence sits at 400, key words at 600. */
+  .headline {
+    font-weight: 400;
+    text-wrap: balance;
+  }
+  .headline strong {
+    font-weight: 600;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: var(--radius-btn);
+    padding: 10px 18px;
+    font-size: var(--text-body-sm);
+    line-height: 1.2;
+    font-weight: 500;
+    transition:
+      background-color 200ms var(--ease-out-soft),
+      border-color 200ms var(--ease-out-soft),
+      color 200ms var(--ease-out-soft);
+  }
+  .btn-primary {
+    background-color: var(--color-ink);
+    color: var(--color-surface);
+  }
+  .btn-primary:hover {
+    background-color: var(--color-charcoal);
+  }
+  .btn-outline {
+    border: 1px solid var(--color-ink);
+    color: var(--color-ink);
+  }
+  .btn-outline:hover {
+    background-color: var(--color-fog);
+  }
+  .btn .arrow {
+    transition: transform 200ms var(--ease-out-soft);
+  }
+  .btn:hover .arrow {
+    transform: translateX(3px);
+  }
+
+  /* Blueprint frame: the landing lives in one railed column. */
+  .frame {
+    margin-inline: auto;
+    max-width: 1200px;
+    border-inline: 1px solid var(--color-hairline);
+  }
+  .band {
+    border-top: 1px solid var(--color-hairline);
+    padding: 64px 24px;
+  }
+  @media (min-width: 768px) {
+    .band {
+      padding: 96px 64px;
+    }
+  }
+
+  /* Scroll reveal: progressive enhancement, content is visible without JS. */
+  .js [data-reveal] {
+    opacity: 0;
+    transform: translateY(12px);
+    transition:
+      opacity 450ms var(--ease-out-soft),
+      transform 450ms var(--ease-out-soft);
+    transition-delay: calc(var(--reveal-i, 0) * 70ms);
+  }
+  .js [data-reveal].is-in {
+    opacity: 1;
+    transform: none;
   }
 }
 
@@ -137,5 +232,9 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  .js [data-reveal] {
+    opacity: 1;
+    transform: none;
   }
 }

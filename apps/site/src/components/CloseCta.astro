@@ -2,16 +2,29 @@
 import { SITE } from "../config";
 ---
 
-<section class="px-6 pb-20 md:px-10">
-  <div class="mx-auto max-w-[1200px] rounded-card bg-sky-tint px-8 py-14 text-center md:py-16">
-    <h2 class="text-heading-lg font-semibold text-ink">Give your agent a budget, not your keys.</h2>
-    <div class="mt-8 flex justify-center">
-      <a
-        href={SITE.appRoute}
-        class="rounded-btn bg-primary px-[15px] py-[6px] text-body-sm font-medium text-white transition-opacity duration-200 ease-out hover:opacity-90"
-      >
-        Launch app
-      </a>
+<section class="band text-center" aria-labelledby="close-heading">
+  <div data-reveal>
+    <h2 id="close-heading" class="headline mx-auto max-w-[18ch] text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
+      Give your agent a budget, <strong>not your keys.</strong>
+    </h2>
+    <div class="mt-9 flex justify-center">
+      <a href={SITE.appRoute} class="btn btn-primary">Launch app</a>
     </div>
   </div>
 </section>
+
+<div class="overflow-hidden border-t border-hairline" aria-hidden="true">
+  <p class="wordmark select-none text-center">{SITE.name.toLowerCase()}</p>
+</div>
+
+<style>
+  .wordmark {
+    font-size: clamp(40px, 14vw, 184px);
+    font-weight: 600;
+    font-stretch: 110%;
+    letter-spacing: -0.04em;
+    line-height: 0.78;
+    color: #eef0f3;
+    transform: translateY(14%);
+  }
+</style>

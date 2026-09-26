@@ -19,28 +19,107 @@ Authorization: Bearer <agentKey>
 
 → 200 { "receiptId": "...", "decision": "pay", "paymentSignatureHeader": "..." }
    or  { "decision": "refuse", "reason": "..." } — never a partial signature.`;
+
+const FLOW = [
+  {
+    art: "/art/intent.webp",
+    name: "You",
+    text: "Sign a mandate once with your wallet: budget, category, expiry.",
+  },
+  {
+    art: "/art/agent.webp",
+    name: "Your agent",
+    text: "Authenticates with a scoped credential that can only ever ask the firewall to sign.",
+  },
+  {
+    art: "/brand/mark.svg",
+    name: "The firewall",
+    text: "Checks the payment against the mandate you signed, then signs or refuses.",
+  },
+  {
+    art: "/art/terminal.webp",
+    name: "The store",
+    text: "Gets an x402 payment signature only after a pay decision.",
+  },
+] as const;
+
+const PANELS = [
+  { title: "1. Create a mandate", code: CREATE_MANDATE },
+  { title: "2. The agent asks the firewall to sign", code: AGENT_SIGN },
+] as const;
 ---
 
-<section id="developers" class="px-6 md:px-10">
-  <div class="mx-auto max-w-[1200px]">
-    <div class="mx-auto max-w-[60ch] text-center">
-      <h2 class="text-heading-lg font-semibold text-ink">Your agent never gets a key.</h2>
-      <p class="mt-4 text-body text-graphite">
+<section id="developers" class="band" aria-labelledby="dev-heading">
+  <div class="grid grid-cols-1 items-end gap-10 md:grid-cols-[1fr_auto]">
+    <div data-reveal>
+      <h2 id="dev-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
+        Your agent <strong>never gets a key.</strong>
+      </h2>
+      <p class="mt-6 max-w-[54ch] text-body-lg text-graphite">
         The human signs a mandate once. The agent authenticates with a scoped credential that can only ever ask the
         firewall to sign — it can't move funds on its own.
       </p>
     </div>
+    <img
+      src="/art/plug.webp"
+      alt=""
+      width="1024"
+      height="1024"
+      loading="lazy"
+      decoding="async"
+      class="pointer-events-none mx-auto w-[200px] select-none md:-mb-4 md:w-[250px]"
+      data-reveal
+      style="--reveal-i: 1"
+    />
+  </div>
 
-    <div class="mt-12 grid grid-cols-1 gap-5 lg:grid-cols-2">
-      <div class="rounded-card border border-black/[0.08] bg-surface p-6">
-        <h3 class="text-body-sm font-medium text-stone">1. Create a mandate</h3>
-        <pre class="mt-4 overflow-x-auto rounded-sm bg-midnight p-4 font-mono text-body-sm leading-[1.6] text-white/90"><code>{CREATE_MANDATE}</code></pre>
-      </div>
+  <ol class="mt-12 grid grid-cols-1 overflow-hidden rounded-card border border-hairline sm:grid-cols-2 lg:grid-cols-4">
+    {
+      FLOW.map((step, i) => (
+        <li
+          class="flow-step relative flex items-start gap-4 border-hairline px-5 py-5 max-sm:[&:not(:first-child)]:border-t sm:max-lg:[&:nth-child(n+3)]:border-t sm:max-lg:[&:nth-child(even)]:border-l lg:flex-col lg:gap-3 lg:[&:not(:first-child)]:border-l"
+          data-reveal
+          style={`--reveal-i: ${i}`}
+        >
+          <img
+            src={step.art}
+            alt=""
+            width="1024"
+            height="1024"
+            loading="lazy"
+            decoding="async"
+            class:list={["shrink-0 select-none", step.art.endsWith(".svg") ? "h-16 w-16 p-3 lg:h-24 lg:w-24 lg:p-6" : "h-16 w-16 lg:h-24 lg:w-24"]}
+          />
+          <div>
+            <p class="text-body font-semibold text-ink">{step.name}</p>
+            <p class="mt-1 text-body-sm text-graphite">{step.text}</p>
+          </div>
+        </li>
+      ))
+    }
+  </ol>
 
-      <div class="rounded-card border border-black/[0.08] bg-surface p-6">
-        <h3 class="text-body-sm font-medium text-stone">2. The agent asks the firewall to sign</h3>
-        <pre class="mt-4 overflow-x-auto rounded-sm bg-midnight p-4 font-mono text-body-sm leading-[1.6] text-white/90"><code>{AGENT_SIGN}</code></pre>
-      </div>
-    </div>
+  <div class="mt-6 grid grid-cols-1 gap-6">
+    {
+      PANELS.map((panel, i) => (
+        <figure class="min-w-0 overflow-hidden rounded-card bg-ink" data-reveal style={`--reveal-i: ${i}`}>
+          <figcaption class="flex items-center justify-between border-b border-white/10 px-5 py-3">
+            <span class="text-body-sm font-medium text-white">{panel.title}</span>
+            <span class="label text-white/60">http</span>
+          </figcaption>
+          <pre class="code overflow-x-auto px-5 py-4 text-white/90"><code>{panel.code}</code></pre>
+        </figure>
+      ))
+    }
   </div>
 </section>
+
+<style>
+  .code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-stretch: 87.5%;
+    line-height: 1.7;
+    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  }
+</style>
