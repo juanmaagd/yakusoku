@@ -292,6 +292,44 @@ export async function resumeOwnerSigning(sessionToken: string): Promise<OwnerCon
   return ownerScopedJson<OwnerControlState>("/me/resume", sessionToken, { method: "POST" });
 }
 
+// --- Connect your agent / Settings (apps/firewall/index.ts's /owner/agent-key*,
+// K1) ---------------------------------------------------------------------
+// A minted key is an ordinary account key (`ya_...`) — the same kind
+// `POST /connect/poll` issues — so it authenticates the hosted MCP exactly
+// like any other account credential. These calls only manage the mint/list/
+// revoke lifecycle from the owner's own session.
+
+export interface AgentKeySummary {
+  /** Non-reversible fingerprint, never the key material (apps/firewall/store.ts). */
+  id: string;
+  label?: string;
+  createdAt: string;
+  revoked: boolean;
+}
+
+export async function listAgentKeys(sessionToken: string): Promise<AgentKeySummary[]> {
+  return ownerScopedJson<AgentKeySummary[]>("/owner/agent-keys", sessionToken);
+}
+
+export interface CreatedAgentKey {
+  /** Shown exactly once — never fetched again after this response. */
+  agentKey: string;
+  accountId: string;
+  smartAccount?: Address;
+}
+
+export async function createAgentKey(sessionToken: string, label?: string): Promise<CreatedAgentKey> {
+  return ownerScopedJson<CreatedAgentKey>("/owner/agent-key", sessionToken, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(label ? { label } : {}),
+  });
+}
+
+export async function revokeAgentKey(sessionToken: string, id: string): Promise<{ id: string; revoked: boolean }> {
+  return ownerScopedJson(`/owner/agent-keys/${encodeURIComponent(id)}/revoke`, sessionToken, { method: "POST" });
+}
+
 /** `GET /events?session=...` (apps/firewall/index.ts) — `EventSource` can't
  * send an `Authorization` header, so the session rides the query string,
  * same as the firewall's own admin `?admin=1` stream. */

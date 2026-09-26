@@ -4,23 +4,12 @@ import type { SseConnectionStatus } from "../lib/sse";
 import { useWalletSession } from "../lib/useWalletSession";
 import AccountView from "./account/AccountView";
 import PromisesView, { PromisesSkeleton } from "./app/PromisesView";
+import SettingsView from "./app/SettingsView";
 import SignInGate from "./app/SignInGate";
 import LiveView, { LiveSkeleton } from "./dashboard/LiveView";
 import AppShell from "./ui/AppShell";
 
-type View = "promises" | "live" | "account";
-
-function routeFor(view: View): string {
-  if (view === "live") return SITE.dashboardRoute;
-  if (view === "account") return SITE.accountRoute;
-  return SITE.appRoute;
-}
-
-function viewForPathname(pathname: string): View {
-  if (pathname === SITE.dashboardRoute) return "live";
-  if (pathname === SITE.accountRoute) return "account";
-  return "promises";
-}
+type View = "promises" | "live" | "account" | "settings";
 
 interface LiveFilterRequest {
   id: string | undefined;
@@ -28,10 +17,10 @@ interface LiveFilterRequest {
 }
 
 interface AppRootProps {
-  /** Which tab the current document was rendered for (`/app`, `/app/dashboard`
-   * or `/app/account`) — also this island's server-rendered and first-client
-   * render, so hydration matches exactly (see `app.astro` / `dashboard.astro`
-   * / `account.astro`). */
+  /** Which tab the current document was rendered for (`/app`, `/app/dashboard`,
+   * `/app/account` or `/app/settings`) — also this island's server-rendered and
+   * first-client render, so hydration matches exactly (see `app.astro` /
+   * `dashboard.astro` / `account.astro` / `settings.astro`). */
   initialView: View;
   /** Dev-mode absolute path to `apps/mcp/index.ts`, forwarded to the key
    * handoff's local MCP config snippet. Only ever set on `/app`. */
@@ -79,7 +68,7 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
   const navToken = useRef(0);
 
   const goTo = useCallback((next: View, targetUrl?: string) => {
-    const url = new URL(targetUrl ?? routeFor(next), window.location.origin);
+    const url = new URL(targetUrl ?? routeForView(next), window.location.origin);
     const target = url.pathname + url.search;
     const current = window.location.pathname + window.location.search;
     if (target !== current) window.history.pushState({ view: next }, "", target);
@@ -109,10 +98,11 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
   }, []);
 
   // One delegated click listener stands in for per-component navigation:
-  // any in-app <a href="/app"> / <a href="/app/dashboard[?promise=...]">
-  // anywhere in the tree — AppShell's tabs, PromiseList's "Watch live"
-  // cards, Live's empty-state links — becomes a view flip instead of a
-  // document load, without changing any of those components.
+  // any in-app <a href="/app"> / <a href="/app/dashboard[?promise=...]"> /
+  // <a href="/app/settings"> anywhere in the tree — AppShell's tabs,
+  // PromiseList's "Watch live"/"Connect your agent" links, Live's empty-state
+  // links — becomes a view flip instead of a document load, without changing
+  // any of those components.
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -136,6 +126,9 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
       } else if (url.pathname === SITE.accountRoute) {
         e.preventDefault();
         goTo("account", url.pathname + url.search);
+      } else if (url.pathname === SITE.settingsRoute) {
+        e.preventDefault();
+        goTo("settings", url.pathname + url.search);
       }
     }
     document.addEventListener("click", onClick);
@@ -143,7 +136,7 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
   }, [goTo]);
 
   useEffect(() => {
-    document.title = view === "live" ? `Live — ${SITE.name}` : view === "account" ? `Account — ${SITE.name}` : `Intents — ${SITE.name}`;
+    document.title = `${viewTitle(view)} — ${SITE.name}`;
   }, [view]);
 
   const openLive = useCallback(() => goTo("live"), [goTo]);
@@ -179,6 +172,11 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
               <AccountView key={session.stage.sessionToken} sessionToken={session.stage.sessionToken} onUnauthorized={session.handleUnauthorized} />
             )}
           </div>
+          <div hidden={view !== "settings"}>
+            {visited.has("settings") && (
+              <SettingsView key={session.stage.sessionToken} sessionToken={session.stage.sessionToken} onUnauthorized={session.handleUnauthorized} />
+            )}
+          </div>
         </>
       ) : session.stage.kind === "checking" ? (
         view === "live" ? (
@@ -191,4 +189,25 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
       )}
     </AppShell>
   );
+}
+
+function routeForView(view: View): string {
+  if (view === "live") return SITE.dashboardRoute;
+  if (view === "account") return SITE.accountRoute;
+  if (view === "settings") return SITE.settingsRoute;
+  return SITE.appRoute;
+}
+
+function viewForPathname(pathname: string): View {
+  if (pathname === SITE.dashboardRoute) return "live";
+  if (pathname === SITE.accountRoute) return "account";
+  if (pathname === SITE.settingsRoute) return "settings";
+  return "promises";
+}
+
+function viewTitle(view: View): string {
+  if (view === "live") return "Live";
+  if (view === "account") return "Account";
+  if (view === "settings") return "Settings";
+  return "Intents";
 }

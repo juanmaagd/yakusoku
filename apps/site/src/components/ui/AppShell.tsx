@@ -25,7 +25,7 @@ export function useOwnerControl(): OwnerControl | undefined {
   return useContext(OwnerControlContext);
 }
 
-type Section = "promises" | "live" | "account";
+type Section = "promises" | "live" | "account" | "settings";
 
 interface AppShellProps {
   active: Section;
@@ -130,6 +130,7 @@ function Tabs({ active, liveStatus }: { active: Section; liveStatus?: SseConnect
     { id: "promises", label: "Intents", href: SITE.appRoute },
     { id: "live", label: "Live", href: SITE.dashboardRoute },
     { id: "account", label: "Account", href: SITE.accountRoute },
+    { id: "settings", label: "Settings", href: SITE.settingsRoute },
   ];
   return (
     <ul className="flex h-full items-stretch gap-6">

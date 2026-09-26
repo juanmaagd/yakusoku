@@ -83,6 +83,10 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
           <p className="mt-2 text-body text-graphite">
             What your agent may buy, with how much, until when. Enforced before every payment.
           </p>
+          <a href={SITE.settingsRoute} className={`${textButton} mt-3`}>
+            Connect your agent
+            <IconArrowRight size={14} />
+          </a>
         </div>
         {hasPromises && (
           <button type="button" onClick={onNew} className={primaryButton}>

@@ -15,6 +15,9 @@ export const SITE = {
    * owner's ordinary SIWE session instead of only through the agent's
    * 30-minute `/setup` link. */
   accountRoute: "/app/account",
+  /** Where an owner manages hosted-MCP agent keys (K1/Settings): mint, label,
+   * list and revoke — separate from the one-time wallet-mandate handoff. */
+  settingsRoute: "/app/settings",
   /** The one-time, agent-issued link that links a wallet as the owner of a
    * per-user `OmamorisanAccount` (P11.4). The agent appends `?token=...`. */
   setupRoute: "/setup",
