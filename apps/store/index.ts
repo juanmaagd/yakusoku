@@ -115,6 +115,22 @@ const httpServer = new x402HTTPResourceServer(resourceServer, {
 
 const app = express();
 
+// T1 request log (odd/tasks/dokploy-deploy.md) — no logging framework here
+// (express, not Hono), so a tiny equivalent: method, path, status and ms, to
+// stdout, one line per request. Registered first so it wraps every route
+// below, including the x402 payment middleware.
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - start}ms`);
+  });
+  next();
+});
+
+app.get("/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
 app.get("/catalog", (_req, res) => {
   res.json({ products: CATALOG });
 });

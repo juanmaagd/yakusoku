@@ -95,6 +95,12 @@ async function fetchMerchantRequirement(resourceUrl: string): Promise<MerchantFe
       signal: AbortSignal.timeout(SELF_FETCH_TIMEOUT_MS),
     });
   } catch (err) {
+    // T1 fix (odd/tasks/dokploy-deploy.md) — this used to fail silently: the
+    // `merchant_unreachable` reason reaches the receipt, but nothing told an
+    // operator watching stdout that the firewall's OWN self-fetch (not the
+    // agent's) just failed — the exact signal you'd want first when, say, a
+    // deploy's internal networking is misconfigured (T3's networking note).
+    console.error(`[firewall] merchant self-fetch failed for ${originResult.origin}:`, err instanceof Error ? err.message : String(err));
     return { ok: false, reason: "merchant_unreachable", detail: `fetch failed: ${err instanceof Error ? err.message : String(err)}` };
   }
   // Headers only — never read or trust the body, and never hold the

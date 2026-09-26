@@ -5,6 +5,7 @@
 
 import { Hono, type Context, type Next } from "hono";
 import { cors } from "hono/cors";
+import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
 import { getConnInfo } from "hono/bun";
 import { z } from "zod";
@@ -62,6 +63,15 @@ const PORT = Number(process.env.PORT) || 4001;
 const SSE_HEARTBEAT_MS = 15_000;
 
 const app = new Hono();
+
+// --- T1 request log + health (odd/tasks/dokploy-deploy.md) ------------------
+// `hono/logger` prints two lines per request ("<-- METHOD path" then
+// "--> METHOD path status Nms") to stdout — method, path, status and ms, as
+// requested. Registered first so it wraps every route below, including CORS
+// preflights and the SSE stream.
+app.use(logger());
+
+app.get("/health", (c) => c.json({ ok: true }));
 
 // --- CORS (WU-P3) ------------------------------------------------------------
 // The site (a separate origin) needs the Authorization header for session
@@ -714,6 +724,40 @@ app.get("/mandate", (c) => {
   });
 });
 
+// --- T1 one-line decision summary (odd/tasks/dokploy-deploy.md) -------------
+// A receipt's own `reasons`/`timeline` already carry the full detail (WU9),
+// but an operator tailing stdout during a team test shouldn't have to open
+// the dashboard or fetch a receipt just to see what a `/sign` call decided —
+// this maps the receipt's final `state` to the pipeline stage that actually
+// decided it, one line, no secrets, no full payloads.
+const STAGE_BY_RECEIPT_STATE: Partial<Record<DecisionReceipt["state"], string>> = {
+  idempotent_hit: "idempotency",
+  policy_rejected: "policy",
+  merchant_blocked: "merchant",
+  provenance_blocked: "provenance",
+  intercepta_blocked: "intercepta",
+  intercepta_escalated: "intercepta",
+  jev_refused: "jev",
+  jev_ask_human: "jev",
+  awaiting_world_id: "world_id",
+  world_id_denied: "world_id",
+  world_id_expired: "world_id",
+  paused: "control",
+  sign_failed: "sign",
+  signed: "sign",
+  settled: "sign",
+  settlement_failed: "sign",
+  error: "pipeline",
+};
+
+function truncateReason(reason: string, max = 160): string {
+  return reason.length > max ? `${reason.slice(0, max)}…` : reason;
+}
+
+function logSignDecision(receiptId: string, verdict: string, reason: string, stage: string): void {
+  console.log(`[sign] receiptId=${receiptId} verdict=${verdict} stage=${stage} reason="${truncateReason(reason)}"`);
+}
+
 // --- POST /sign --------------------------------------------------------------
 
 const signRequestSchema = z
@@ -794,13 +838,13 @@ app.post("/sign", async (c) => {
       }
       publish("decision", receipt);
     }
+    logSignDecision(outcome.receiptId, outcome.verdict, outcome.reason, (receipt && STAGE_BY_RECEIPT_STATE[receipt.state]) ?? "unknown");
     return c.json(outcome);
   } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
     console.error("sign pipeline error", err);
-    return c.json(
-      { verdict: "refuse", reason: err instanceof Error ? err.message : String(err), receiptId: "unavailable" },
-      200,
-    );
+    logSignDecision("unavailable", "refuse", reason, "pipeline_error");
+    return c.json({ verdict: "refuse", reason, receiptId: "unavailable" }, 200);
   }
 });
 
