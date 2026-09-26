@@ -33,8 +33,16 @@ process.env.FIREWALL_PRIVATE_KEY ??= `0x${"22".repeat(32)}`;
 const FIREWALL_KEY = process.env.FIREWALL_PRIVATE_KEY as `0x${string}`;
 const EXPECTED_SIGNER = privateKeyToAccount(FIREWALL_KEY).address;
 
-const { createIntent, createPromise, findOrCreateAccountBySubjectHash, getPromise, getReceipt, savePendingApproval, setAccountDeployment } =
-  await import("./store");
+const {
+  createIntent,
+  createPromise,
+  findOrCreateAccountBySubjectHash,
+  getCachedSignOutcome,
+  getPromise,
+  getReceipt,
+  savePendingApproval,
+  setAccountDeployment,
+} = await import("./store");
 const { finalize } = await import("./receipts");
 const { settleApproved, settleRefused } = await import("./approvals");
 
@@ -150,6 +158,22 @@ describe("settleApproved — StepUp attestation attachment (WU12)", () => {
     const receipt = getReceipt(receiptId);
     expect(receipt?.worldId?.attestation?.message.acr).toBe("https://world.org/oidc/acr/orb-v3");
   });
+});
+
+describe("settleRefused — only a human \"no\" is cached for the payment", () => {
+  test("denied is cached: the same promise + item replays the refusal", async () => {
+    const { approval } = seedPendingApproval();
+    await settleRefused(approval, "denied", "human denied the World ID approval request", "world_id_denied");
+    expect(getCachedSignOutcome(approval.paymentIdentifier)?.verdict).toBe("refuse");
+  });
+
+  for (const status of ["expired", "paused", "error"] as const) {
+    test(`${status} is not cached: the next attempt is re-evaluated`, async () => {
+      const { approval } = seedPendingApproval();
+      await settleRefused(approval, status, `transient: ${status}`, status === "expired" ? "world_id_expired" : "error");
+      expect(getCachedSignOutcome(approval.paymentIdentifier)).toBeUndefined();
+    });
+  }
 });
 
 describe("settleRefused — never attaches an attestation (WU12)", () => {

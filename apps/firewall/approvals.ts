@@ -254,7 +254,13 @@ function finalizeResolution(
   toState: ReceiptState,
   verdict: Verdict,
   reason: string,
-  opts: { paymentSignature?: string; worldId?: DecisionReceipt["worldId"]; payer?: string; payerKind?: DecisionReceipt["payerKind"] } = {},
+  opts: {
+    paymentSignature?: string;
+    worldId?: DecisionReceipt["worldId"];
+    payer?: string;
+    payerKind?: DecisionReceipt["payerKind"];
+    cache?: boolean;
+  } = {},
 ): void {
   finalize({
     receiptId: approval.receiptId,
@@ -276,7 +282,7 @@ function finalizeResolution(
     paymentSignature: opts.paymentSignature,
     payer: opts.payer,
     payerKind: opts.payerKind,
-    cache: true,
+    cache: opts.cache ?? true,
   });
   publish("approval.resolved", { receiptId: approval.receiptId, status: approval.status, reason });
   const updated = getReceipt(approval.receiptId);
@@ -293,6 +299,8 @@ function finalizeResolution(
  * primitives — those already have their own no-network unit tests
  * (world-id.test.ts), and `mock.module` replaces a module process-wide for
  * the rest of the `bun test` run, which would otherwise break them. */
+const TRANSIENT_REFUSALS: ReadonlySet<PendingApproval["status"]> = new Set(["expired", "paused", "error"]);
+
 export async function settleRefused(
   approval: PendingApproval,
   status: Exclude<PendingApproval["status"], "pending" | "approved">,
@@ -312,7 +320,11 @@ export async function settleRefused(
     receiptState,
     "refuse",
     reason,
-    { worldId: { approved: false, status } },
+    // A human "no" (denied, wrong human, revoked) is final for this exact
+    // payment. A lapse with no answer, a pause, or an error is not: never
+    // freeze the same promise + item as refused, re-evaluate (and ask the
+    // human again) on the next attempt.
+    { worldId: { approved: false, status }, cache: !TRANSIENT_REFUSALS.has(status) },
   );
   recordSpend(approval.intentId, -BigInt(approval.amountAtomic));
 

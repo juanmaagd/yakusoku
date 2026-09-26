@@ -505,12 +505,19 @@ export interface PromiseSummaryDto {
   replacedBy?: string;
 }
 
+/** The stored `status` only flips to `expired` lazily, so an `active` promise
+ * past its expiry would otherwise be reported as spendable to the agent and
+ * the dashboard. Report what can actually happen now. */
+export function effectivePromiseStatus(promise: StoredPromise): StoredPromise["status"] {
+  return promise.status === "active" && Number(promise.expiry) * 1000 <= Date.now() ? "expired" : promise.status;
+}
+
 export function serializePromiseSummary(promise: StoredPromise): PromiseSummaryDto {
   const remaining = promise.budget - promise.spent;
   return {
     id: promise.id,
     task: promise.task,
-    status: promise.status,
+    status: effectivePromiseStatus(promise),
     budget: promise.budget.toString(),
     remainingBudget: (remaining > 0n ? remaining : 0n).toString(),
     categories: promise.categories,
