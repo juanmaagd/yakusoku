@@ -32,7 +32,7 @@ Existing guards are deterministic (spend caps, allow/deny lists, network/asset c
 - Testnet only; no mainnet funds. Control endpoints are localhost-guarded, not authenticated.
 - The key-case attack in the demo is a disclosed scripted compromised agent (`bun run attack`), because current LLMs are not fooled on cue.
 - Intercepta live screening pending the sandbox key; without it every payment escalates to World ID.
-- **Product name: "Omamori"** (decided Sat Sep 26, "for now"; may still change). Replaces the working name "Yakusoku". User-facing surfaces (site, dashboard, EIP-712 signing domain, agent output, README) use it; internal identifiers (package scope `@yakusoku/*`, repo and folder name) stay until the name is final. Logo: a split circle with a centered vertical slot (the gate); the shipped files in `apps/site/public/brand/` still carry the previous pen-nib mark until the new SVG lands (see `apps/site/BRAND.md`).
+- **Product name: "Omamori"** (renamed from "Omamorisan" on Sun Sep 27; "Omamorisan" was decided Sat Sep 26 and replaced the working name "Yakusoku"). The spending rules a human approves for an agent are called **intents** (renamed from "promises" the same day). User-facing surfaces (site, dashboard, agent output, README) use both names; internal identifiers keep earlier names: package scope `@yakusoku/*`, repo and folder name, `omamorisan` env vars / MCP server key / contract names, the EIP-712 signing domain (renaming it would invalidate existing signatures), and `promise` routes, tables and MCP tool names. Logo: a split circle with a centered vertical slot (the gate) plus the "omamori" wordmark (see `apps/site/BRAND.md`).
 
 ## Brand Commitments
 - Name: Omamori (working name, may change).
