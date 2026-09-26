@@ -135,7 +135,7 @@ export default function SetupAgentCard() {
       </div>
 
       {setup.supported ? (
-        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1.3fr_1fr] lg:items-start">
+        <div className="mt-6 grid max-w-[760px] grid-cols-1 gap-6">
           <figure className="min-w-0 overflow-hidden rounded-card bg-ink">
             <figcaption className="flex flex-col items-start gap-2 border-b border-white/10 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
               <span className="label text-white/60">Prompt for {setup.client}</span>
