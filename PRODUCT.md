@@ -11,20 +11,20 @@ Astro + Tailwind site (`apps/site`): landing at `/`, intent (mandate) onboarding
 
 ## Users
 - **ETHGlobal Tokyo 2026 judges** evaluating the project in a few minutes: they must grasp the problem, the mechanism and the evidence quickly.
-- **Developers building agents that pay** (x402 / agent payments) who could put this firewall in front of their agent's signing key.
-- **The person who delegates a purchase to an AI agent**: signs what the agent is allowed to buy (`/sign`), watches decisions live (`/dashboard`) and approves doubtful payments with World ID on their phone.
+- **The person who delegates purchases to an AI agent** (the protagonist): approves an intent once with World ID, links a wallet as the owner of the agent's account and funds it with USDC, then sees receipts, gift card codes and revokes intents in `/app`; doubtful payments ask them again on their phone.
+- **Developers building agents that pay** (x402 / agent payments) who can put the same guard in front of any agent over MCP or the HTTP API.
 
 ## Product Purpose
-A pre-signature firewall for AI agent payments. The agent never holds a key; it asks the firewall to sign. The firewall signs an x402 payment only when it matches an intent the user signed with their wallet (EIP-712), stored outside the agent's context. Every check runs before signing and fails closed: any error or doubt ends in refuse or ask-a-human, never pay. Success: a prompt-injected agent cannot spend on something the user never asked for, while legitimate purchases go through without friction.
+Give your agent a budget, not your keys. A person approves once what their AI agent may buy (what, where, how much, until when) with World ID; the agent then buys on its own over MCP, paying x402 merchants in USDC from a smart account the person owns and funds. The agent never holds a key. Every payment is checked against that intent before anything is signed and fails closed: any error or doubt ends in refuse or ask-a-human, never pay. Success: everyday purchases need no taps, the agent handles retries, repeats, running-low budgets and plan changes correctly, and a prompt-injected agent cannot spend on something the person never asked for.
 
 ## Positioning
-Existing guards are deterministic (spend caps, allow/deny lists, network/asset checks). They all miss a payment to a clean address, within budget, for something never requested. This product adds a calibrated semantic intent check (TypeSafe Jev) against the user-signed intent before signing, layered with deterministic provenance, address/token screening (Intercepta) and fresh human approval (World ID for Agents) — and proves each decision afterwards (receipts, StepUp attestation, independent on-chain verifier).
+Agents that pay today sit at two poles: checkout inside a chat, where the person confirms every purchase (safe, not autonomous), and a wallet with a spending cap (autonomous, but an agent can be steered into any purchase inside the cap). Omamori is the gap between them: approve once, the agent buys alone, only what you asked, and asks you when in doubt. The reason to believe is the pre-signature check: deterministic guards (spend caps, allow/deny lists, network/asset checks) all miss a payment to a clean address, within budget, for something never requested; Omamori adds a calibrated semantic intent check (TypeSafe Jev) against the approved intent, layered with deterministic provenance, address/token screening (Intercepta) and fresh human approval (World ID for Agents), and proves each decision afterwards (receipts, StepUp attestation, independent on-chain verifier). Selling order: the agent buys for you end to end; it cannot spend on what you never asked; the six-stage pipeline is the how.
 
 ## Operating Context
 - Base Sepolia testnet, USDC, x402 v2 payments through the public facilitator.
 - Demo scenario: "Buy a $25 Amazon gift card for my sister's birthday"; the store's promo copy tries to make the agent buy a Steam card instead.
 - Pipeline order: idempotency → policy → provenance → Intercepta → Jev → World ID → sign; a refusal from any layer wins over a doubt.
-- The user signs the intent with MetaMask (injected wallet) and approves doubtful payments in the World App.
+- The person approves intents and doubtful payments in World App; a wallet (e.g. MetaMask) links as the owner of their smart account (`OmamorisanAccount`) and funds it. The older wallet-signed EIP-712 intent path still works but is not part of the pitch.
 - The dashboard contrasts two lanes for each payment attempt: what a naive agent wallet would have paid vs. the firewall's verdict with the deciding layer and reason.
 
 ## Capabilities and Constraints
