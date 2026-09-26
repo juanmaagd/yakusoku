@@ -1,23 +1,24 @@
 ---
 import SetupAgentCard from "./SetupAgentCard";
 
-// Order carries meaning: connect happens once, before any promise; a promise
-// is approved per task; a doubt approval is the exception, not the rule.
+// Order carries meaning: rules are approved once, before any purchase;
+// purchases then run without taps; a doubt approval is the exception, not
+// the rule.
 const MOMENTS = [
   {
-    dt: "Connect",
+    dt: "Rules",
     headline: "Once, up front",
-    body: "Approve the MCP connection in World App the first time your agent asks.",
+    body: "Approve what your agent may buy, where, and how much. The same World App tap connects your account.",
   },
   {
-    dt: "Promise",
-    headline: "Every new task",
-    body: "A budget and an expiry, approved before your agent can spend against it.",
+    dt: "Purchases",
+    headline: "No taps",
+    body: "Your agent pays on its own while each purchase fits your rules.",
   },
   {
     dt: "Doubt",
     headline: "Only if something's off",
-    body: "The firewall pauses and asks you directly before it ever signs.",
+    body: "The firewall pauses and asks you on your phone before it ever signs.",
   },
 ] as const;
 ---
@@ -27,8 +28,8 @@ const MOMENTS = [
     Set up your <strong>agent.</strong>
   </h2>
   <p class="mt-6 max-w-[54ch] text-body-lg text-graphite">
-    One prompt wires up the connection. After that, your agent can only spend through a promise you approved
-    yourself — every human moment happens on your phone with World ID.
+    One prompt and one approval set your rules. After that, your agent buys on its own inside them — your phone
+    only lights up when something looks off.
   </p>
 
   <dl class="mt-10 grid grid-cols-1 border-y border-hairline sm:grid-cols-3">

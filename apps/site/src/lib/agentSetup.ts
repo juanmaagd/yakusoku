@@ -33,20 +33,24 @@ export interface ProviderSetup {
 }
 
 // The shared instruction every prompt ends with, once the MCP tools are
-// available: connect once, then request a promise before every purchase.
+// available: approve spending rules once (which also connects a new
+// account), then reuse that promise for every purchase without asking again.
 const FLOW =
-  "call `connect` and show me the World ID link and code so I can approve on my phone. " +
-  "From then on, whenever I ask you to buy something: call `request_promise` first with exactly what I asked for, " +
-  "the store, a budget and an expiry, wait for my approval, then pay only through `pay_x402`. " +
-  "Never retry a refused payment with different wording.";
+  "ask me for my spending rules if I haven't given them yet — what you may buy, which store, a total USDC " +
+  "budget, and how long (up to 7 days) — then call `request_promise` once with them and show me the World ID " +
+  "link and code so I can approve on my phone; that single approval also connects my account. Show me any setup " +
+  "link too so I can fund it. Before every purchase, call `list_promises` and pay through `pay_x402` under an " +
+  "active promise that already covers it, without asking me again. If nothing covers it, tell me why and only " +
+  "call `request_promise` with `replaces` if I agree to widen the rules. Never retry a refused payment with " +
+  "different wording.";
 
 /** Terminal steps are the same shape for every self-installing agent: open it,
- * approve the change and restart, then approve the World ID connection. */
+ * approve the change and restart, then approve the spending rules in World ID. */
 function terminalSteps(client: string): readonly string[] {
   return [
     `Open ${client} in any folder and paste the prompt.`,
     `Approve the change it proposes, restart ${client} when it asks, and paste the prompt again.`,
-    "Approve the connection in World App on your phone.",
+    "Approve your spending rules in World App on your phone.",
   ];
 }
 
