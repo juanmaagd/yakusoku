@@ -83,16 +83,18 @@ export interface SessionState {
 export function noCredentialMessage(httpMode: boolean): string {
   if (httpMode) {
     return (
-      "no credential yet for this MCP session — call connect (or request_promise, which can create one in a " +
-      "single step) to link this agent to a human's account via World ID. This session's credential lives in " +
-      "memory only for this session — it is never shared with another session and never persisted, so a session " +
-      "that reconnects with a new session id must call connect/request_promise again."
+      "no credential yet for this MCP session — call request_promise with the human's spending rules (what you " +
+      "may buy, the budget, how long) to set them and create the account together in one step; call connect " +
+      "only if the human already has an existing account to link to. This session's credential lives in memory " +
+      "only for this session — it is never shared with another session and never persisted, so a session that " +
+      "reconnects with a new session id must call request_promise (or connect) again."
     );
   }
   return (
-    "no credential yet for this MCP session — call the connect tool to link this agent to a human's account via " +
-    "World ID (or provide an existing wallet mandate key (yk_...) or account key (ya_...) via the Authorization: " +
-    "Bearer header, OMAMORISAN_AGENT_KEY, or the credentials file)"
+    "no credential yet for this MCP session — call request_promise with the human's spending rules to set them " +
+    "and create the account together in one step (call connect only if the human already has an existing " +
+    "account), or provide an existing wallet mandate key (yk_...) or account key (ya_...) via the Authorization: " +
+    "Bearer header, OMAMORISAN_AGENT_KEY, or the credentials file"
   );
 }
 

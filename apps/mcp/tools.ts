@@ -328,9 +328,9 @@ function isJevIntentMismatchRefusal(reason: string): boolean {
 function jevIntentMismatchHint(promise: { id: string; task: string } | undefined): string | undefined {
   if (!promise) return undefined;
   return (
-    `This purchase does not match the approved promise ("${promise.task}"). If the human asked for something ` +
-    `different, confirm with them, then call request_promise with replaces="${promise.id}" describing exactly ` +
-    "what they now want. Do not retry this payment under the current promise."
+    `This purchase does not match the approved spending rules ("${promise.task}"). If the human wants to widen ` +
+    `the rules to cover it, confirm with them first, then call request_promise with replaces="${promise.id}" ` +
+    "describing exactly what they now want. Do not retry this payment under the current promise."
   );
 }
 
@@ -672,8 +672,10 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     "connect",
     {
       description:
-        "Link this agent to a human's Omamorisan account via World ID — call this once, before anything else, " +
-        "if get_mandate or any other tool says there's no credential yet. A friendly no-op if this session " +
+        "Link this agent to a human's EXISTING Omamorisan account via World ID — this does not set any spending " +
+        "rules. For a brand-new user, call request_promise instead: it sets their spending rules and creates the " +
+        "account together under a single approval, so never call connect first for a new user. Call connect " +
+        "only when the human already has an account to link this agent to. A friendly no-op if this session " +
         "already has a credential (an account or a legacy wallet mandate). Starts a World ID approval and " +
         "returns a verification link plus a short user code for the human to open in World App on their phone; " +
         "waits briefly for them to approve. If they haven't yet, returns status 'pending' — call check_connection " +
@@ -734,37 +736,48 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     "request_promise",
     {
       description:
-        "Ask the human to pre-authorize a task with a budget, via World ID — the World-ID-native replacement " +
-        "for a wallet-signed mandate. With NO credential at all yet, this creates the human's account AND this " +
-        "promise together under a SINGLE World ID approval (no separate connect step needed). With an already-" +
-        "connected account, asks for a promise on it as usual. Binds the promise to one merchant (store) origin — " +
-        "pay_x402 can only ever spend it on a resource at that exact origin, never a different store, even a " +
-        "clean/in-budget one. Shows the human a summary (task, budget, categories, expiry, merchant) to approve " +
-        "in World App; once approved, pay_x402 can spend against it with zero further taps until it runs out or " +
-        "expires. Waits briefly for approval; if the human hasn't responded yet, returns 'pending' and the " +
-        "promiseId to pass to check_promise. When the human changes what they want mid-task (the item they asked " +
-        "for is unavailable, they chose an alternative, or they want a different budget/store), call this again " +
-        "with replaces set to the CURRENT promiseId BEFORE paying, describing exactly what they now want — the " +
-        "human approves that change on their phone, and once approved the old promise stops working. Never keep " +
-        "trying to pay under the old promise once the plan has changed.",
+        "Ask the human to set (or widen) their standing spending rules, via World ID — the World-ID-native " +
+        "replacement for a wallet-signed mandate. Call this ONCE to cover many purchases, not once per item or " +
+        "per task: before calling it, check list_promises and reuse an active promise with pay_x402 whenever it " +
+        "already covers what's needed. With NO credential at all yet, this creates the human's account AND " +
+        "these spending rules together under a SINGLE World ID approval (no separate connect step needed — " +
+        "never call connect first for a new user). With an already-connected account, asks for the same rules " +
+        "on it. `task` should state the full scope the human approved (e.g. 'Any Amazon or Steam gift card for " +
+        "personal gifts'), not a single item, whenever that's what they asked for. Binds the rules to one " +
+        "merchant (store) origin — pay_x402 can only ever spend under them on a resource at that exact origin, " +
+        "never a different store, even a clean/in-budget one. Shows the human a summary (task, budget, " +
+        "categories, expiry, merchant) to approve in World App; once approved, pay_x402 can spend against it " +
+        "with zero further taps until it runs out or expires. Waits briefly for approval; if the human hasn't " +
+        "responded yet, returns 'pending' and the promiseId to pass to check_promise. When a purchase doesn't " +
+        "fit the active rules (something outside what was approved, or the human wants a different " +
+        "budget/store), explain why to the human and, only if they agree, call this again with replaces set to " +
+        "the CURRENT promiseId BEFORE paying, describing exactly what they now want — the human approves that " +
+        "widened/changed rule set on their phone, and once approved the old promise stops working. Never keep " +
+        "trying to pay under the old promise once the rules have changed.",
       inputSchema: {
-        task: z.string().min(1).describe("what this promise authorizes, in plain language (e.g. 'buy a $1 Amazon gift card')"),
-        budgetUsdc: z.number().positive().describe("maximum total USDC this promise may spend, across all purchases"),
-        categories: z.array(z.string().min(1)).min(1).max(5).describe("1-5 purchase categories this promise may spend on"),
-        expiresInMinutes: z.number().positive().describe("how many minutes from now this promise stays valid"),
+        task: z
+          .string()
+          .min(1)
+          .describe(
+            "the human's approved scope, in plain language — the full spending rule, not a single item, when " +
+              "that's what they set (e.g. 'Any Amazon or Steam gift card for personal gifts, up to $10 each')",
+          ),
+        budgetUsdc: z.number().positive().describe("maximum total USDC these rules may spend, across all purchases"),
+        categories: z.array(z.string().min(1)).min(1).max(5).describe("1-5 purchase categories these rules may spend on"),
+        expiresInMinutes: z.number().positive().describe("how many minutes from now these rules stay valid (e.g. up to 7 days)"),
         merchant: z
           .string()
           .min(1)
           .describe(
-            "the store's base URL (e.g. http://localhost:4000) — this promise can only ever pay a resource on this exact origin",
+            "the store's base URL (e.g. http://localhost:4000) — these rules can only ever pay a resource on this exact origin",
           ),
         replaces: z
           .string()
           .min(1)
           .optional()
           .describe(
-            "the promiseId of an existing promise this one replaces — set this when the human changed what they " +
-              "want mid-task; requires an already-connected account (never on the very first promise)",
+            "the promiseId of an existing promise this one replaces — set this when the human agrees to widen or " +
+              "change their spending rules; requires an already-connected account (never on the very first promise)",
           ),
       },
     },
@@ -831,7 +844,10 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
           return await waitForFirstPromiseOutcome(session, config.firewallUrl, config.httpMode);
         }
         if (!session.hasAgentKey() || credentialKind(session.getAgentKey()) !== "account") {
-          return fail("check_promise needs a connected World ID account — call connect first.");
+          return fail(
+            "check_promise needs a connected World ID account — call request_promise first to set spending " +
+              "rules and create the account (or connect if the human already has one).",
+          );
         }
         return await waitForPromiseOutcome(config.firewallUrl, session.getAgentKey(), promiseId);
       } catch (err) {
@@ -850,13 +866,17 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         "it with USDC — deploys the smart account (OmamorisanAccount) that actually holds and pays from the " +
         "money. Call this whenever connect/check_connection/request_promise/get_mandate mentions the account " +
         "still needs setup, or whenever the human asks how to fund their account. Requires a connected World ID " +
-        "account (call connect first if this fails).",
+        "account (call request_promise first to set spending rules and create one, or connect if the human " +
+        "already has one, if this fails).",
       inputSchema: {},
     },
     async () => {
       try {
         if (!session.hasAgentKey() || credentialKind(session.getAgentKey()) !== "account") {
-          return fail("setup_account needs a connected World ID account — call connect first.");
+          return fail(
+            "setup_account needs a connected World ID account — call request_promise first to set spending " +
+              "rules and create the account (or connect if the human already has one).",
+          );
         }
         const accountKey = session.getAgentKey();
         const link = await fetchSetupLink(config.firewallUrl, accountKey);
@@ -875,13 +895,19 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
   server.registerTool(
     "list_promises",
     {
-      description: "List every promise on this account (pending, active, or resolved), with remaining budget, categories, and expiry.",
+      description:
+        "List every promise (spending rule) on this account (pending, active, or resolved), with remaining " +
+        "budget, categories, and expiry. Check this before every purchase to see whether an active promise " +
+        "already covers it, so pay_x402 can reuse it instead of asking the human for a new one.",
       inputSchema: {},
     },
     async () => {
       try {
         if (!session.hasAgentKey() || credentialKind(session.getAgentKey()) !== "account") {
-          return fail("list_promises needs a connected World ID account — call connect first.");
+          return fail(
+            "list_promises needs a connected World ID account — call request_promise first to set spending " +
+              "rules and create the account (or connect if the human already has one).",
+          );
         }
         return ok(await fetchPromises(config.firewallUrl, session.getAgentKey()));
       } catch (err) {
@@ -899,7 +925,8 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         "Get what this agent is authorized to do. With a connected World ID account, returns the account and " +
         "its promises (list_promises gives the same list on its own). With a legacy wallet mandate key, " +
         "returns that mandate: task, total/remaining USDC budget, categories, expiry, revoked. Call this first, " +
-        "before browsing or buying anything — if it fails with no credential, call connect.",
+        "before browsing or buying anything — if it fails with no credential, ask the human for their spending " +
+        "rules and call request_promise, which sets those rules and creates the account together in one approval.",
       inputSchema: {},
     },
     async () => {
@@ -949,11 +976,13 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     {
       description:
         "Buy an x402-protected resource by URL, through the user's payment firewall — you never hold a " +
-        "private key or a signature yourself. GETs the url; if it isn't a 402, returns the body as-is (no " +
-        "payment required). If it is a 402, asks the firewall to sign, using everything fetch_url has seen " +
-        "this session as untrusted context. With a connected World ID account, pass promiseId to say which " +
-        "promise to spend from — omit it only when the account has exactly one active promise. The firewall " +
-        "may pay immediately, refuse outright (fail-closed — never retry a refusal with different wording), or " +
+        "private key or a signature yourself. Reuse the human's existing spending rules: call list_promises " +
+        "first and pay under whichever active promise already covers this purchase, without asking the human " +
+        "again. GETs the url; if it isn't a 402, returns the body as-is (no payment required). If it is a 402, " +
+        "asks the firewall to sign, using everything fetch_url has seen this session as untrusted context. With " +
+        "a connected World ID account, pass promiseId to say which promise to spend from — omit it only when " +
+        "the account has exactly one active promise. The firewall may pay immediately, refuse outright " +
+        "(fail-closed — never retry a refusal with different wording), or " +
         "require fresh human approval via World ID, in which case this returns immediately with a " +
         "verificationUri and you should call check_approval later. `justification` must state, in your own " +
         "words, why this specific purchase matches what the human actually asked for.",

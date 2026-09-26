@@ -23,17 +23,27 @@ import { registerTools } from "./tools";
 const FIREWALL_URL = process.env.OMAMORISAN_FIREWALL_URL ?? "http://localhost:4001";
 const HTTP_PORT = 4010;
 
-// Promise-replacement fix — self-contained within the first 512 chars
-// (verified against the installed @modelcontextprotocol/sdk@1.30.1's
-// `ServerOptions.instructions?: string`, server/index.d.ts): the flow, the
-// fail-closed "never retry a refusal" rule, and the one instruction this
-// fix adds — request a replacement promise before paying once the human's
-// plan has changed, rather than trying to force the old promise through.
+// Standing-rules fix (odd/tasks/standing-rules.md) — day-to-day purchases
+// need zero human approvals. The human approves their spending rules ONCE,
+// via request_promise, and that single approval also creates the account for
+// a brand-new user — connect is only for linking to an account that already
+// exists. Every later purchase reuses the active promise (list_promises +
+// pay_x402) with no new approval, until it's widened (replaces) or a doubtful
+// payment needs a fresh one. The essential flow is self-contained within the
+// first ~460 chars (verified against the installed
+// @modelcontextprotocol/sdk@1.30.1's `ServerOptions.instructions?: string`,
+// server/index.d.ts) so a client that only surfaces a truncated instructions
+// string still shows the whole "don't call connect first" rule.
 const SERVER_INSTRUCTIONS =
-  "Payment flow: connect (World ID) -> request_promise (task+budget+merchant) -> wait for human approval in " +
-  "World App -> pay_x402 only once active. A refusal is final: never retry the same payment with different " +
-  "wording. If the human changes what they want mid-task, call request_promise again with replaces set to the " +
-  "current promiseId BEFORE paying — never keep paying under the old promise once the plan has changed.";
+  "Omamorisan lets you pay for things on the human's behalf within spending rules they approve once. If there " +
+  "is no active promise yet, ask the human for their rules — what you may buy, the store URL, a total USDC " +
+  "budget, and how long (up to 7 days) — then call request_promise ONCE with them; that single World ID " +
+  "approval also connects a new account, so never call connect first. Show the World ID link and code, and any " +
+  "setup link, so they can fund the account. Before every purchase, call list_promises and pay with pay_x402 " +
+  "under an active promise that covers it — never request a new promise per item or per task. If nothing " +
+  "covers it, tell the human why and only call request_promise with replaces if they agree to widen the rules. " +
+  "If pay_x402 returns needs_human_approval, show the link and code and wait, then call check_approval. A " +
+  "refusal is final: never retry with different wording.";
 
 function buildServer(session: SessionState, httpMode: boolean): McpServer {
   const server = new McpServer({ name: "omamorisan", version: "0.1.0" }, { instructions: SERVER_INSTRUCTIONS });
@@ -45,11 +55,13 @@ function buildServer(session: SessionState, httpMode: boolean): McpServer {
 
 async function runStdio(): Promise<void> {
   // P9.3: no key required to start anymore — an agent with nothing set yet
-  // just gets the `connect` tool as its only useful first move (every other
-  // tool fails fast with a "call connect first" message, session.ts's
-  // NO_CREDENTIAL_MESSAGE). Resolution order: env var (unchanged) > this
+  // should call `request_promise` (sets the human's spending rules and
+  // creates the account together in one approval); `connect` is only for
+  // linking to an account that already exists (every other tool fails fast
+  // with a "no credential yet" message pointing at both, session.ts's
+  // `noCredentialMessage`). Resolution order: env var (unchanged) > this
   // firewall's row in the credentials file (credentials.ts), written by a
-  // previous `connect`/`check_connection` run.
+  // previous `connect`/`check_connection` or first-time `request_promise` run.
   // `|| undefined` (not `??`) so an accidentally-empty-string env var is
   // treated as "unset" rather than as a literal empty credential.
   const envKey = process.env.OMAMORISAN_AGENT_KEY || undefined;
@@ -59,7 +71,9 @@ async function runStdio(): Promise<void> {
   await buildServer(session, false).connect(new StdioServerTransport());
   console.error(
     `[omamorisan-mcp] stdio ready (firewall ${FIREWALL_URL}) — ` +
-      (credential.current ? "using a stored credential" : "not connected yet: the agent should call the connect tool"),
+      (credential.current
+        ? "using a stored credential"
+        : "no credential yet: the agent should call request_promise to set spending rules (or connect for an existing account)"),
   );
 }
 

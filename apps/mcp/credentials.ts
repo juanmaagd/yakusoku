@@ -1,16 +1,17 @@
 // Local on-disk credential storage for the Omamorisan MCP server (P9.3,
-// odd/tasks/yakusoku.md Phase 3) — lets a stdio agent run `connect` ONCE and
-// have every later process pick up the resulting World ID account key
-// automatically, without re-authenticating or ever exposing the key to the
-// LLM. Keyed by firewall base URL so one machine can hold credentials for
-// more than one firewall (e.g. an isolated test stack alongside the live
-// one).
+// odd/tasks/yakusoku.md Phase 3) — lets a stdio agent run `connect` (or a
+// first-time `request_promise`) ONCE and have every later process pick up
+// the resulting World ID account key automatically, without
+// re-authenticating or ever exposing the key to the LLM. Keyed by firewall
+// base URL so one machine can hold credentials for more than one firewall
+// (e.g. an isolated test stack alongside the live one).
 //
 // Credential resolution order (index.ts, session.ts): an HTTP
 // `Authorization: Bearer` header on the connecting request > the
 // `OMAMORISAN_AGENT_KEY` env var > this file. `connect`/`check_connection`
-// (tools.ts) are the only writers, and only after a real World ID approval —
-// an env- or header-provided key is never written back here.
+// and a first-time `request_promise`'s approval (tools.ts) are the only
+// writers, and only after a real World ID approval — an env- or
+// header-provided key is never written back here.
 
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
