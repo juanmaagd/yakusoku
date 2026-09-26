@@ -1,0 +1,30 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import { SITE } from "../config";
+---
+
+<Layout title={`Launch app — ${SITE.name}`}>
+  <Nav />
+  <main class="flex min-h-[70vh] items-center justify-center px-6 py-20 md:px-10">
+    <div class="w-full max-w-[560px] rounded-card border border-black/[0.08] bg-surface p-8 text-center md:p-10">
+      <h1 class="text-heading font-semibold text-ink">Mandate onboarding is on its way here.</h1>
+      <p class="mx-auto mt-4 max-w-[46ch] text-body text-graphite">
+        The wallet-connect flow for signing a new intent is moving into this app. Until it lands, sign your intent on
+        the current screen.
+      </p>
+      <a
+        href={SITE.legacySigningUrl}
+        target="_blank"
+        rel="noreferrer"
+        class="mt-8 inline-flex items-center gap-1.5 rounded-btn bg-primary px-[15px] py-[6px] text-body-sm font-medium text-white transition-opacity duration-200 ease-out hover:opacity-90"
+      >
+        Go to the current signing screen
+        <span aria-hidden="true">↗</span>
+      </a>
+      <p class="mt-4 text-caption text-ink/54">{SITE.legacySigningUrl} — runs locally, not this site.</p>
+    </div>
+  </main>
+  <Footer />
+</Layout>

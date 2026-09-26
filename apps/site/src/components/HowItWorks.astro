@@ -1,0 +1,65 @@
+---
+const STAGES = [
+  {
+    name: "Idempotency",
+    catches: "Already seen this exact payment — replays the cached result instead of paying twice.",
+    accent: "bg-sky",
+  },
+  {
+    name: "Policy",
+    catches: "Budget, expiry, and network/asset — checked before anything else runs.",
+    accent: "bg-saffron",
+  },
+  {
+    name: "Provenance",
+    catches: "Whether the destination traces to what you signed, or only to untrusted page text.",
+    accent: "bg-mocha",
+  },
+  {
+    name: "Intercepta",
+    catches: "Screens the destination address and token for sanctions, scams, and drainers — live.",
+    accent: "bg-marigold",
+  },
+  {
+    name: "Jev",
+    catches: "Whether the payment matches what you actually asked for — semantically, not just by address.",
+    accent: "bg-coral",
+  },
+  {
+    name: "World ID → sign",
+    catches: "Asks a live human when anything above is undecided, then signs — bound to that exact payment.",
+    accent: "bg-signal",
+  },
+] as const;
+---
+
+<section id="how-it-works" class="px-6 md:px-10">
+  <div class="mx-auto max-w-[1200px]">
+    <div class="mx-auto max-w-[60ch] text-center">
+      <h2 class="text-heading-lg font-semibold text-ink">How it works</h2>
+      <p class="mt-4 text-body text-graphite">
+        Every stage runs, in order, before the firewall signs anything. A refusal from any stage wins outright.
+      </p>
+    </div>
+
+    <ol class="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {
+        STAGES.map((stage) => (
+          <li class={`rounded-card p-6 text-ink ${stage.accent}`}>
+            <h3 class="text-heading-sm font-semibold">{stage.name}</h3>
+            <p class="mt-3 text-body-sm">{stage.catches}</p>
+          </li>
+        ))
+      }
+    </ol>
+
+    <div class="mt-8 rounded-card border border-black/[0.08] bg-surface p-6 text-center">
+      <p class="text-body font-medium text-ink">
+        Fail-closed: any error or doubt ends in
+        <span class="rounded-full bg-coral px-2.5 py-0.5 text-body-sm font-semibold text-ink">refuse</span>
+        or ask a human — never pay.
+      </p>
+      <p class="mt-1 text-body-sm text-slate">A refusal from any layer wins over a doubt.</p>
+    </div>
+  </div>
+</section>

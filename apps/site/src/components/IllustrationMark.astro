@@ -1,0 +1,23 @@
+---
+// A small circular illustration mark: white disc, 2px accent-colored border,
+// per DESIGN.md Imagery ("flat illustrated marks in 2px colored circles").
+interface Props {
+  src: string;
+  alt?: string;
+  accentClass: string; // e.g. "border-sky"
+  size?: number;
+  class?: string;
+  [key: `data-${string}`]: string | boolean | undefined;
+}
+
+const { src, alt = "", accentClass, size = 44, class: className = "", ...rest } = Astro.props;
+const imgSize = Math.round(size * 0.72);
+---
+
+<span
+  class:list={["inline-flex shrink-0 items-center justify-center rounded-full border-2 bg-white", accentClass, className]}
+  style={{ width: `${size}px`, height: `${size}px` }}
+  {...rest}
+>
+  <img src={src} alt={alt} width={imgSize} height={imgSize} loading="lazy" decoding="async" class="object-contain" />
+</span>

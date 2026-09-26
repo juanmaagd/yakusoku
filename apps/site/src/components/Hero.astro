@@ -1,0 +1,42 @@
+---
+import { SITE } from "../config";
+---
+
+<section class="px-6 pt-14 text-center md:px-10 md:pt-20">
+  <div class="mx-auto max-w-[900px]">
+    <h1 class="text-balance font-semibold text-heading sm:text-display-sm md:text-display">
+      Your agent pays only for what you
+      <span class="relative inline-block">
+        <span class="relative z-10 inline-block rounded-full bg-marigold px-6 py-2">promised</span>
+        <svg
+          class="pointer-events-none absolute -top-9 -right-9 h-12 w-12 text-ink/70 md:-top-11 md:-right-11 md:h-14 md:w-14"
+          viewBox="0 0 64 64"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path d="M6 42 C 8 20, 28 6, 46 10 C 54 12, 58 18, 55 25" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <path d="M45 15 L56 24 L43 28" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </span>.
+    </h1>
+
+    <p class="mx-auto mt-6 max-w-[62ch] text-pretty font-serif text-subheading text-graphite">
+      {SITE.description}
+    </p>
+
+    <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+      <a
+        href={SITE.appRoute}
+        class="rounded-btn bg-primary px-[15px] py-[6px] text-body-sm font-medium text-white transition-opacity duration-200 ease-out hover:opacity-90"
+      >
+        Launch app
+      </a>
+      <a
+        href="#developers"
+        class="rounded-btn bg-sky-tint px-[15px] py-[6px] text-body-sm font-medium text-primary transition-opacity duration-200 ease-out hover:opacity-80"
+      >
+        Plug in your agent
+      </a>
+    </div>
+  </div>
+</section>

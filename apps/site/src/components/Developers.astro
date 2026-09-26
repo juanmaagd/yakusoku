@@ -1,0 +1,46 @@
+---
+const CREATE_MANDATE = `POST /intents
+{
+  "message": { /* signed TaskIntent: budget, category, expiry */ },
+  "signature": "0x...",
+  "signer": "0xYourWalletAddress"
+}
+
+→ 201 { "id": "intent_...", "remainingBudget": "25000000", "agentKey": "ak_..." }
+   agentKey is returned exactly once. Store it — the firewall never shows it again.`;
+
+const AGENT_SIGN = `POST /sign
+Authorization: Bearer <agentKey>
+
+{
+  "paymentRequiredHeader": "<base64 402 header from the store>",
+  "resourceUrl": "https://store.example/checkout/amazon-25"
+}
+
+→ 200 { "receiptId": "...", "decision": "pay", "paymentSignatureHeader": "..." }
+   or  { "decision": "refuse", "reason": "..." } — never a partial signature.`;
+---
+
+<section id="developers" class="px-6 md:px-10">
+  <div class="mx-auto max-w-[1200px]">
+    <div class="mx-auto max-w-[60ch] text-center">
+      <h2 class="text-heading-lg font-semibold text-ink">Your agent never gets a key.</h2>
+      <p class="mt-4 text-body text-graphite">
+        The human signs a mandate once. The agent authenticates with a scoped credential that can only ever ask the
+        firewall to sign — it can't move funds on its own.
+      </p>
+    </div>
+
+    <div class="mt-12 grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <div class="rounded-card border border-black/[0.08] bg-surface p-6">
+        <h3 class="text-body-sm font-medium text-stone">1. Create a mandate</h3>
+        <pre class="mt-4 overflow-x-auto rounded-sm bg-midnight p-4 font-mono text-body-sm leading-[1.6] text-white/90"><code>{CREATE_MANDATE}</code></pre>
+      </div>
+
+      <div class="rounded-card border border-black/[0.08] bg-surface p-6">
+        <h3 class="text-body-sm font-medium text-stone">2. The agent asks the firewall to sign</h3>
+        <pre class="mt-4 overflow-x-auto rounded-sm bg-midnight p-4 font-mono text-body-sm leading-[1.6] text-white/90"><code>{AGENT_SIGN}</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
