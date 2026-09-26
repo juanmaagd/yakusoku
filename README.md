@@ -241,6 +241,10 @@ bun run dev-intent -- "Buy a $1 Amazon gift card (rehearsal)" 1 gift_card:amazon
 bun run agent -- --intent <intentId> --key <agentKey> "Buy me a $1 Amazon gift card (rehearsal)"
 ```
 
+### Deploying
+
+For a shared team-testing instance on Dokploy (Docker Compose, all four services, generated domains), see [`docs/deploy.md`](docs/deploy.md).
+
 ### Checks
 
 | Command | What it proves | Spends testnet USDC? |

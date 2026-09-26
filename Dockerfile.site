@@ -1,0 +1,29 @@
+# Astro static build → tiny Bun static-file server (T3, odd/tasks/dokploy-deploy.md).
+# apps/site/astro.config.mjs sets no `output`/adapter, so this is Astro's
+# default static-site mode (plain files in dist/, no Node/SSR server) — do
+# NOT switch it to an adapter just to containerize it. Astro inlines
+# `PUBLIC_*` env vars at BUILD time, so they arrive as build args, baked into
+# the static output; there is no way to change them without rebuilding.
+FROM oven/bun:1 AS build
+
+WORKDIR /app
+
+COPY . .
+RUN bun install --frozen-lockfile
+
+ARG PUBLIC_FIREWALL_URL
+ARG PUBLIC_MCP_URL
+ARG PUBLIC_SITE_URL
+ENV PUBLIC_FIREWALL_URL=${PUBLIC_FIREWALL_URL}
+ENV PUBLIC_MCP_URL=${PUBLIC_MCP_URL}
+ENV PUBLIC_SITE_URL=${PUBLIC_SITE_URL}
+RUN bun run --cwd apps/site build
+
+FROM oven/bun:1-slim AS run
+
+WORKDIR /app
+COPY --from=build /app/apps/site/dist ./dist
+COPY apps/site/serve.ts ./serve.ts
+
+EXPOSE 4321
+CMD ["bun", "run", "serve.ts"]

@@ -1,0 +1,176 @@
+# Omamorisan — Dokploy Docker Compose deployment (T3, odd/tasks/dokploy-deploy.md).
+#
+# Four services: firewall, store, mcp (Streamable HTTP), site. See
+# docs/deploy.md for the step-by-step Dokploy UI walkthrough (domains,
+# pasting env, smoke-checking) and its env checklist table.
+#
+# Networking, per Dokploy's own docs (cited in docs/deploy.md):
+# - Every publicly-routed service joins the shared `dokploy-network` (the
+#   default for a Docker Compose app — see "Isolated Deployments" in
+#   docs/deploy.md if you'd rather Dokploy manage an app-scoped network
+#   instead; in that case drop the `dokploy-network` block below entirely).
+# - `expose` (not `ports`) advertises the container port for Dokploy's
+#   per-service "Domains" tab to route to via Traefik — it never publishes a
+#   host port, so these don't collide with a dev instance running on the
+#   same VPS.
+# - Inter-service calls that don't need to leave the compose network (mcp ->
+#   firewall) use the plain Compose service name over the default network,
+#   e.g. OMAMORISAN_FIREWALL_URL=http://firewall:4001 — no domain needed.
+#
+# IMPORTANT — merchant self-fetch hairpin (see docs/deploy.md's networking
+# caveat): the firewall's `merchant` pipeline stage (apps/firewall/merchant.ts)
+# independently re-fetches a payment's resourceUrl, which for a world_id
+# promise MUST be the exact PUBLIC store origin the human approved
+# (never weakened to an internal service name — that would defeat the
+# security property this stage exists for). That means the firewall
+# container calls back out to its own VPS's public domain through Traefik.
+# This needs the Docker host to support NAT hairpin/loopback for a container
+# reaching the host's own public IP; most Linux Docker hosts do, but some
+# cloud network setups don't. If real `/sign` calls fail with
+# `merchant_unreachable` after deploy, this is the first thing to check
+# (docs/deploy.md has the exact diagnostic).
+services:
+  firewall:
+    build:
+      context: .
+      dockerfile: Dockerfile.bun
+    image: omamorisan-bun:latest
+    command: ["bun", "run", "apps/firewall/index.ts"]
+    restart: unless-stopped
+    expose:
+      - "4001"
+    environment:
+      - PORT=4001
+      - FIREWALL_DATA_DIR=/data
+      # Secrets / required per-deployment values (docs/deploy.md env checklist).
+      - FIREWALL_PRIVATE_KEY=${FIREWALL_PRIVATE_KEY}
+      - WORLD_CLIENT_ID=${WORLD_CLIENT_ID}
+      - WORLD_CLIENT_SECRET=${WORLD_CLIENT_SECRET}
+      - WORLD_ID_ISSUER=${WORLD_ID_ISSUER}
+      - INTERCEPTA_API_KEY=${INTERCEPTA_API_KEY}
+      - TYPESAFE_API_KEY=${TYPESAFE_API_KEY}
+      - BASE_SEPOLIA_RPC_URL=${BASE_SEPOLIA_RPC_URL}
+      # This deployment's own generated domains (see docs/deploy.md — generate
+      # domains BEFORE filling these in).
+      - OMAMORISAN_SITE_ORIGINS=${OMAMORISAN_SITE_ORIGINS}
+      - OMAMORISAN_SIWE_DOMAINS=${OMAMORISAN_SIWE_DOMAINS}
+      - OMAMORISAN_SITE_URL=${OMAMORISAN_SITE_URL}
+      # Recommended (falls back to an empty recipient allow-list if unset —
+      # see account-setup.ts's own startup warning).
+      - MERCHANT_ADDRESS=${MERCHANT_ADDRESS}
+      - MERCHANT_KEY=${MERCHANT_KEY}
+      - OMAMORISAN_DEFAULT_RECIPIENTS=${OMAMORISAN_DEFAULT_RECIPIENTS}
+      # Optional tuning — every one of these degrades to the code's own
+      # built-in default when left blank (Number(...) > 0 checks, never a
+      # bare `??`), so it's safe to leave any of them empty in Dokploy's env.
+      - WORLD_ID_APPROVAL_TIMEOUT_S=${WORLD_ID_APPROVAL_TIMEOUT_S}
+      - WORLD_ID_MAX_AUTH_AGE_S=${WORLD_ID_MAX_AUTH_AGE_S}
+      - INTERCEPTA_TIMEOUT_MS=${INTERCEPTA_TIMEOUT_MS}
+      - OMAMORISAN_DEFAULT_PER_PAYMENT_LIMIT_USDC=${OMAMORISAN_DEFAULT_PER_PAYMENT_LIMIT_USDC}
+      - OMAMORISAN_MAX_PROMISE_USDC=${OMAMORISAN_MAX_PROMISE_USDC}
+      - OMAMORISAN_MAX_PENDING_PROMISES=${OMAMORISAN_MAX_PENDING_PROMISES}
+      - OMAMORISAN_FUNDING_TIMEOUT_MS=${OMAMORISAN_FUNDING_TIMEOUT_MS}
+      - HUMAN_APPROVAL_OVER_USDC=${HUMAN_APPROVAL_OVER_USDC}
+      # Never set OMAMORISAN_ACCOUNT_READER, OMAMORISAN_DEV_APPROVALS, or
+      # OMAMORISAN_ACCOUNT_DEPLOYER=stub here — dev-only fabrication seams
+      # the firewall itself refuses to consider safe on a live instance
+      # (see their own [SECURITY] startup warnings in apps/firewall/index.ts).
+    volumes:
+      - firewall_data:/data
+    networks:
+      - default
+      - dokploy-network
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:4001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  store:
+    build:
+      context: .
+      dockerfile: Dockerfile.bun
+    image: omamorisan-bun:latest
+    command: ["bun", "run", "apps/store/index.ts"]
+    restart: unless-stopped
+    expose:
+      - "4000"
+    environment:
+      - PORT=4000
+      - MERCHANT_ADDRESS=${MERCHANT_ADDRESS}
+      - MERCHANT_KEY=${MERCHANT_KEY}
+    networks:
+      - default
+      - dokploy-network
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.bun
+    image: omamorisan-bun:latest
+    command: ["bun", "run", "apps/mcp/index.ts", "--http"]
+    restart: unless-stopped
+    expose:
+      - "4010"
+    environment:
+      # Internal service name — mcp and firewall are both backend containers
+      # in this same compose project, so this never needs a public domain.
+      - OMAMORISAN_FIREWALL_URL=http://firewall:4001
+      # T2's SSRF guard exemption list (odd/tasks/dokploy-deploy.md) — leave
+      # blank unless fetch_url/pay_x402 legitimately need a non-public host.
+      - OMAMORISAN_FETCH_ALLOWED_HOSTS=${OMAMORISAN_FETCH_ALLOWED_HOSTS}
+      # Deliberately NOT set: OMAMORISAN_AGENT_KEY. Setting it here would
+      # hand every anonymous HTTP session the SAME World ID account/agent
+      # key — the opposite of "each tester gets their own account". Leave
+      # unset so every session bootstraps its own via the connect tool.
+    depends_on:
+      firewall:
+        condition: service_healthy
+    networks:
+      - default
+      - dokploy-network
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:4010/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  site:
+    build:
+      context: .
+      dockerfile: Dockerfile.site
+      args:
+        # Astro inlines PUBLIC_* at BUILD time — these must be this
+        # deployment's real generated domains (docs/deploy.md: generate
+        # domains BEFORE the first site build) or the built site will keep
+        # pointing at localhost.
+        PUBLIC_FIREWALL_URL: ${PUBLIC_FIREWALL_URL}
+        PUBLIC_MCP_URL: ${PUBLIC_MCP_URL}
+        PUBLIC_SITE_URL: ${PUBLIC_SITE_URL}
+    restart: unless-stopped
+    expose:
+      - "4321"
+    networks:
+      - default
+      - dokploy-network
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:4321/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  firewall_data:
+
+networks:
+  dokploy-network:
+    external: true

@@ -25,6 +25,11 @@ export const SITE = {
   /** The MCP server's Streamable HTTP endpoint (apps/mcp/README.md: port 4010,
    * `/mcp` path, agent key as a Bearer token), shown on the key handoff. */
   mcpUrl: (import.meta.env.PUBLIC_MCP_URL as string | undefined) ?? "http://localhost:4010/mcp",
+  /** This site's own public origin (T3, odd/tasks/dokploy-deploy.md) — used
+   * to build absolute URLs (e.g. the og:image meta tags in Layout.astro)
+   * that must resolve from outside the deploying container, never a
+   * hardcoded localhost origin baked into the static build. */
+  siteUrl: (import.meta.env.PUBLIC_SITE_URL as string | undefined) ?? "http://localhost:4321",
 } as const;
 
 /**

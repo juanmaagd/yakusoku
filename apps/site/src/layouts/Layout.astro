@@ -27,11 +27,11 @@ const { title = SITE.name, description = SITE.description } = Astro.props;
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:image" content="http://localhost:4321/brand/og.png" />
+    <meta property="og:image" content={`${SITE.siteUrl}/brand/og.png`} />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    <meta name="twitter:image" content="http://localhost:4321/brand/og.png" />
+    <meta name="twitter:image" content={`${SITE.siteUrl}/brand/og.png`} />
   </head>
   <body class="min-h-screen bg-canvas font-sans text-ink antialiased">
     <slot />

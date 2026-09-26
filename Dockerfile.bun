@@ -1,0 +1,23 @@
+# One image for every bun-based Omamorisan service (firewall, store, mcp) —
+# T3, odd/tasks/dokploy-deploy.md. This is a bun workspaces monorepo, so the
+# build context is the repo root and `bun install` resolves every workspace
+# member in one shot; docker-compose.yml gives each service its own
+# `command:` to pick which app actually runs. Single stage on purpose (Bun
+# runs TypeScript directly — no separate compile step) and no
+# COPY-package.json-first layer-caching trick, to keep this file simple:
+# `bun install` reruns on every source change either way, which is an
+# acceptable tradeoff for a hackathon deploy.
+FROM oven/bun:1
+
+WORKDIR /app
+
+COPY . .
+RUN bun install --frozen-lockfile
+
+# firewall (:4001), store (:4000), mcp HTTP (:4010) — see docker-compose.yml
+# for which port(s) each service actually publishes.
+EXPOSE 4000 4001 4010
+
+# Overridden per service in docker-compose.yml; this default keeps a bare
+# `docker build && docker run` on this image doing something sane.
+CMD ["bun", "run", "apps/firewall/index.ts"]

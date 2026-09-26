@@ -1,0 +1,27 @@
+# Docker build context excludes (T3, odd/tasks/dokploy-deploy.md). Applies to
+# both Dockerfile.bun and Dockerfile.site, which both build from the repo
+# root so bun's workspace install sees every package.json.
+.git
+.github
+.gitmodules
+
+node_modules
+**/node_modules
+
+# Foundry/Solidity — irrelevant to the deployed services, and its lib/ +
+# out/ (forge-std, openzeppelin-contracts, build artifacts) are ~100MB.
+contracts
+
+docs
+README.md
+DESIGN.md
+PRODUCT.md
+odd
+
+# Local dev artifacts — never bake a dev SQLite file into the image; the
+# firewall's data dir is a named volume at runtime (FIREWALL_DATA_DIR=/data).
+apps/firewall/data
+
+# Astro's own build output — Dockerfile.site produces this fresh in the
+# build stage; never trust a stale local dist/ from the host.
+apps/site/dist
