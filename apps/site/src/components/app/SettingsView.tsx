@@ -65,7 +65,7 @@ export default function SettingsView({ sessionToken, onUnauthorized }: SettingsV
       // here instead of the bare error code.
       setCreateError(
         message === "no account"
-          ? "Sign a promise first (Promises tab) — that sets up your account. Then come back here to connect your agent."
+          ? "No account is linked to this wallet yet. Let your agent create its first intent (you approve it in World App), link this wallet from the setup link it gives you, then come back here."
           : message,
       );
     } finally {
