@@ -153,14 +153,14 @@ export function buildPromiseSummary(
    * new task/budget line, so the human approves the swap, not just the new
    * terms in isolation. Server-written, same as the rest of this summary —
    * the agent has no way to alter it. */
-  replaces?: { task: string; budgetUsdc: number },
+  replaces?: { task: string; remainingUsdc: number },
 ): string {
   const expiryIso = new Date(Number(expirySeconds) * 1000).toISOString();
   // `merchantOrigin` is already validated http(s) (see `createPromiseRequest`),
   // so `new URL` here never throws; `.host` drops the scheme for a shorter,
   // human-facing "…at localhost:4000" (task text per the H1 fix).
   const merchantHost = new URL(merchantOrigin).host;
-  const replacesPrefix = replaces ? `Replaces "${replaces.task}" ($${replaces.budgetUsdc.toFixed(2)} USDC). ` : "";
+  const replacesPrefix = replaces ? `Replaces "${replaces.task}" ($${replaces.remainingUsdc.toFixed(2)} USDC left). ` : "";
   return `${replacesPrefix}Approve "${task}" — up to $${budgetUsdc.toFixed(2)} USDC across ${categories.join(", ")}, expiring ${expiryIso}, at ${merchantHost}.`;
 }
 
@@ -255,6 +255,13 @@ export async function createPromiseRequest(account: StoredAccount, input: Create
     return { ok: false, status: 502, error: `could not start World ID approval: ${err instanceof Error ? err.message : String(err)}` };
   }
 
+  // The device-authorization await above lets a concurrent request for the
+  // same account run; re-validate synchronously right before the insert so
+  // the pending cap and the one-pending-replacement rule can't both be
+  // passed by two racing requests. The orphaned device flow just expires.
+  const revalidated = validatePromiseInput(input, account.id);
+  if (!revalidated.ok) return revalidated;
+
   const promiseId = `promise_${crypto.randomUUID()}`;
   const budgetAtomic = BigInt(Math.round(input.budgetUsdc * 10 ** USDC_DECIMALS));
   const expirySeconds = BigInt(Math.floor(Date.now() / 1000) + Math.floor(input.expiresInSeconds));
@@ -269,7 +276,7 @@ export async function createPromiseRequest(account: StoredAccount, input: Create
   // happens later, at settlement, against a fresh re-fetch of its own.
   const replacesTarget = input.replaces ? getPromise(input.replaces) : undefined;
   const replacesSummary = replacesTarget
-    ? { task: replacesTarget.task, budgetUsdc: Number(replacesTarget.budget) / 10 ** USDC_DECIMALS }
+    ? { task: replacesTarget.task, remainingUsdc: Number(replacesTarget.budget - replacesTarget.spent) / 10 ** USDC_DECIMALS }
     : undefined;
 
   const promise: StoredPromise = {

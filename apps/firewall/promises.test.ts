@@ -319,9 +319,9 @@ describe("buildPromiseSummary — replaces makes the change explicit (promise-re
       ["gift_card:steam"],
       BigInt(Math.floor(Date.now() / 1000) + 3600),
       "http://localhost:4000",
-      { task: "Buy an Amazon gift card", budgetUsdc: 1 },
+      { task: "Buy an Amazon gift card", remainingUsdc: 1 },
     );
-    expect(summary.startsWith('Replaces "Buy an Amazon gift card" ($1.00 USDC). Approve "Buy a Steam gift card"')).toBe(true);
+    expect(summary.startsWith('Replaces "Buy an Amazon gift card" ($1.00 USDC left). Approve "Buy a Steam gift card"')).toBe(true);
   });
 
   test("omits the prefix entirely for an ordinary (non-replacing) promise", () => {

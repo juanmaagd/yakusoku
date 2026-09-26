@@ -180,7 +180,7 @@ describe("request_promise — replaces passthrough (promise-replacement fix)", (
           verificationUri: "https://sandbox.auth.world.org/device",
           userCode: "ABC-123",
           expiresAt: "2999-01-01T00:00:00.000Z",
-          summary: 'Replaces "old task" ($1.00 USDC). Approve "new task" — up to $2.00 USDC across gift_card:steam, at store.test.',
+          summary: 'Replaces "old task" ($1.00 USDC left). Approve "new task" — up to $2.00 USDC across gift_card:steam, at store.test.',
         });
       }
       if (url === "http://firewall.test/promises/promise_new" && method === "GET") {
@@ -193,7 +193,7 @@ describe("request_promise — replaces passthrough (promise-replacement fix)", (
           categories: ["gift_card:steam"],
           expiry: "9999999999",
           createdAt: new Date().toISOString(),
-          summary: 'Replaces "old task" ($1.00 USDC). Approve "new task" — up to $2.00 USDC across gift_card:steam, at store.test.',
+          summary: 'Replaces "old task" ($1.00 USDC left). Approve "new task" — up to $2.00 USDC across gift_card:steam, at store.test.',
           replaces: "promise_old",
         });
       }
