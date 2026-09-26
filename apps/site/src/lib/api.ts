@@ -210,6 +210,38 @@ export async function revokeOwnerPromise(sessionToken: string, id: string): Prom
   });
 }
 
+// --- Owner account panel (apps/firewall/index.ts's GET /owner/accounts) ----
+// Every smart account this wallet linked as owner at `/setup`, with what the
+// /app "Account" section needs — the owner-session counterpart to
+// `lib/setupApi.ts`'s `SetupInfo` (used only by `/setup` itself), reachable
+// at any time with the ordinary SIWE session instead of a fresh setup link.
+
+export interface OwnerAccountMerchant {
+  address: Address;
+  label: string;
+  /** `true`/`false` from a live on-chain read; `null` when there's nothing
+   * to read yet or the read itself failed — never a guessed `false`. */
+  registered: boolean | null;
+}
+
+export interface OwnerAccount {
+  accountId: string;
+  chainId: number;
+  /** The USDC contract this account pays with — read balances against this,
+   * never a cached figure from the firewall (root API contract). */
+  usdc: Address;
+  operator: Address;
+  smartAccount: Address;
+  owner: Address;
+  /** Decimal USDC string (e.g. `"25"`) — never atomic units, never a float. */
+  perPaymentLimitUsdc: string;
+  knownMerchants: OwnerAccountMerchant[];
+}
+
+export async function listOwnerAccounts(sessionToken: string): Promise<OwnerAccount[]> {
+  return ownerScopedJson<OwnerAccount[]>("/owner/accounts", sessionToken);
+}
+
 /** No session required server-side (`GET /receipts/:id/attestation` is
  * unauthenticated, apps/firewall/index.ts) — returns `undefined` for a
  * receipt with no attestation (denied/expired/pre-World-ID) instead of

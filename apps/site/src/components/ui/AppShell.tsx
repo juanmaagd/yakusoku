@@ -25,7 +25,7 @@ export function useOwnerControl(): OwnerControl | undefined {
   return useContext(OwnerControlContext);
 }
 
-type Section = "promises" | "live";
+type Section = "promises" | "live" | "account";
 
 interface AppShellProps {
   active: Section;
@@ -35,7 +35,7 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-/** The frame every /app route shares: logo, the two sections, the global
+/** The frame every /app route shares: logo, the section tabs, the global
  * "Pause all" switch and the wallet chip. Signed out, only the logo shows and
  * the page content is the sign-in gate. */
 export default function AppShell({ active, session, liveStatus, children }: AppShellProps) {
@@ -129,6 +129,7 @@ function Tabs({ active, liveStatus }: { active: Section; liveStatus?: SseConnect
   const tabs: { id: Section; label: string; href: string }[] = [
     { id: "promises", label: "Promises", href: SITE.appRoute },
     { id: "live", label: "Live", href: SITE.dashboardRoute },
+    { id: "account", label: "Account", href: SITE.accountRoute },
   ];
   return (
     <ul className="flex h-full items-stretch gap-6">

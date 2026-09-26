@@ -10,6 +10,11 @@ export const SITE = {
   githubUrl: "https://github.com/juanmaagd/yakusoku",
   appRoute: "/app",
   dashboardRoute: "/app/dashboard",
+  /** The owner account panel (P-account) — balances, deposit, withdraw,
+   * pause/resume and registered merchants, reachable at any time with the
+   * owner's ordinary SIWE session instead of only through the agent's
+   * 30-minute `/setup` link. */
+  accountRoute: "/app/account",
   /** The one-time, agent-issued link that links a wallet as the owner of a
    * per-user `OmamorisanAccount` (P11.4). The agent appends `?token=...`. */
   setupRoute: "/setup",

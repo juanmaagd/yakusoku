@@ -1,0 +1,9 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import AppRoot from "../../components/AppRoot";
+import { SITE } from "../../config";
+---
+
+<Layout title={`Account — ${SITE.name}`}>
+  <AppRoot client:load initialView="account" />
+</Layout>

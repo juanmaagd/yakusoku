@@ -2,12 +2,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SITE } from "../config";
 import type { SseConnectionStatus } from "../lib/sse";
 import { useWalletSession } from "../lib/useWalletSession";
+import AccountView from "./account/AccountView";
 import PromisesView, { PromisesSkeleton } from "./app/PromisesView";
 import SignInGate from "./app/SignInGate";
 import LiveView, { LiveSkeleton } from "./dashboard/LiveView";
 import AppShell from "./ui/AppShell";
 
-type View = "promises" | "live";
+type View = "promises" | "live" | "account";
+
+function routeFor(view: View): string {
+  if (view === "live") return SITE.dashboardRoute;
+  if (view === "account") return SITE.accountRoute;
+  return SITE.appRoute;
+}
+
+function viewForPathname(pathname: string): View {
+  if (pathname === SITE.dashboardRoute) return "live";
+  if (pathname === SITE.accountRoute) return "account";
+  return "promises";
+}
 
 interface LiveFilterRequest {
   id: string | undefined;
@@ -15,9 +28,10 @@ interface LiveFilterRequest {
 }
 
 interface AppRootProps {
-  /** Which tab the current document was rendered for (`/app` vs
-   * `/app/dashboard`) — also this island's server-rendered and first-client
-   * render, so hydration matches exactly (see `app.astro` / `dashboard.astro`). */
+  /** Which tab the current document was rendered for (`/app`, `/app/dashboard`
+   * or `/app/account`) — also this island's server-rendered and first-client
+   * render, so hydration matches exactly (see `app.astro` / `dashboard.astro`
+   * / `account.astro`). */
   initialView: View;
   /** Dev-mode absolute path to `apps/mcp/index.ts`, forwarded to the key
    * handoff's local MCP config snippet. Only ever set on `/app`. */
@@ -65,7 +79,7 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
   const navToken = useRef(0);
 
   const goTo = useCallback((next: View, targetUrl?: string) => {
-    const url = new URL(targetUrl ?? (next === "live" ? SITE.dashboardRoute : SITE.appRoute), window.location.origin);
+    const url = new URL(targetUrl ?? routeFor(next), window.location.origin);
     const target = url.pathname + url.search;
     const current = window.location.pathname + window.location.search;
     if (target !== current) window.history.pushState({ view: next }, "", target);
@@ -82,7 +96,7 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
   // re-derive the view (and, landing on Live, its promise filter) from it.
   useEffect(() => {
     function onPopState() {
-      const next: View = window.location.pathname === SITE.dashboardRoute ? "live" : "promises";
+      const next: View = viewForPathname(window.location.pathname);
       setView(next);
       setVisited((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
       if (next === "live") {
@@ -119,6 +133,9 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
       } else if (url.pathname === SITE.dashboardRoute) {
         e.preventDefault();
         goTo("live", url.pathname + url.search);
+      } else if (url.pathname === SITE.accountRoute) {
+        e.preventDefault();
+        goTo("account", url.pathname + url.search);
       }
     }
     document.addEventListener("click", onClick);
@@ -126,7 +143,7 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
   }, [goTo]);
 
   useEffect(() => {
-    document.title = view === "live" ? `Live — ${SITE.name}` : `Promises — ${SITE.name}`;
+    document.title = view === "live" ? `Live — ${SITE.name}` : view === "account" ? `Account — ${SITE.name}` : `Promises — ${SITE.name}`;
   }, [view]);
 
   const openLive = useCallback(() => goTo("live"), [goTo]);
@@ -155,6 +172,11 @@ export default function AppRoot({ initialView, entryPath }: AppRootProps) {
                 onLiveStatus={setLiveStatus}
                 filterRequest={liveFilterRequest}
               />
+            )}
+          </div>
+          <div hidden={view !== "account"}>
+            {visited.has("account") && (
+              <AccountView key={session.stage.sessionToken} sessionToken={session.stage.sessionToken} onUnauthorized={session.handleUnauthorized} />
             )}
           </div>
         </>
