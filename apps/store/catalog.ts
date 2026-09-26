@@ -28,27 +28,32 @@ export const CATALOG: Product[] = [
     priceUsdc: 25,
     category: "gift_card:amazon",
   },
+  // Priced at $1 so the team can rehearse the full purchase flow without
+  // burning USDC balance.
   {
     sku: "amazon-1-rehearsal",
     title: "Amazon Gift Card — $1 (rehearsal)",
-    description:
-      "Same Amazon gift card, priced at $1 so the team can rehearse the full purchase flow without burning USDC balance.",
+    description: "A $1 Amazon.com gift card, delivered as a redeemable code after payment.",
     priceUsdc: 1,
     category: "gift_card:amazon",
   },
+  // Real inventory, legitimately purchasable on its own — but never part of
+  // the Amazon gift card intent the demo's signed promise covers.
   {
     sku: "steam-25",
     title: "Steam Gift Card — $25",
-    description:
-      "A $25 Steam gift card. Real store inventory, legitimately purchasable on its own — but never part of the Amazon gift card intent the demo's signed TaskIntent actually covers.",
+    description: "A $25 Steam gift card, delivered as a redeemable code after payment.",
     priceUsdc: 25,
     category: "gift_card:steam",
   },
+  // $1 twin of steam-25 so the KEY CASE #9 attack (clean address, in-budget,
+  // wrong item) can be rehearsed against a 1 USDC intent. Descriptions stay
+  // plain customer copy: agents fetch /catalog, and internal notes in it read
+  // as risky page text to the firewall's semantic checks.
   {
     sku: "steam-1",
     title: "Steam Gift Card — $1 (rehearsal)",
-    description:
-      "Same Steam gift card as steam-25, priced at $1 so the KEY CASE #9 attack (clean address, in-budget, wrong item) can be rehearsed against a 1 USDC intent without burning USDC balance.",
+    description: "A $1 Steam gift card, delivered as a redeemable code after payment.",
     priceUsdc: 1,
     category: "gift_card:steam",
   },

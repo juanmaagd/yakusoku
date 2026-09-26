@@ -264,8 +264,13 @@ app.get("/", (_req, res) => {
   res.type("html").send(renderCatalogPage());
 });
 
+// Each product carries its purchase path so an agent never has to guess
+// routes (a guessing agent fills its untrusted-content log with 404 pages).
 app.get("/catalog", (_req, res) => {
-  res.json({ products: CATALOG });
+  res.json({
+    howToBuy: "GET a product's purchaseUrl (relative to this store's origin); it answers 402 with x402 payment requirements.",
+    products: CATALOG.map((product) => ({ ...product, purchaseUrl: `/giftcard/${product.sku}` })),
+  });
 });
 
 app.get("/promo/:sku", (req, res) => {
