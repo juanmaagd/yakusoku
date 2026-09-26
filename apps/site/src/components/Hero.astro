@@ -1,13 +1,10 @@
 ---
 import { SITE } from "../config";
 import Arrow from "./Arrow.astro";
+import ErrandCard from "./ErrandCard.astro";
 
-// The site description, with the protocol folded in for the hero only.
 const SUBHEAD =
-  "A pre-signature firewall for AI agent payments over x402. The agent never holds a key: every payment is checked against the intent you signed, before anything is signed.";
-
-// The deterministic rules the key attack case passes (see "Why deterministic rules miss it").
-const PASSED_RULES = ["budget", "wallet", "address"];
+  "Approve once what your AI agent may buy — what, where, how much, until when. It shops on its own from an account you fund, and can't be talked into anything else.";
 
 const STACK = ["x402", "Base Sepolia", "Intercepta", "World ID for Agents", "TypeSafe Jev"];
 ---
@@ -16,19 +13,19 @@ const STACK = ["x402", "Base Sepolia", "Intercepta", "World ID for Agents", "Typ
   <div class="grid grid-cols-1 items-center gap-12 px-6 pt-12 pb-16 md:px-16 md:pt-16 md:pb-20 lg:pt-14 lg:grid-cols-[0.92fr_1.08fr] lg:gap-10">
     <div class="relative z-10 max-w-[560px]">
       <h1 id="hero-heading" class="headline text-[44px] leading-[1.04] tracking-[-0.02em] text-ink sm:text-[56px] lg:text-display">
-        Your agent pays <strong>only for what you intended.</strong>
+        Give your agent a budget, <strong>not your keys.</strong>
       </h1>
       <p class="mt-6 max-w-[46ch] text-body-lg text-graphite">
         {SUBHEAD}
       </p>
       <div class="mt-9 flex flex-col gap-3 sm:flex-row">
-        <a href={SITE.appRoute} class="btn btn-primary">Launch app</a>
-        <a href="#developers" class="btn btn-outline">Plug in your agent <Arrow class="arrow" /></a>
+        <a href="#setup-agent" class="btn btn-primary">Set up your agent <Arrow class="arrow" /></a>
+        <a href={SITE.appRoute} class="btn btn-outline">Launch app</a>
       </div>
     </div>
 
-    <!-- Promise diff: what was signed against what the agent asked to pay. -->
-    <div class="relative lg:h-[540px]">
+    <!-- The errand card: a real product fragment telling one purchase from request to receipt. -->
+    <div class="relative">
       <img
         src="/art/key.webp"
         alt=""
@@ -37,67 +34,11 @@ const STACK = ["x402", "Base Sepolia", "Intercepta", "World ID for Agents", "Typ
         loading="eager"
         decoding="async"
         fetchpriority="high"
-        class="pointer-events-none mx-auto block w-[260px] select-none sm:w-[340px] lg:absolute lg:top-0 lg:right-0 lg:mx-0 lg:w-[420px] xl:w-[480px]"
+        class="pointer-events-none mx-auto block w-[220px] select-none sm:w-[280px] lg:mx-0 lg:ml-auto lg:w-[300px]"
       />
 
-      <div class="relative z-10 mx-auto -mt-20 w-full max-w-[440px] sm:-mt-24 lg:absolute lg:bottom-0 lg:left-0 lg:mx-0 lg:mt-0">
-        <figure id="promise" class="promise rounded-card border border-hairline bg-surface shadow-console" aria-label="A recorded firewall decision">
-          <dl class="space-y-3.5 px-5 pt-5 pb-4">
-            <div class="p-row p-row-1 grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[86px_1fr_auto]">
-              <dt class="label col-span-2 text-stone sm:col-span-1">You signed</dt>
-              <dd class="text-body text-ink">Amazon gift card · 25 USDC</dd>
-              <dd class="text-graphite">
-                <svg viewBox="0 0 18 18" fill="none" class="h-[18px] w-[18px]" aria-hidden="true">
-                  <circle cx="9" cy="9" r="7.25" stroke="currentColor" stroke-opacity=".35" stroke-width="1.5" />
-                  <path d="M5.3 9.3L7.7 11.6L12.7 6.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                <span class="sr-only">Signed</span>
-              </dd>
-            </div>
-
-            <div>
-              <div class="p-row p-row-2 grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[86px_1fr_auto]">
-                <dt class="label col-span-2 text-stone sm:col-span-1">Agent asks</dt>
-                <dd class="text-body text-ink"><mark class="p-diff">Steam</mark> gift card · 25 USDC</dd>
-                <dd class="text-refuse">
-                  <svg viewBox="0 0 18 18" fill="none" class="h-[18px] w-[18px]" aria-hidden="true">
-                    <circle cx="9" cy="9" r="7.25" fill="currentColor" />
-                    <path d="M6.2 6.2L11.8 11.8M11.8 6.2L6.2 11.8" stroke="#fff" stroke-width="1.7" stroke-linecap="round" />
-                  </svg>
-                  <span class="sr-only">Does not match what you signed</span>
-                </dd>
-              </div>
-              <p class="p-caption mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono sm:pl-[98px] text-[11px] text-graphite">
-                {
-                  PASSED_RULES.map((rule) => (
-                    <span class="inline-flex items-center gap-1">
-                      {rule}
-                      <svg viewBox="0 0 18 18" fill="none" class="h-3 w-3" aria-hidden="true">
-                        <path d="M5.3 9.3L7.7 11.6L12.7 6.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
-                      </svg>
-                      <span class="sr-only">passes</span>
-                    </span>
-                  ))
-                }
-              </p>
-            </div>
-          </dl>
-
-          <figcaption class="p-verdict border-t border-hairline px-5 py-4">
-            <p class="text-heading-sm leading-tight">
-              <span class="font-semibold text-refuse-ink">Refused</span><span class="text-graphite"> — not what you signed</span>
-            </p>
-            <p class="mt-1.5 text-body-sm text-graphite">Nothing was paid.</p>
-          </figcaption>
-        </figure>
-
-        <button type="button" id="promise-replay" class="replay label mt-3 inline-flex items-center gap-1.5 rounded-sm px-1.5 py-1 text-graphite">
-          <svg viewBox="0 0 16 16" fill="none" class="h-3 w-3" aria-hidden="true">
-            <path d="M3 8a5 5 0 1 0 1.6-3.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            <path d="M3.2 2.2v2.6h2.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-          Replay
-        </button>
+      <div class="relative z-10 mx-auto -mt-16 w-full max-w-[460px] sm:-mt-20 lg:mx-0 lg:max-w-[500px] lg:-mt-24">
+        <ErrandCard />
       </div>
     </div>
   </div>
@@ -109,119 +50,3 @@ const STACK = ["x402", "Base Sepolia", "Intercepta", "World ID for Agents", "Typ
     </ul>
   </div>
 </section>
-
-<style>
-  /* The mismatched word: a refuse wash with an underline, swept in. */
-  .p-diff {
-    border-radius: 2px;
-    padding: 0 2px;
-    margin: 0 -2px;
-    color: inherit;
-    background-image:
-      linear-gradient(var(--color-refuse), var(--color-refuse)),
-      linear-gradient(var(--color-refuse-wash), var(--color-refuse-wash));
-    background-repeat: no-repeat;
-    background-position:
-      left bottom,
-      left center;
-    background-size:
-      100% 1.5px,
-      100% 100%;
-  }
-
-  .replay {
-    transition: color 200ms var(--ease-out-soft);
-  }
-  .replay:hover {
-    color: var(--color-ink);
-  }
-  :global(html:not(.js)) .replay {
-    display: none;
-  }
-
-  /* Sequence (the hero's only motion). Hidden start states apply only with
-     JS; the final state is the default. */
-  :global(.js) .promise .p-row,
-  :global(.js) .promise .p-caption {
-    transition:
-      opacity 380ms var(--ease-out-soft),
-      transform 380ms var(--ease-out-soft);
-  }
-  :global(.js) .promise .p-row-2 {
-    transition-delay: 500ms;
-  }
-  :global(.js) .promise .p-diff {
-    transition: background-size 420ms var(--ease-out-soft) 900ms;
-  }
-  :global(.js) .promise .p-caption {
-    transition-delay: 1200ms;
-  }
-  :global(.js) .promise .p-verdict {
-    transform-origin: left center;
-    transition:
-      opacity 360ms var(--ease-out-soft) 1500ms,
-      transform 520ms var(--ease-out-soft) 1500ms;
-  }
-
-  :global(.js) .promise:not(.is-played) .p-row,
-  :global(.js) .promise:not(.is-played) .p-caption {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  :global(.js) .promise:not(.is-played) .p-diff {
-    background-size:
-      0% 1.5px,
-      0% 100%;
-  }
-  :global(.js) .promise:not(.is-played) .p-verdict {
-    opacity: 0;
-    transform: scale(1.02);
-  }
-
-  .promise.no-anim,
-  .promise.no-anim * {
-    transition: none !important;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .promise,
-    .promise * {
-      transition: none !important;
-    }
-  }
-</style>
-
-<script>
-  const card = document.getElementById("promise");
-  const replay = document.getElementById("promise-replay");
-
-  if (card) {
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    // Restart from the hidden state without animating the way back.
-    const play = () => {
-      card.classList.add("no-anim");
-      card.classList.remove("is-played");
-      void card.offsetWidth;
-      card.classList.remove("no-anim");
-      card.classList.add("is-played");
-    };
-
-    replay?.addEventListener("click", play);
-
-    if (reduceMotion || !("IntersectionObserver" in window)) {
-      card.classList.add("is-played");
-    } else {
-      const io = new IntersectionObserver(
-        (entries) => {
-          if (entries.some((e) => e.isIntersecting)) {
-            io.disconnect();
-            card.classList.add("is-played");
-          }
-        },
-        { threshold: 0.4 },
-      );
-      io.observe(card);
-    }
-  }
-</script>
