@@ -1,11 +1,11 @@
-# Omamorisan brand mark
+# Omamori brand mark
 
 Not served by the site — internal reference for anyone touching `public/brand/**`.
 
 ## What it means
 
 A solid circle split by one centered vertical slot: a gate that only lets the right payment
-through. It is also the "o" of omamorisan. No pen, no checkmark, no Japanese motifs (see
+through. It is also the "o" of omamori. No pen, no checkmark, no Japanese motifs (see
 `PRODUCT.md` → Brand Commitments, `DESIGN.md` header) — just the gate.
 
 ## Files (`apps/site/public/brand/`)
@@ -16,7 +16,7 @@ through. It is also the "o" of omamorisan. No pen, no checkmark, no Japanese mot
 | `favicon.svg` | Same mark with a wider slot for legibility at 16–32 px. Ink on transparent. |
 | `favicon-32.png`, `icon-512.png` | Raster fallbacks of the favicon/mark for browsers and PWA manifests that need a PNG. Transparent background. |
 | `apple-touch-icon.png` | 180×180, mark padded ~20% on white (`#ffffff`), per Apple's icon convention. |
-| `logo.svg` | Horizontal lockup — mark left, "omamorisan" wordmark right. Used in `Nav.astro` and `AppShell.tsx`. |
+| `logo.svg` | Horizontal lockup — mark left, "omamori" wordmark right. Used in `Nav.astro` and `AppShell.tsx`. |
 | `logo-stacked.svg` | Mark above the wordmark, centered. Use for square/vertical placements (README, share cards). |
 | `og.png` | 1200×630 Open Graph / Twitter card image: white canvas, hairline frame, lockup + tagline. |
 
@@ -43,7 +43,7 @@ extra ornament — it stays a clean two-path SVG at every size.
 The wordmark in `logo.svg` / `logo-stacked.svg` is **Mona Sans weight 600, outlined to paths**
 (extracted from the project's `@fontsource-variable/mona-sans` package with `fontTools`: the
 variable font instanced at `wght=600`/`wdth=100`, each glyph's outline exported with
-`fontTools.pens.svgPathPen.SVGPathPen`, and the ten glyphs of "omamorisan" assembled using the
+`fontTools.pens.svgPathPen.SVGPathPen`, and the seven glyphs of "omamori" assembled using the
 font's own advance widths with `-0.02em` letter-spacing applied between characters — no kerning
 pairs apply to this word at this weight). The SVG needs no font at render time. Mark height is
 cap height × 1.25, vertically centered on the cap-height band; the gap between mark and wordmark
@@ -72,3 +72,8 @@ with the mark horizontally centered over the wordmark instead.
 Concept generated with Codex `image_gen` as `assets/logo-v2/01-slot.png` (outside this repo); the
 shipped vector geometry was authored by hand from measurements on that concept, not auto-traced.
 The wordmark is Mona Sans 600, outlined to paths with `fontTools` as described above.
+
+The wordmark was renamed to "omamori" (2026-09-27) by dropping the last three glyphs of the
+original outline and trimming the viewBox; spacing and geometry are unchanged. `og.png` was
+re-rendered with the same layout: `logo.svg` at 96 px tall at (80, 226), tagline in Mona Sans 600
+at 35.3 px, 1 px `#e8e8e8` hairline frame.
