@@ -144,12 +144,40 @@ export type PendingApprovalStatus =
 
 // --- Accounts / connect / promises shared types (Phase 3, P9.1/P9.2) --------
 
+/** A payment recipient this account's smart account allow-lists at deploy
+ * time (P11.3a) — `label` is display-only, never sent on-chain. */
+export interface AccountRecipient {
+  address: `0x${string}`;
+  label: string;
+}
+
 export interface StoredAccount {
   id: string;
   /** `keccak256` of the World ID ID token's `sub` claim — never the raw
    * subject (see `hashWorldIdSubject`, packages/shared/step-up.ts). */
   subjectHash: `0x${string}`;
   createdAt: string;
+  /** P11.3a — set once `POST /setup/:token/owner` deploys this account's
+   * `OmamorisanAccount`. `undefined` until then. */
+  smartAccount?: `0x${string}`;
+  /** The wallet that linked itself as this account's owner (verified by
+   * signature over the setup message, account-setup.ts) — same value as
+   * `smartAccount`'s on-chain `owner()`. */
+  owner?: `0x${string}`;
+  /** Atomic USDC units — the `perPaymentLimit` this account's smart account
+   * was actually deployed with (recorded here so `GET /account`/`GET
+   * /setup/:token` keep reporting the real deployed value even if the
+   * `OMAMORISAN_DEFAULT_PER_PAYMENT_LIMIT_USDC` env default changes later).
+   * `undefined` before deployment. */
+  perPaymentLimitAtomic?: bigint;
+  /** The recipient allow-list this account's smart account was actually
+   * deployed with — same "freeze what was deployed" reasoning as
+   * `perPaymentLimitAtomic`. `undefined` before deployment. */
+  recipients?: AccountRecipient[];
+  /** The `createAccount` deployment transaction hash — `undefined` before
+   * deployment, and also `undefined` for a `stub` deployer (no transaction
+   * was ever sent; see `account-setup.ts`'s `AccountDeployer`). */
+  deployTxHash?: `0x${string}`;
 }
 
 export type ConnectStatus = "pending" | "approved" | "denied" | "expired" | "error";
@@ -302,7 +330,12 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
     subject_hash TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    smart_account TEXT,
+    owner TEXT,
+    per_payment_limit_atomic TEXT,
+    recipients_json TEXT,
+    deploy_tx_hash TEXT
   );
   CREATE TABLE IF NOT EXISTS account_keys (
     key_hash TEXT PRIMARY KEY,
@@ -358,6 +391,40 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS promises_account_id ON promises (account_id);
   CREATE INDEX IF NOT EXISTS promises_status ON promises (status);
+  CREATE TABLE IF NOT EXISTS setup_tokens (
+    token_hash TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS setup_tokens_account_id ON setup_tokens (account_id);
+  CREATE TABLE IF NOT EXISTS first_promise_requests (
+    id TEXT PRIMARY KEY,
+    poll_secret_hash TEXT NOT NULL,
+    device_code TEXT NOT NULL,
+    status TEXT NOT NULL,
+    account_id TEXT,
+    pending_account_key TEXT,
+    key_delivered INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    task TEXT NOT NULL,
+    budget TEXT NOT NULL,
+    categories_json TEXT NOT NULL,
+    expiry TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    merchant TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    verification_uri TEXT NOT NULL,
+    verification_uri_complete TEXT,
+    user_code TEXT NOT NULL,
+    interval_seconds INTEGER NOT NULL,
+    requested_at TEXT NOT NULL,
+    gate_started_at_ms INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS first_promise_requests_status ON first_promise_requests (status);
 `);
 
 // WU13 migration: `intents` may already exist from before the `revoked`
@@ -392,6 +459,22 @@ db.exec(`
   );
   if (!existingPromiseColumns.has("merchant")) {
     db.exec(`ALTER TABLE promises ADD COLUMN merchant TEXT`);
+  }
+}
+
+// P11.3a migration: `accounts` may already exist from before the deployment
+// columns did (a live dev sqlite file under data/) — add them by hand,
+// nullable, when missing. A pre-existing account row then reads back with
+// every deployment field `undefined`, exactly like an account that has
+// simply never been set up yet.
+{
+  const existingAccountColumns = new Set(
+    (db.prepare(`PRAGMA table_info(accounts)`).all() as { name: string }[]).map((row) => row.name),
+  );
+  for (const column of ["smart_account", "owner", "per_payment_limit_atomic", "recipients_json", "deploy_tx_hash"]) {
+    if (!existingAccountColumns.has(column)) {
+      db.exec(`ALTER TABLE accounts ADD COLUMN ${column} TEXT`);
+    }
   }
 }
 
@@ -445,6 +528,14 @@ const setControlStmt = db.prepare(
 const insertAccountStmt = db.prepare(`INSERT INTO accounts (id, subject_hash, created_at) VALUES ($id, $subjectHash, $createdAt)`);
 const getAccountBySubjectHashStmt = db.prepare(`SELECT * FROM accounts WHERE subject_hash = $subjectHash`);
 const getAccountStmt = db.prepare(`SELECT * FROM accounts WHERE id = $id`);
+// P11.3a — the ONLY writer of the deployment columns; every other account
+// write (`insertAccountStmt`) leaves them NULL.
+const setAccountDeploymentStmt = db.prepare(
+  `UPDATE accounts SET
+     smart_account = $smartAccount, owner = $owner, per_payment_limit_atomic = $perPaymentLimitAtomic,
+     recipients_json = $recipientsJson, deploy_tx_hash = $deployTxHash
+   WHERE id = $id`,
+);
 const insertAccountKeyStmt = db.prepare(
   `INSERT INTO account_keys (key_hash, account_id, created_at, revoked) VALUES ($keyHash, $accountId, $createdAt, 0)`,
 );
@@ -869,10 +960,24 @@ interface AccountRow {
   id: string;
   subject_hash: string;
   created_at: string;
+  smart_account: string | null;
+  owner: string | null;
+  per_payment_limit_atomic: string | null;
+  recipients_json: string | null;
+  deploy_tx_hash: string | null;
 }
 
 function rowToAccount(row: AccountRow): StoredAccount {
-  return { id: row.id, subjectHash: row.subject_hash as `0x${string}`, createdAt: row.created_at };
+  return {
+    id: row.id,
+    subjectHash: row.subject_hash as `0x${string}`,
+    createdAt: row.created_at,
+    smartAccount: (row.smart_account as `0x${string}` | null) ?? undefined,
+    owner: (row.owner as `0x${string}` | null) ?? undefined,
+    perPaymentLimitAtomic: row.per_payment_limit_atomic ? BigInt(row.per_payment_limit_atomic) : undefined,
+    recipients: row.recipients_json ? (JSON.parse(row.recipients_json) as AccountRecipient[]) : undefined,
+    deployTxHash: (row.deploy_tx_hash as `0x${string}` | null) ?? undefined,
+  };
 }
 
 export function findOrCreateAccountBySubjectHash(subjectHash: `0x${string}`): StoredAccount {
@@ -886,6 +991,30 @@ export function findOrCreateAccountBySubjectHash(subjectHash: `0x${string}`): St
 export function getAccount(id: string): StoredAccount | undefined {
   const row = getAccountStmt.get({ $id: id }) as AccountRow | null;
   return row ? rowToAccount(row) : undefined;
+}
+
+/** P11.3a — `POST /setup/:token/owner`'s only write path. Persists exactly
+ * what was actually deployed (never the live env defaults, which may drift
+ * later) so `GET /account`/`GET /setup/:token` keep reporting the true
+ * on-chain configuration forever after. */
+export function setAccountDeployment(
+  accountId: string,
+  deployment: {
+    smartAccount: `0x${string}`;
+    owner: `0x${string}`;
+    perPaymentLimitAtomic: bigint;
+    recipients: AccountRecipient[];
+    deployTxHash?: `0x${string}`;
+  },
+): void {
+  setAccountDeploymentStmt.run({
+    $id: accountId,
+    $smartAccount: deployment.smartAccount,
+    $owner: deployment.owner,
+    $perPaymentLimitAtomic: deployment.perPaymentLimitAtomic.toString(),
+    $recipientsJson: JSON.stringify(deployment.recipients),
+    $deployTxHash: deployment.deployTxHash ?? null,
+  });
 }
 
 /** Mints a fresh account credential (`ya_...`) bound to `accountId` — the raw
@@ -1143,4 +1272,215 @@ export function countPendingPromisesForAccount(accountId: string): number {
 export function listPromisesByStatus(status: PromiseStatus): StoredPromise[] {
   const rows = listPromisesByStatusStmt.all({ $status: status }) as PromiseRow[];
   return rows.map(rowToPromise);
+}
+
+// --- Setup tokens (P11.3a) ----------------------------------------------------
+//
+// `POST /accounts/setup-link` mints one of these; the RAW token is the
+// credential a browser presents to `GET /setup/:token` / `POST
+// /setup/:token/owner` (account-setup.ts) — only its SHA-256 hash is ever
+// persisted, same discipline as every other bearer secret in this file
+// (`hashAccountKey`/`hashSessionToken`/`hashConnectPollSecret`, auth.ts).
+
+export interface SetupToken {
+  accountId: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+const insertSetupTokenStmt = db.prepare(
+  `INSERT INTO setup_tokens (token_hash, account_id, created_at, expires_at) VALUES ($tokenHash, $accountId, $createdAt, $expiresAt)`,
+);
+const getSetupTokenStmt = db.prepare(`SELECT account_id, created_at, expires_at FROM setup_tokens WHERE token_hash = $tokenHash`);
+
+export function createSetupToken(tokenHash: string, accountId: string, expiresAt: string): void {
+  insertSetupTokenStmt.run({ $tokenHash: tokenHash, $accountId: accountId, $createdAt: new Date().toISOString(), $expiresAt: expiresAt });
+}
+
+/** Looks up a setup token by the SHA-256 hash of its raw value. Returns
+ * `undefined` for an unknown token — account-setup.ts's callers treat that
+ * identically to an expired one (404, never confirms whether some OTHER
+ * token would have worked). Expiry itself is deliberately NOT checked here:
+ * once an account is deployed the token stays a valid (idempotent) credential
+ * forever after (root API contract: "reusable until the account is
+ * deployed") — account-setup.ts checks `expiresAt` only for an account that
+ * hasn't deployed yet. */
+export function getSetupToken(tokenHash: string): SetupToken | undefined {
+  const row = getSetupTokenStmt.get({ $tokenHash: tokenHash }) as { account_id: string; created_at: string; expires_at: string } | null;
+  return row ? { accountId: row.account_id, createdAt: row.created_at, expiresAt: row.expires_at } : undefined;
+}
+
+// --- First promise requests (P9.6) --------------------------------------------
+//
+// `POST /promises/first` (first-promise.ts) — the single-World-ID-approval
+// path that creates an account AND its first promise together, for an MCP
+// session that has no credential at all yet. Same device-flow-resumption
+// shape as `ConnectRequest`/`PendingApproval`/`StoredPromise` above, plus the
+// promise fields needed to build the real `StoredPromise` row once approved
+// (there is no account yet to hang a `promises` row off of until then).
+
+export type FirstPromiseStatus = "pending" | "approved" | "denied" | "expired" | "error";
+
+export interface FirstPromiseRequest {
+  id: string;
+  pollSecretHash: string;
+  deviceCode: string;
+  status: FirstPromiseStatus;
+  accountId?: string;
+  /** Raw account key, held only until the first successful poll after
+   * approval delivers it — same one-time-delivery pattern as
+   * `ConnectRequest.pendingAccountKey`. */
+  pendingAccountKey?: string;
+  keyDelivered: boolean;
+  reason?: string;
+  task: string;
+  budget: bigint;
+  categories: string[];
+  expiry: bigint;
+  nonce: `0x${string}`;
+  merchant: string;
+  summary: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  userCode: string;
+  intervalSeconds: number;
+  requestedAt: string;
+  gateStartedAtMs: number;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const insertFirstPromiseRequestStmt = db.prepare(
+  `INSERT INTO first_promise_requests (
+     id, poll_secret_hash, device_code, status, account_id, pending_account_key, key_delivered, reason,
+     task, budget, categories_json, expiry, nonce, merchant, summary,
+     verification_uri, verification_uri_complete, user_code, interval_seconds, requested_at,
+     gate_started_at_ms, expires_at, created_at, updated_at
+   ) VALUES (
+     $id, $pollSecretHash, $deviceCode, $status, $accountId, $pendingAccountKey, $keyDelivered, $reason,
+     $task, $budget, $categoriesJson, $expiry, $nonce, $merchant, $summary,
+     $verificationUri, $verificationUriComplete, $userCode, $intervalSeconds, $requestedAt,
+     $gateStartedAtMs, $expiresAt, $createdAt, $updatedAt
+   )`,
+);
+const updateFirstPromiseRequestStmt = db.prepare(
+  `UPDATE first_promise_requests SET
+     status = $status, account_id = $accountId, pending_account_key = $pendingAccountKey,
+     key_delivered = $keyDelivered, reason = $reason, interval_seconds = $intervalSeconds, updated_at = $updatedAt
+   WHERE id = $id`,
+);
+const getFirstPromiseRequestStmt = db.prepare(`SELECT * FROM first_promise_requests WHERE id = $id`);
+const listFirstPromiseRequestsByStatusStmt = db.prepare(`SELECT * FROM first_promise_requests WHERE status = $status`);
+
+interface FirstPromiseRequestRow {
+  id: string;
+  poll_secret_hash: string;
+  device_code: string;
+  status: string;
+  account_id: string | null;
+  pending_account_key: string | null;
+  key_delivered: number;
+  reason: string | null;
+  task: string;
+  budget: string;
+  categories_json: string;
+  expiry: string;
+  nonce: string;
+  merchant: string;
+  summary: string;
+  verification_uri: string;
+  verification_uri_complete: string | null;
+  user_code: string;
+  interval_seconds: number;
+  requested_at: string;
+  gate_started_at_ms: number;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToFirstPromiseRequest(row: FirstPromiseRequestRow): FirstPromiseRequest {
+  return {
+    id: row.id,
+    pollSecretHash: row.poll_secret_hash,
+    deviceCode: row.device_code,
+    status: row.status as FirstPromiseStatus,
+    accountId: row.account_id ?? undefined,
+    pendingAccountKey: row.pending_account_key ?? undefined,
+    keyDelivered: Boolean(row.key_delivered),
+    reason: row.reason ?? undefined,
+    task: row.task,
+    budget: BigInt(row.budget),
+    categories: JSON.parse(row.categories_json) as string[],
+    expiry: BigInt(row.expiry),
+    nonce: row.nonce as `0x${string}`,
+    merchant: row.merchant,
+    summary: row.summary,
+    verificationUri: row.verification_uri,
+    verificationUriComplete: row.verification_uri_complete ?? undefined,
+    userCode: row.user_code,
+    intervalSeconds: row.interval_seconds,
+    requestedAt: row.requested_at,
+    gateStartedAtMs: row.gate_started_at_ms,
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function createFirstPromiseRequest(request: FirstPromiseRequest): void {
+  insertFirstPromiseRequestStmt.run({
+    $id: request.id,
+    $pollSecretHash: request.pollSecretHash,
+    $deviceCode: request.deviceCode,
+    $status: request.status,
+    $accountId: request.accountId ?? null,
+    $pendingAccountKey: request.pendingAccountKey ?? null,
+    $keyDelivered: request.keyDelivered ? 1 : 0,
+    $reason: request.reason ?? null,
+    $task: request.task,
+    $budget: request.budget.toString(),
+    $categoriesJson: JSON.stringify(request.categories),
+    $expiry: request.expiry.toString(),
+    $nonce: request.nonce,
+    $merchant: request.merchant,
+    $summary: request.summary,
+    $verificationUri: request.verificationUri,
+    $verificationUriComplete: request.verificationUriComplete ?? null,
+    $userCode: request.userCode,
+    $intervalSeconds: request.intervalSeconds,
+    $requestedAt: request.requestedAt,
+    $gateStartedAtMs: request.gateStartedAtMs,
+    $expiresAt: request.expiresAt,
+    $createdAt: request.createdAt,
+    $updatedAt: request.updatedAt,
+  });
+}
+
+/** Full-row update for every mutable field — same "rewrite on each
+ * transition" pattern `saveConnectRequest` uses for a `ConnectRequest`. */
+export function saveFirstPromiseRequest(request: FirstPromiseRequest): void {
+  updateFirstPromiseRequestStmt.run({
+    $id: request.id,
+    $status: request.status,
+    $accountId: request.accountId ?? null,
+    $pendingAccountKey: request.pendingAccountKey ?? null,
+    $keyDelivered: request.keyDelivered ? 1 : 0,
+    $reason: request.reason ?? null,
+    $intervalSeconds: request.intervalSeconds,
+    $updatedAt: request.updatedAt,
+  });
+}
+
+export function getFirstPromiseRequest(id: string): FirstPromiseRequest | undefined {
+  const row = getFirstPromiseRequestStmt.get({ $id: id }) as FirstPromiseRequestRow | null;
+  return row ? rowToFirstPromiseRequest(row) : undefined;
+}
+
+/** Every first-promise request still awaiting a human, for resuming on boot
+ * (first-promise.ts's `resumeFirstPromiseApprovalsOnBoot`). */
+export function listFirstPromiseRequestsByStatus(status: FirstPromiseStatus): FirstPromiseRequest[] {
+  const rows = listFirstPromiseRequestsByStatusStmt.all({ $status: status }) as FirstPromiseRequestRow[];
+  return rows.map(rowToFirstPromiseRequest);
 }

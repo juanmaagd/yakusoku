@@ -33,6 +33,12 @@ function requireEnv(name: string): string {
 
 const account = privateKeyToAccount(requireEnv("FIREWALL_PRIVATE_KEY") as Hex);
 
+/** Exported so account-setup.ts (P11.3a) can send the `createAccount` deploy
+ * transaction from the SAME key that is every deployed account's `operator`
+ * (root CLAUDE.md's funding model) — one firewall key, one meaning, never a
+ * second env var to keep in sync with this one. */
+export const operatorAccount = account;
+
 // Exported so siwe.ts can reuse the same RPC-backed client for
 // `verifySiweMessage` (also ERC-6492-aware) instead of standing up a second one.
 export const publicClient = createPublicClient({

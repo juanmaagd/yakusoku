@@ -28,6 +28,8 @@ const SESSION_TOKEN_RANDOM_BYTES = 32;
 const ACCOUNT_KEY_PREFIX = "ya_";
 const ACCOUNT_KEY_RANDOM_BYTES = 32;
 const CONNECT_POLL_SECRET_RANDOM_BYTES = 32;
+const SETUP_TOKEN_PREFIX = "yt_";
+const SETUP_TOKEN_RANDOM_BYTES = 32;
 
 /** Generates a fresh mandate credential: `yk_` + 32 random bytes, base64url
  * encoded. Never logged or persisted in plaintext — see the file header. */
@@ -90,6 +92,22 @@ export function generateConnectPollSecret(): string {
 /** SHA-256 hex digest of a connect poll secret. */
 export function hashConnectPollSecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
+}
+
+/** Generates a fresh setup-link token (P11.3a): `yt_` + 32 random bytes,
+ * base64url encoded — distinct prefix from every other token kind. Unlike
+ * `yk_`/`ya_`/`ys_`, this one travels IN A URL (`/setup?token=...`), not an
+ * `Authorization` header — "the token is the credential" (root API
+ * contract), so it's hashed and looked up exactly like every other bearer
+ * secret in this file, never treated as less sensitive for appearing in a
+ * URL instead. */
+export function generateSetupToken(): string {
+  return `${SETUP_TOKEN_PREFIX}${randomBytes(SETUP_TOKEN_RANDOM_BYTES).toString("base64url")}`;
+}
+
+/** SHA-256 hex digest of a setup token — same algorithm as `hashAgentKey`. */
+export function hashSetupToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 /** Extracts the bearer token from an `Authorization: Bearer <token>` header
