@@ -553,6 +553,12 @@ const setControlStmt = db.prepare(
 const insertAccountStmt = db.prepare(`INSERT INTO accounts (id, subject_hash, created_at) VALUES ($id, $subjectHash, $createdAt)`);
 const getAccountBySubjectHashStmt = db.prepare(`SELECT * FROM accounts WHERE subject_hash = $subjectHash`);
 const getAccountStmt = db.prepare(`SELECT * FROM accounts WHERE id = $id`);
+// dashboard-promises (D1) — every account a wallet linked as owner at
+// `/setup` (`setAccountDeployment`'s `owner` column below). Case-insensitive:
+// an address may arrive checksummed or lowercased depending on the caller,
+// same tolerance every owner check in index.ts already applies at compare
+// time.
+const listAccountsByOwnerStmt = db.prepare(`SELECT * FROM accounts WHERE owner IS NOT NULL AND LOWER(owner) = LOWER($owner)`);
 // P11.3a — the ONLY writer of the deployment columns; every other account
 // write (`insertAccountStmt`) leaves them NULL.
 const setAccountDeploymentStmt = db.prepare(
@@ -630,6 +636,11 @@ const updatePromiseStmt = db.prepare(
 const updatePromiseSpentStmt = db.prepare(`UPDATE promises SET spent = $spent WHERE id = $id`);
 const getPromiseStmt = db.prepare(`SELECT * FROM promises WHERE id = $id`);
 const listPromisesByAccountStmt = db.prepare(`SELECT * FROM promises WHERE account_id = $accountId ORDER BY created_at DESC`);
+// dashboard-promises (D1) — every promise across every account, for the
+// operator-only branch of `GET /owner/promises` (index.ts), same
+// full-visibility pattern `listIntents`/`listReceipts` already give the
+// legacy operator dashboard.
+const listAllPromisesStmt = db.prepare(`SELECT * FROM promises ORDER BY created_at DESC`);
 const countPromisesByAccountAndStatusStmt = db.prepare(
   `SELECT COUNT(*) as count FROM promises WHERE account_id = $accountId AND status = $status`,
 );
@@ -1032,6 +1043,36 @@ export function getAccount(id: string): StoredAccount | undefined {
   return row ? rowToAccount(row) : undefined;
 }
 
+/** dashboard-promises (D1) — every account this wallet linked as owner
+ * (`POST /setup/:token/owner`, account-setup.ts's `linkOwner`). Powers the
+ * owner dashboard's promise/receipt visibility: a promise on an account with
+ * no linked owner yet can never appear there (documented limitation,
+ * odd/tasks/dashboard-promises.md). */
+export function listAccountsByOwner(owner: `0x${string}`): StoredAccount[] {
+  const rows = listAccountsByOwnerStmt.all({ $owner: owner }) as AccountRow[];
+  return rows.map(rowToAccount);
+}
+
+/** dashboard-promises (D1) — every mandate id a session wallet may see:
+ * legacy wallet-signed intents it signed itself, union the promise ids of
+ * every account it linked as owner. index.ts's owner-scoped `GET
+ * /receipts`/`GET /receipts/:id`/`GET /approvals/:receiptId` all check
+ * membership in this set instead of comparing `intent.signer` directly,
+ * because a promise-backed mandate's `signer` is always the placeholder zero
+ * address (`promiseAsMandate`, promises.ts) and would never match a real
+ * wallet. */
+export function listOwnedMandateIds(owner: `0x${string}`): Set<string> {
+  const lower = owner.toLowerCase();
+  const ids = new Set<string>();
+  for (const intent of listIntents()) {
+    if (intent.signer.toLowerCase() === lower) ids.add(intent.id);
+  }
+  for (const account of listAccountsByOwner(owner)) {
+    for (const promise of listPromisesByAccount(account.id)) ids.add(promise.id);
+  }
+  return ids;
+}
+
 /** P11.3a — `POST /setup/:token/owner`'s only write path. Persists exactly
  * what was actually deployed (never the live env defaults, which may drift
  * later) so `GET /account`/`GET /setup/:token` keep reporting the true
@@ -1345,6 +1386,13 @@ export function getPromise(id: string): StoredPromise | undefined {
  * `promises` summaries. */
 export function listPromisesByAccount(accountId: string): StoredPromise[] {
   const rows = listPromisesByAccountStmt.all({ $accountId: accountId }) as PromiseRow[];
+  return rows.map(rowToPromise);
+}
+
+/** Latest-first across every account — the admin-only branch of `GET
+ * /owner/promises` (index.ts). */
+export function listAllPromises(): StoredPromise[] {
+  const rows = listAllPromisesStmt.all() as PromiseRow[];
   return rows.map(rowToPromise);
 }
 

@@ -26,7 +26,10 @@ import {
   getPromise,
   getReceipt,
   getSessionByToken,
+  listAccountsByOwner,
+  listAllPromises,
   listIntents,
+  listOwnedMandateIds,
   listPromisesByAccount,
   listReceipts,
   remainingBudget,
@@ -38,6 +41,7 @@ import {
   setOwnerControl,
   type StoredAccount,
   type StoredIntent,
+  type StoredPromise,
 } from "./store";
 import { extractBearerToken } from "./auth";
 import { verifyTaskIntentSignature } from "./signer";
@@ -870,12 +874,11 @@ app.get("/receipts", (c) => {
   if (isLocalAdminRequest(c)) return c.json(listReceipts(limit));
   const auth = authenticateSession(c);
   if (!auth.ok) return c.json(auth.body, auth.status);
-  const owner = auth.address.toLowerCase();
-  const ownedIntentIds = new Set(
-    listIntents()
-      .filter((i) => i.signer.toLowerCase() === owner)
-      .map((i) => i.id),
-  );
+  // dashboard-promises (D1): legacy wallet-signed intents this wallet signed,
+  // union the promise ids of every account it linked as owner — a
+  // promise-backed receipt's `intentId` never matches `intent.signer`
+  // directly (see `listOwnedMandateIds`, store.ts).
+  const ownedIntentIds = listOwnedMandateIds(auth.address);
   return c.json(listReceipts(limit).filter((r) => ownedIntentIds.has(r.intentId)));
 });
 
@@ -889,11 +892,40 @@ app.get("/receipts/:id", (c) => {
   if (isLocalAdminRequest(c)) return c.json(receipt);
   const auth = authenticateSession(c);
   if (!auth.ok) return c.json(auth.body, auth.status);
-  const intent = getIntent(receipt.intentId);
-  if (!intent || intent.signer.toLowerCase() !== auth.address.toLowerCase()) {
+  // dashboard-promises (D1) — same ownership set as `GET /receipts` above,
+  // covers both a wallet-signed intent and a promise-backed one.
+  if (!listOwnedMandateIds(auth.address).has(receipt.intentId)) {
     return c.json({ error: "receipt_not_found" }, 404);
   }
   return c.json(receipt);
+});
+
+// --- GET /owner/promises (dashboard-promises D1) ----------------------------
+// The owner-session counterpart to `GET /promises` (account-key-scoped,
+// P9.2 above): every promise across every account this wallet linked as
+// owner at `/setup` (account-setup.ts's `linkOwner`), newest first. Same
+// operator-vs-owner split as `GET /intents`/`GET /receipts`. Public fields
+// only — no agent keys, no attestation internals (see `serializePromiseSummary`).
+
+function serializeOwnerPromise(promise: StoredPromise, account: StoredAccount | undefined) {
+  return {
+    ...serializePromiseSummary(promise),
+    accountId: promise.accountId,
+    smartAccount: account?.smartAccount,
+  };
+}
+
+app.get("/owner/promises", (c) => {
+  if (isLocalAdminRequest(c)) {
+    return c.json(listAllPromises().map((p) => serializeOwnerPromise(p, getAccount(p.accountId))));
+  }
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const accounts = listAccountsByOwner(auth.address);
+  const promises = accounts
+    .flatMap((account) => listPromisesByAccount(account.id).map((p) => serializeOwnerPromise(p, account)))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return c.json(promises);
 });
 
 // --- GET /receipts/:id/attestation (WU12) -------------------------------
@@ -985,8 +1017,10 @@ app.get("/approvals/:receiptId", (c) => {
   if (sessionAuth.ok) {
     const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
     if (!approval) return c.json({ error: "approval_not_found" }, 404);
-    const intent = getIntent(approval.intentId);
-    if (!intent || intent.signer.toLowerCase() !== sessionAuth.address.toLowerCase()) {
+    // dashboard-promises (D1) — same ownership set as `GET /receipts` above,
+    // so a promise-backed approval (its `intentId` is a promise id, never a
+    // real wallet signer) shows up for its account's linked owner too.
+    if (!listOwnedMandateIds(sessionAuth.address).has(approval.intentId)) {
       return c.json({ error: "approval_not_found" }, 404);
     }
     return c.json(approvalStatusResponse(approval));
@@ -1011,22 +1045,44 @@ app.get("/approvals/:receiptId", (c) => {
 // dashboard stream, unchanged from WU9; `?session=<token>` for a wallet
 // owner's own stream, filtered to only the events that belong to its mandates.
 
+/** dashboard-promises (D1) — resolves the owning wallet address for ANY
+ * mandate id, wallet-signed or promise-backed: a wallet intent's own
+ * `signer`, or a world_id promise's linked account owner (`resolveMandate`'s
+ * `source`/`accountId`, promises.ts's `promiseAsMandate`). `undefined` when
+ * the mandate doesn't exist, or a promise's account has no linked owner yet
+ * (documented limitation, odd/tasks/dashboard-promises.md). */
+function mandateOwnerAddress(intentId: string): string | undefined {
+  const mandate = resolveMandate(intentId);
+  if (!mandate) return undefined;
+  if (mandate.source === "world_id") {
+    return mandate.accountId ? getAccount(mandate.accountId)?.owner : undefined;
+  }
+  return mandate.signer;
+}
+
 /** Resolves the owning wallet address for one firewall event, or `undefined`
  * when the event has no single owner (`control.changed`, the global kill
  * switch) or its owner can't be resolved. Every event either carries the
- * intent's `signer` directly (`intent.created`/`intent.revoked`) or a
- * receiptId/intentId this looks up through the store. */
+ * intent's `signer` (`intent.created`/`intent.revoked`) or an accountId
+ * (`promise.*`) directly, or a receiptId/intentId this looks up through the
+ * store via `mandateOwnerAddress`. */
 function eventOwnerAddress(evt: FirewallEvent): string | undefined {
   const payload = evt.payload as Record<string, unknown> | undefined;
   switch (evt.event) {
     case "intent.created":
     case "intent.revoked":
       return typeof payload?.signer === "string" ? payload.signer : undefined;
+    case "promise.requested":
+    case "promise.approved":
+    case "promise.denied": {
+      const accountId = payload?.accountId;
+      return typeof accountId === "string" ? getAccount(accountId)?.owner : undefined;
+    }
     case "decision":
     case "settlement.reported":
     case "sign.requested": {
       const intentId = payload?.intentId;
-      return typeof intentId === "string" ? getIntent(intentId)?.signer : undefined;
+      return typeof intentId === "string" ? mandateOwnerAddress(intentId) : undefined;
     }
     case "stage.completed":
     case "approval.requested":
@@ -1034,7 +1090,7 @@ function eventOwnerAddress(evt: FirewallEvent): string | undefined {
       const receiptId = payload?.receiptId;
       if (typeof receiptId !== "string") return undefined;
       const receipt = getReceipt(receiptId);
-      return receipt ? getIntent(receipt.intentId)?.signer : undefined;
+      return receipt ? mandateOwnerAddress(receipt.intentId) : undefined;
     }
     default:
       return undefined; // e.g. "control.changed" — the global kill switch has no single owner
