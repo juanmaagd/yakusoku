@@ -78,7 +78,7 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
         <div className="max-w-[640px]">
           <h1 className="headline text-heading-sm md:text-heading">
-            Your <strong>promises</strong>
+            Your <strong>intents</strong>
           </h1>
           <p className="mt-2 text-body text-graphite">
             What your agent may buy, with how much, until when. Enforced before every payment.
