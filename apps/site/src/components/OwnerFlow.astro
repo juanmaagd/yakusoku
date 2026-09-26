@@ -1,0 +1,68 @@
+---
+// The owner's flow: the sequence itself carries meaning (ask, then
+// approve, then it buys), so unlike the rest of the page, numbering these
+// three steps is load-bearing rather than decorative.
+const STEPS = [
+  {
+    art: "/art/agent.webp",
+    title: "Ask your agent",
+    body: "Tell Claude, or any agent that speaks MCP, what you need. It asks Omamori for an intent: what, where, how much and until when.",
+  },
+  {
+    art: "/art/approval.webp",
+    title: "Approve once",
+    body: "One tap in World App proves a real person said yes. The first time, it also creates your account: link a wallet as its owner and fund it with USDC.",
+  },
+  {
+    art: "/art/gift.webp",
+    alt: "A wrapped gift box resting on a receipt",
+    title: "It buys. You get the receipt.",
+    body: "It pays from your account inside that intent: no taps, no keys. Every payment leaves a receipt with its reason, and you can revoke the intent any time.",
+  },
+] as const;
+---
+
+<section id="how-it-works" class="band" aria-labelledby="how-heading">
+  <h2 id="how-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
+    One approval. <strong>Then it shops on its own.</strong>
+  </h2>
+
+  <ol class="steps mt-14 grid grid-cols-1 overflow-hidden rounded-card border border-hairline sm:grid-cols-3" data-inview>
+    {
+      STEPS.map((step, i) => (
+        <li
+          class="step relative flex flex-col gap-4 border-hairline px-6 py-7 max-sm:[&:not(:first-child)]:border-t sm:[&:not(:first-child)]:border-l"
+          style={`--i: ${i}`}
+        >
+          <p class="font-mono text-caption text-stone">{String(i + 1).padStart(2, "0")}</p>
+          <img
+            src={step.art}
+            alt={"alt" in step ? step.alt : ""}
+            width="1024"
+            height="1024"
+            loading="lazy"
+            decoding="async"
+            class="h-20 w-20 select-none"
+          />
+          <div>
+            <p class="text-body-lg font-semibold text-ink">{step.title}</p>
+            <p class="mt-2 text-body-sm text-graphite">{step.body}</p>
+          </div>
+        </li>
+      ))
+    }
+  </ol>
+</section>
+
+<style>
+  :global(.js) .steps .step {
+    transition:
+      opacity 420ms var(--ease-out-soft),
+      transform 420ms var(--ease-out-soft);
+    transition-delay: calc(var(--i) * 160ms);
+  }
+  :global(.js) .steps:not(.is-in) .step {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+</style>

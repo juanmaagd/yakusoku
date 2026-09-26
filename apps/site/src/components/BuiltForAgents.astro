@@ -1,0 +1,88 @@
+---
+// Every row names a real tool or field from apps/mcp/tools.ts — dropped
+// rather than invented if it couldn't be verified there.
+const BEHAVIORS = [
+  {
+    title: "Knows what's left",
+    body: "USDC and minutes left on each intent, before it tries to pay.",
+    ref: "list_promises",
+  },
+  {
+    title: "Never pays twice",
+    body: "A retry returns the first result; buying the same item again needs an explicit purchase reference.",
+    ref: "purchaseRef",
+  },
+  {
+    title: "Asks before changing plans",
+    body: "A new plan replaces the intent only after you approve it.",
+    ref: "replaces",
+  },
+  {
+    title: "Sets its rules once",
+    body: "Spending rules you approve once cover everyday purchases.",
+    ref: "request_promise",
+  },
+  {
+    title: "Waits for you",
+    body: "Keeps the purchase open while you approve on your phone.",
+    ref: "check_approval",
+  },
+  {
+    title: "Never sees a key",
+    body: "It holds a scoped credential that can only ask for a signature.",
+    ref: "agentKey",
+  },
+] as const;
+
+// The real shape `list_promises` returns for one intent (apps/mcp/tools.ts,
+// `withAgentView`): precomputed remainingUsdc/expiresInMinutes/usableNow so
+// the agent never has to compare dates or read atomic units itself.
+const INTENT_VIEW = [
+  { key: "task", value: "Amazon gift cards for personal gifts, up to 25 USDC each" },
+  { key: "merchant", value: "store.example" },
+  { key: "remainingUsdc", value: "25.00" },
+  { key: "expiresInMinutes", value: "1380" },
+  { key: "usableNow", value: "true" },
+] as const;
+---
+
+<section id="agents" class="band" aria-labelledby="agents-heading">
+  <h2 id="agents-heading" class="headline max-w-[22ch] text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
+    Built so your agent <strong>gets purchases right.</strong>
+  </h2>
+  <p class="mt-6 max-w-[54ch] text-body-lg text-graphite">
+    Omamori gives your agent the context to spend correctly, not just a way to pay.
+  </p>
+
+  <div class="mt-12 grid grid-cols-1 items-start gap-10 lg:grid-cols-[1.2fr_1fr] lg:gap-12">
+    <ul class="divide-y divide-hairline overflow-hidden rounded-card border border-hairline bg-surface">
+      {
+        BEHAVIORS.map((row) => (
+          <li class="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+            <div>
+              <p class="text-body font-semibold text-ink">{row.title}</p>
+              <p class="mt-1 text-body-sm text-graphite">{row.body}</p>
+            </div>
+            <code class="shrink-0 rounded-sm bg-fog px-1.5 py-0.5 font-mono text-caption text-graphite">{row.ref}</code>
+          </li>
+        ))
+      }
+    </ul>
+
+    <div class="rounded-card border border-hairline">
+      <div class="border-b border-hairline px-5 py-3.5">
+        <p class="label text-graphite">list_promises → this intent</p>
+      </div>
+      <dl class="divide-y divide-hairline">
+        {
+          INTENT_VIEW.map((row) => (
+            <div class="flex items-center justify-between gap-4 px-5 py-3">
+              <dt class="label text-graphite">{row.key}</dt>
+              <dd class="min-w-0 truncate font-mono text-body-sm text-ink">{row.value}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </div>
+  </div>
+</section>
