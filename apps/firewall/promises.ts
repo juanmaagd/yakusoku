@@ -132,7 +132,9 @@ export type CreatePromiseOutcome =
   | { ok: true; promise: StoredPromise }
   | { ok: false; status: 400 | 429 | 502; error: string };
 
-function buildPromiseSummary(
+/** Exported so `first-promise.ts` (P9.6) builds the identical human-facing
+ * approval text for its combined account+promise flow. */
+export function buildPromiseSummary(
   task: string,
   budgetUsdc: number,
   categories: string[],
@@ -147,13 +149,18 @@ function buildPromiseSummary(
   return `Approve "${task}" — up to $${budgetUsdc.toFixed(2)} USDC across ${categories.join(", ")}, expiring ${expiryIso}, at ${merchantHost}.`;
 }
 
-/** `POST /promises` (index.ts, account-key auth). Validates the caps
- * (per-promise budget, max pending promises per account, max expiry), then
- * starts a fresh World ID device flow bound to this exact promise — the
- * SAME device-authorization/poll/validate primitives (world-id.ts) WU11
- * already uses for payment approvals and accounts.ts uses for connect,
- * unmodified. */
-export async function createPromiseRequest(account: StoredAccount, input: CreatePromiseInput): Promise<CreatePromiseOutcome> {
+export type ValidatedPromiseInput = { ok: true; merchantOrigin: string } | { ok: false; status: 400 | 429; error: string };
+
+/**
+ * Shared cap/shape validation for a promise request — budget bounds,
+ * category count, expiry bounds, and merchant-origin normalization (H1 fix).
+ * Exported so `first-promise.ts` (P9.6's single-World-ID-approval combined
+ * account+promise flow) validates its own input identically, rather than
+ * duplicating these constants and rules. `accountId` is optional: the P9.6
+ * flow calls this BEFORE an account exists yet, so it has no pending-promise
+ * count to check against (a brand-new account can only ever have zero).
+ */
+export function validatePromiseInput(input: CreatePromiseInput, accountId?: string): ValidatedPromiseInput {
   if (!Number.isFinite(input.budgetUsdc) || input.budgetUsdc <= 0) {
     return { ok: false, status: 400, error: "budgetUsdc must be a positive number" };
   }
@@ -173,13 +180,28 @@ export async function createPromiseRequest(account: StoredAccount, input: Create
   if (!merchantResult.ok) {
     return { ok: false, status: 400, error: `invalid merchant: ${merchantResult.reason}` };
   }
-  const merchantOrigin = merchantResult.origin;
 
-  const pendingCount = countPendingPromisesForAccount(account.id);
-  const maxPending = maxPendingPromises();
-  if (pendingCount >= maxPending) {
-    return { ok: false, status: 429, error: `too many pending promises for this account (max ${maxPending})` };
+  if (accountId !== undefined) {
+    const pendingCount = countPendingPromisesForAccount(accountId);
+    const maxPending = maxPendingPromises();
+    if (pendingCount >= maxPending) {
+      return { ok: false, status: 429, error: `too many pending promises for this account (max ${maxPending})` };
+    }
   }
+
+  return { ok: true, merchantOrigin: merchantResult.origin };
+}
+
+/** `POST /promises` (index.ts, account-key auth). Validates the caps
+ * (per-promise budget, max pending promises per account, max expiry), then
+ * starts a fresh World ID device flow bound to this exact promise — the
+ * SAME device-authorization/poll/validate primitives (world-id.ts) WU11
+ * already uses for payment approvals and accounts.ts uses for connect,
+ * unmodified. */
+export async function createPromiseRequest(account: StoredAccount, input: CreatePromiseInput): Promise<CreatePromiseOutcome> {
+  const validated = validatePromiseInput(input, account.id);
+  if (!validated.ok) return validated;
+  const merchantOrigin = validated.merchantOrigin;
 
   let device: Awaited<ReturnType<typeof startDeviceAuthorization>>;
   try {
