@@ -9,6 +9,17 @@ URLs below use placeholders. Replace them with the Dokploy domains:
 | `<STORE_URL>` | Demo store (x402 merchant, fake gift cards) |
 | `<SITE_URL>` | Site: landing, `/app`, `/app/dashboard`, `/setup` |
 
+Current team instance (Dokploy, deployed 2026-09-26):
+
+| Service | URL |
+|---|---|
+| Site | https://omamorisan-site-074960-91-98-199-240.sslip.io |
+| Store | https://omamorisan-store-1135aa-91-98-199-240.sslip.io |
+| Hosted MCP (Streamable HTTP) | https://omamorisan-mcp-8e4dca-91-98-199-240.sslip.io/mcp |
+| Firewall API | https://omamorisan-firewall-e25869-91-98-199-240.sslip.io |
+
+Claude Code: `claude mcp add --transport http omamorisan-team https://omamorisan-mcp-8e4dca-91-98-199-240.sslip.io/mcp`
+
 Payments are real transactions on **Base Sepolia** (testnet USDC, no real money). Gift card codes are fake.
 
 ## What you need
