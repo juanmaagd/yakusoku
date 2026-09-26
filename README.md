@@ -20,9 +20,9 @@ bun run site   # apps/site on :4321
 
 Open `http://localhost:4321/app`, connect a wallet, and sign a promise — an EIP-712 mandate — with what your agent may buy, its budget in USDC, and when it expires. This never costs gas and is the only thing that ever authorizes spending.
 
-**2. Paste the MCP config it hands you.**
+**2. Connect your agent.**
 
-The result screen shows your agent key exactly once, plus a ready-to-paste MCP client config (`apps/site/src/config.ts`, `mcpStdioConfigSnippet`):
+The result screen shows your agent key exactly once, with the promise ID, the MCP server URL and the auth header to copy. For a stdio MCP client (Claude Desktop, Cursor), use this config (`apps/site/src/config.ts`, `mcpStdioConfigSnippet`):
 
 ```json
 {
