@@ -24,15 +24,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { USDC_SEPOLIA_ADDRESS, X402_NETWORK, type TaskIntentMessage } from "@yakusoku/shared";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { hashWorldIdSubject, USDC_SEPOLIA_ADDRESS, X402_NETWORK, type TaskIntentMessage } from "@yakusoku/shared";
 
 // store.ts opens a bun:sqlite file under FIREWALL_DATA_DIR and signer.ts
 // reads FIREWALL_PRIVATE_KEY, both at module-load time — same isolated-temp-
 // dir / throwaway-key pattern every other test file in this suite uses.
+// account-setup.test.ts's own stub-deployer / fixed-recipients env vars, so
+// this file's owner-account-panel tests (A2) deploy for free too — no gas,
+// no dependency on MERCHANT_KEY/MERCHANT_ADDRESS being set in this shell.
 process.env.FIREWALL_DATA_DIR = mkdtempSync(join(tmpdir(), "yakusoku-index-test-"));
 process.env.FIREWALL_PRIVATE_KEY ??= `0x${"44".repeat(32)}`;
+process.env.OMAMORISAN_ACCOUNT_DEPLOYER = "stub";
+process.env.OMAMORISAN_DEFAULT_RECIPIENTS ??= JSON.stringify([
+  { address: "0x000000000000000000000000000000000000dEaD", label: "Test recipient" },
+]);
 
-const { createIntent, createSession, savePendingApproval, saveReceipt } = await import("./store");
+const { createIntent, createSession, findOrCreateAccountBySubjectHash, savePendingApproval, saveReceipt } = await import("./store");
+const { createSetupLink, fillSetupMessage, linkOwner, setupMessageTemplate } = await import("./account-setup");
 const firewallConfig = (await import("./index")).default;
 const server = Bun.serve({ ...firewallConfig, port: 0 });
 const BASE_URL = `http://127.0.0.1:${server.port}`;
@@ -222,4 +231,58 @@ test("gift card code is delivered only to the signed-in receipt owner", async ()
   const publicReceipt = await ordinaryReceipt.json() as { giftCardAvailable: boolean };
   expect(publicReceipt.giftCardAvailable).toBe(true);
   expect(JSON.stringify(publicReceipt)).not.toContain(code);
+});
+
+// --- GET /owner/accounts — owner account panel (A2) -------------------------
+// Same "boot the real Hono app, drive it over real HTTP" style as the P9
+// suite above. Deploys via the stub deployer (account-setup.test.ts's own
+// pattern) — no gas, no real transaction — so this only ever proves the
+// route's own auth/scoping, never anything about a live deploy.
+
+describe("GET /owner/accounts (owner account panel A2)", () => {
+  async function deployOwnedAccount() {
+    const owner = privateKeyToAccount(generatePrivateKey());
+    const account = findOrCreateAccountBySubjectHash(hashWorldIdSubject(`owner-accounts-test-${crypto.randomUUID()}`));
+    const link = createSetupLink(account.id);
+    const message = fillSetupMessage(setupMessageTemplate(account.id, link.token), owner.address);
+    const signature = await owner.signMessage({ message });
+    const outcome = await linkOwner(link.token, owner.address, signature);
+    if (!outcome.ok) throw new Error(`test setup: linkOwner failed (${outcome.reason})`);
+    return { owner, smartAccount: outcome.smartAccount };
+  }
+
+  test("no credential at all -> 401", async () => {
+    const res = await fetch(`${BASE_URL}/owner/accounts`);
+    expect(res.status).toBe(401);
+  });
+
+  test("an owner who never linked an account sees an empty list, not an error", async () => {
+    const { token } = createSession(`0x${"99".repeat(20)}`);
+    const res = await fetch(`${BASE_URL}/owner/accounts`, { headers: { authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  test("an owner sees their own deployed account, never a different owner's", async () => {
+    const mine = await deployOwnedAccount();
+    const theirs = await deployOwnedAccount();
+
+    const { token } = createSession(mine.owner.address);
+    const res = await fetch(`${BASE_URL}/owner/accounts`, { headers: { authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      smartAccount: string;
+      owner: string;
+      operator: string;
+      perPaymentLimitUsdc: string;
+      knownMerchants: unknown[];
+    }[];
+    expect(body).toHaveLength(1);
+    expect(body[0]?.smartAccount.toLowerCase()).toBe(mine.smartAccount.toLowerCase());
+    expect(body[0]?.owner.toLowerCase()).toBe(mine.owner.address.toLowerCase());
+    expect(typeof body[0]?.perPaymentLimitUsdc).toBe("string");
+    expect(Array.isArray(body[0]?.knownMerchants)).toBe(true);
+    // Never leaks a different owner's account into this owner's list.
+    expect(body.some((a) => a.smartAccount.toLowerCase() === theirs.smartAccount.toLowerCase())).toBe(false);
+  });
 });

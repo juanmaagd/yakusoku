@@ -68,7 +68,7 @@ import {
   serializePromiseDetail,
   serializePromiseSummary,
 } from "./promises";
-import { createSetupLink, describeAccountDeployment, getSetupStatus, linkOwner } from "./account-setup";
+import { createSetupLink, describeAccountDeployment, describeOwnerAccount, getSetupStatus, linkOwner, type OwnerAccountDto } from "./account-setup";
 import { createFirstPromiseRequestOutcome, devApproveFirstPromise, pollFirstPromise, resumeFirstPromiseApprovalsOnBoot } from "./first-promise";
 import { publish, subscribe, type FirewallEvent } from "./events-bus";
 
@@ -966,6 +966,24 @@ app.post("/owner/promises/:id/revoke", (c) => {
   const promise = revokeOwnerPromiseRequest(c.req.param("id"), auth.address);
   if (!promise) return c.json({ error: "promise_not_found" }, 404);
   return c.json(serializeOwnerPromise(promise, getAccount(promise.accountId)));
+});
+
+// --- GET /owner/accounts (owner account panel A2) ---------------------------
+// Every smart account this wallet linked as owner at `/setup`
+// (account-setup.ts's `linkOwner`), with what `/app`'s "Account" section
+// needs to show — the same shape `GET /setup/:token` reports once deployed,
+// so the owner can reach Balance/Deposit/Withdraw/Pause/merchants from `/app`
+// at any time, not only through the agent's 30-minute setup link. No
+// admin/loopback branch, unlike `GET /owner/promises` — there is no operator
+// use case for this route, only the owner's own accounts, scoped by session
+// exactly like `listAccountsByOwner` already scopes `GET /owner/promises`.
+
+app.get("/owner/accounts", async (c) => {
+  const auth = authenticateSession(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const accounts = listAccountsByOwner(auth.address);
+  const described = await Promise.all(accounts.map(describeOwnerAccount));
+  return c.json(described.filter((a): a is OwnerAccountDto => a !== undefined));
 });
 
 // --- GET /receipts/:id/attestation (WU12) -------------------------------

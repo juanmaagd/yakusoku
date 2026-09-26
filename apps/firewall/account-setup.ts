@@ -369,6 +369,42 @@ export function getMerchantRegistrationReader(): MerchantRegistrationReader {
   return process.env.OMAMORISAN_ACCOUNT_READER === "stub" ? stubMerchantRegistrationReader : realMerchantRegistrationReader;
 }
 
+// --- GET /owner/accounts (owner account panel A2) ---------------------------
+// The read-only counterpart to `GET /setup/:token`'s deployed shape, for the
+// owner's OWN "/app" — reached with the owner's ordinary SIWE session instead
+// of a fresh agent-issued setup link. `listAccountsByOwner` (store.ts) only
+// ever returns a row with `owner` set, and `owner` and `smartAccount` are
+// always written together (`linkOwner`'s `setAccountDeployment` call above),
+// so every account reaching this function is already deployed — `undefined`
+// here is defensive only, never expected in practice.
+
+export interface OwnerAccountDto {
+  accountId: string;
+  chainId: number;
+  usdc: `0x${string}`;
+  operator: `0x${string}`;
+  smartAccount: `0x${string}`;
+  owner: `0x${string}`;
+  /** Decimal USDC string, same convention as {@link AccountDeploymentInfo}. */
+  perPaymentLimitUsdc: string;
+  knownMerchants: KnownMerchantDto[];
+}
+
+export async function describeOwnerAccount(account: StoredAccount): Promise<OwnerAccountDto | undefined> {
+  const deployment = await describeAccountDeployment(account);
+  if (!deployment.smartAccount || !deployment.owner) return undefined;
+  return {
+    accountId: account.id,
+    chainId: CHAIN_ID,
+    usdc: USDC_SEPOLIA_ADDRESS,
+    operator: operatorAccount.address,
+    smartAccount: deployment.smartAccount,
+    owner: deployment.owner,
+    perPaymentLimitUsdc: deployment.perPaymentLimitUsdc,
+    knownMerchants: await getKnownMerchants(account),
+  };
+}
+
 /** Builds `knownMerchants` for `GET /setup/:token`. Before deployment there's
  * no smart account to read `recipients(address)` from at all, so every entry
  * reports `registered: null` (never a guessed `false`) rather than skipping
