@@ -1,13 +1,33 @@
-// The four Omamorisan MCP tools (WU-P2, root CLAUDE.md) — the same x402 flow
-// `apps/agent`'s `buy` tool runs, generalized for ANY MCP-speaking agent.
-// Every payment still goes through the firewall's `/sign`; this server never
-// holds a signing key and never decides pay/refuse/ask_human itself.
+// The Omamorisan MCP tools — the same x402 flow apps/agent's `buy` tool
+// runs, generalized for ANY MCP-speaking agent. Every payment still goes
+// through the firewall's `/sign`; this server never holds a signing key and
+// never decides pay/refuse/ask_human itself.
+//
+// P9.3 (odd/tasks/yakusoku.md Phase 3) adds the World-ID-native "agent-
+// native checkout" path on top of the original WU-P2 four tools: `connect`/
+// `check_connection` bind this agent to a human's account (no wallet, no
+// key ever shown to the LLM), `request_promise`/`check_promise`/
+// `list_promises` replace a wallet-signed mandate with a World-ID-approved
+// promise, and `pay_x402`/`get_mandate` branch on the connected credential's
+// kind (credentials.ts) so the legacy `yk_` wallet-mandate path keeps working
+// completely unchanged.
 
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { decodePaymentRequiredHeader, decodePaymentResponseHeader } from "@x402/core/http";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { assertHttpUrl, FETCH_TIMEOUT_MS, MAX_BODY_BYTES, parseMaybeJson, readCapped, type SessionState } from "./session";
+import { credentialKind, saveStoredCredential } from "./credentials";
+import {
+  assertHttpUrl,
+  FETCH_TIMEOUT_MS,
+  MAX_BODY_BYTES,
+  parseMaybeJson,
+  pollWithTimeout,
+  readCapped,
+  type PendingConnect,
+  type SessionState,
+} from "./session";
 
 export interface ToolsConfig {
   firewallUrl: string;
@@ -58,11 +78,84 @@ interface ApprovalStatusResponse extends ApprovalInfo {
   paymentSignature?: string;
 }
 
+// --- P9.1/P9.2 account/promise response shapes (firewall API, read-only from here) ---
+
+interface ConnectStartResponse {
+  connectId: string;
+  pollSecret: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  userCode: string;
+  expiresAt: string;
+  intervalSeconds: number;
+}
+
+interface ConnectPollResponse {
+  status: "pending" | "approved" | "denied" | "expired" | "error";
+  accountId?: string;
+  accountKey?: string;
+  reason?: string;
+}
+
+interface PromiseSummary {
+  id: string;
+  task: string;
+  status: string;
+  budget: string;
+  remainingBudget: string;
+  categories: string[];
+  expiry: string;
+  createdAt: string;
+}
+
+interface PromiseDetail extends PromiseSummary {
+  summary: string;
+  reason?: string;
+  pendingApproval?: { verificationUri: string; userCode?: string; expiresAt?: string };
+}
+
+interface CreatePromiseResponse {
+  promiseId: string;
+  status: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  userCode: string;
+  expiresAt: string;
+  summary: string;
+}
+
+interface AccountInfo {
+  accountId: string;
+  createdAt: string;
+  promises: PromiseSummary[];
+}
+
 async function fetchMandate(firewallUrl: string, agentKey: string): Promise<MandateInfo> {
   const res = await fetch(`${firewallUrl}/mandate`, { headers: { authorization: `Bearer ${agentKey}` } });
   const body = await res.json().catch(() => undefined);
   if (!res.ok) throw new Error(`GET /mandate failed: ${res.status} ${JSON.stringify(body)}`);
   return body as MandateInfo;
+}
+
+async function fetchAccount(firewallUrl: string, accountKey: string): Promise<AccountInfo> {
+  const res = await fetch(`${firewallUrl}/account`, { headers: { authorization: `Bearer ${accountKey}` } });
+  const body = await res.json().catch(() => undefined);
+  if (!res.ok) throw new Error(`GET /account failed: ${res.status} ${JSON.stringify(body)}`);
+  return body as AccountInfo;
+}
+
+async function fetchPromise(firewallUrl: string, accountKey: string, promiseId: string): Promise<PromiseDetail> {
+  const res = await fetch(`${firewallUrl}/promises/${promiseId}`, { headers: { authorization: `Bearer ${accountKey}` } });
+  const body = await res.json().catch(() => undefined);
+  if (!res.ok) throw new Error(`GET /promises/${promiseId} failed: ${res.status} ${JSON.stringify(body)}`);
+  return body as PromiseDetail;
+}
+
+async function fetchPromises(firewallUrl: string, accountKey: string): Promise<PromiseDetail[]> {
+  const res = await fetch(`${firewallUrl}/promises`, { headers: { authorization: `Bearer ${accountKey}` } });
+  const body = await res.json().catch(() => undefined);
+  if (!res.ok) throw new Error(`GET /promises failed: ${res.status} ${JSON.stringify(body)}`);
+  return body as PromiseDetail[];
 }
 
 /** Retries the original resource with a firewall-issued signature — shared by
@@ -132,19 +225,306 @@ async function handleSignVerdict(
   return { status: "refused", reason: sign.reason, receiptId: sign.receiptId };
 }
 
+// --- P9.3 elicitation (URL mode, best-effort) --------------------------------
+//
+// Fires an out-of-band `elicitation/create` (mode "url") when the connected
+// client declared support for it (McpServer's underlying Server exposes the
+// negotiated client capabilities via getClientCapabilities() — see the
+// installed @modelcontextprotocol/sdk@1.30.1's server/index.js). NEVER
+// awaited by the caller: the World ID poll (connect/promise/approval) is
+// always the source of truth for whether a human actually approved, so a
+// client that doesn't support this, ignores it, or the human just dismissing
+// the prompt must never change what this tool returns. Falls back to nothing
+// (plain tool-result text, already present in every caller) when the client
+// never declared `elicitation.url` — most clients today (Claude Desktop,
+// Cursor) don't.
+function sendUrlElicitationBestEffort(server: McpServer, message: string, url: string | undefined): void {
+  if (!url) return;
+  if (!server.server.getClientCapabilities()?.elicitation?.url) return;
+  void server.server.elicitInput({ mode: "url", message, url, elicitationId: randomUUID() }).catch(() => {
+    // Best-effort only — never surfaces to the tool caller.
+  });
+}
+
+// --- P9.3 connect / check_connection ------------------------------------------
+
+async function pollConnectOnce(firewallUrl: string, pending: PendingConnect): Promise<ConnectPollResponse> {
+  const res = await fetch(`${firewallUrl}/connect/poll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ connectId: pending.connectId, pollSecret: pending.pollSecret }),
+  });
+  const body = (await res.json().catch(() => undefined)) as ConnectPollResponse | undefined;
+  if (!res.ok || !body) throw new Error(`firewall POST /connect/poll failed: HTTP ${res.status} ${JSON.stringify(body)}`);
+  return body;
+}
+
+/** Shared by `connect` (right after starting a fresh device flow) and
+ * `check_connection` (resuming this session's existing one) — both wait the
+ * same ≤~30s budget, at the firewall's own recommended poll interval, before
+ * telling the agent to check back later. */
+async function waitForConnectOutcome(session: SessionState, firewallUrl: string): Promise<CallToolResult> {
+  const pending = session.pendingConnect;
+  if (!pending) return fail("no pending connection — call connect first");
+
+  const intervalMs = Math.min(Math.max(pending.intervalSeconds, 1), 10) * 1000;
+  const result = await pollWithTimeout(() => pollConnectOnce(firewallUrl, pending), (r) => r.status !== "pending", { intervalMs });
+
+  if (result.status === "pending") {
+    return ok({
+      status: "pending",
+      connectId: pending.connectId,
+      verificationUri: pending.verificationUriComplete ?? pending.verificationUri,
+      userCode: pending.userCode,
+      expiresAt: pending.expiresAt,
+      message: "Still waiting for the human to approve in World App — call check_connection again shortly.",
+    });
+  }
+
+  session.pendingConnect = undefined;
+
+  if (result.status === "approved") {
+    if (!result.accountKey || !result.accountId) {
+      return fail(
+        "this connect request already resolved as approved and its account key was already delivered to another " +
+          "session — call connect again to start a fresh one",
+      );
+    }
+    session.setAgentKey(result.accountKey);
+    await saveStoredCredential(firewallUrl, { agentKey: result.accountKey, kind: "account", connectedAt: new Date().toISOString() });
+    return ok({
+      status: "connected",
+      accountId: result.accountId,
+      message: "Connected. Call get_mandate to see the account, or request_promise to ask for a task budget.",
+    });
+  }
+
+  return ok({ status: result.status, reason: result.reason ?? `connect request resolved as ${result.status}` });
+}
+
+// --- P9.3 request_promise / check_promise -------------------------------------
+
+/** Shared by `request_promise` (right after creating a fresh promise) and
+ * `check_promise` (resuming an existing one by id) — same ≤~30s wait budget
+ * as `waitForConnectOutcome`. The firewall's `/promises` response has no
+ * poll-interval hint (unlike `/connect`), so this uses a flat 3s cadence. */
+async function waitForPromiseOutcome(firewallUrl: string, accountKey: string, promiseId: string): Promise<CallToolResult> {
+  const detail = await pollWithTimeout(() => fetchPromise(firewallUrl, accountKey, promiseId), (p) => p.status !== "pending_approval");
+
+  if (detail.status === "pending_approval") {
+    return ok({
+      status: "pending",
+      promiseId,
+      verificationUri: detail.pendingApproval?.verificationUri,
+      userCode: detail.pendingApproval?.userCode,
+      expiresAt: detail.pendingApproval?.expiresAt,
+      summary: detail.summary,
+      message: "Still waiting for the human to approve in World App — call check_promise with this promiseId shortly.",
+    });
+  }
+  if (detail.status === "active") {
+    return ok({
+      status: "active",
+      promiseId,
+      summary: detail.summary,
+      remainingBudget: detail.remainingBudget,
+      message: "Approved — pay_x402 can now spend against this promise.",
+    });
+  }
+  return ok({ status: detail.status, promiseId, reason: detail.reason ?? `promise resolved as ${detail.status}` });
+}
+
+type ResolvedPromise = { ok: true; promiseId: string; task: string; autoSelected: boolean } | { ok: false; message: string };
+
+/** `pay_x402`'s account-key path: resolves which promise to spend from —
+ * either the caller-supplied `promiseId`, or (if omitted) the account's ONE
+ * active promise. Zero or several active promises without an explicit
+ * `promiseId` is a clear error, never a guess. */
+async function resolvePromiseForPayment(firewallUrl: string, accountKey: string, promiseId: string | undefined): Promise<ResolvedPromise> {
+  if (promiseId) {
+    const detail = await fetchPromise(firewallUrl, accountKey, promiseId);
+    if (detail.status !== "active") {
+      return { ok: false, message: `promise ${promiseId} is not active (status: ${detail.status}${detail.reason ? `, ${detail.reason}` : ""})` };
+    }
+    return { ok: true, promiseId, task: detail.task, autoSelected: false };
+  }
+
+  const promises = await fetchPromises(firewallUrl, accountKey);
+  const active = promises.filter((p) => p.status === "active");
+  if (active.length === 0) {
+    return { ok: false, message: "no active promises on this account — call request_promise first, or list_promises to see pending ones" };
+  }
+  if (active.length > 1) {
+    return { ok: false, message: `multiple active promises (${active.map((p) => p.id).join(", ")}) — specify which one with promiseId` };
+  }
+  const only = active[0];
+  if (!only) return { ok: false, message: "no active promises on this account — call request_promise first" };
+  return { ok: true, promiseId: only.id, task: only.task, autoSelected: true };
+}
+
 export function registerTools(server: McpServer, config: ToolsConfig, session: SessionState): void {
+  // --- connect (P9.3) ---------------------------------------------------------
+
   server.registerTool(
-    "get_mandate",
+    "connect",
     {
       description:
-        "Get the human-authorized mandate behind this agent's key: what task it covers, its total and " +
-        "remaining USDC budget, allowed categories, expiry, and whether it was revoked. Call this first, " +
-        "before browsing or buying anything, to know what you're actually allowed to do.",
+        "Link this agent to a human's Omamorisan account via World ID — call this once, before anything else, " +
+        "if get_mandate or any other tool says there's no credential yet. A friendly no-op if this session " +
+        "already has a credential (an account or a legacy wallet mandate). Starts a World ID approval and " +
+        "returns a verification link plus a short user code for the human to open in World App on their phone; " +
+        "waits briefly for them to approve. If they haven't yet, returns status 'pending' — call check_connection " +
+        "a little later to keep checking.",
       inputSchema: {},
     },
     async () => {
       try {
-        return ok(await fetchMandate(config.firewallUrl, session.getAgentKey()));
+        if (session.hasAgentKey()) {
+          return ok({
+            status: "already_connected",
+            credentialKind: credentialKind(session.getAgentKey()) ?? "unknown",
+            message: "This agent already has a credential — call get_mandate to see what it's authorized to do.",
+          });
+        }
+        const res = await fetch(`${config.firewallUrl}/connect`, { method: "POST" });
+        const body = (await res.json().catch(() => undefined)) as (ConnectStartResponse & { error?: string }) | undefined;
+        if (!res.ok || !body?.connectId || !body.pollSecret) {
+          return fail(`firewall POST /connect failed: HTTP ${res.status} ${JSON.stringify(body)}`);
+        }
+        session.pendingConnect = body;
+        sendUrlElicitationBestEffort(
+          server,
+          `Approve connecting this AI agent to your Omamorisan account in World App. Code: ${body.userCode}.`,
+          body.verificationUriComplete ?? body.verificationUri,
+        );
+        return await waitForConnectOutcome(session, config.firewallUrl);
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  );
+
+  server.registerTool(
+    "check_connection",
+    {
+      description:
+        "Check on a pending connect() approval. Waits briefly for the human to approve in World App; if they " +
+        "still haven't, reports 'pending' again — call it again after a short pause. If this session is already " +
+        "connected, says so instead of erroring.",
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        if (session.hasAgentKey()) {
+          return ok({ status: "already_connected", message: "Already connected — call get_mandate to see what's authorized." });
+        }
+        return await waitForConnectOutcome(session, config.firewallUrl);
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  );
+
+  // --- request_promise / check_promise / list_promises (P9.3) -----------------
+
+  server.registerTool(
+    "request_promise",
+    {
+      description:
+        "Ask the human to pre-authorize a task with a budget, via World ID — the World-ID-native replacement " +
+        "for a wallet-signed mandate. Requires a connected account (call connect first if this fails). Shows " +
+        "the human a summary (task, budget, categories, expiry) to approve in World App; once approved, " +
+        "pay_x402 can spend against it with zero further taps until it runs out or expires. Waits briefly for " +
+        "approval; if the human hasn't responded yet, returns 'pending' and the promiseId to pass to " +
+        "check_promise.",
+      inputSchema: {
+        task: z.string().min(1).describe("what this promise authorizes, in plain language (e.g. 'buy a $1 Amazon gift card')"),
+        budgetUsdc: z.number().positive().describe("maximum total USDC this promise may spend, across all purchases"),
+        categories: z.array(z.string().min(1)).min(1).max(5).describe("1-5 purchase categories this promise may spend on"),
+        expiresInMinutes: z.number().positive().describe("how many minutes from now this promise stays valid"),
+      },
+    },
+    async ({ task, budgetUsdc, categories, expiresInMinutes }) => {
+      try {
+        if (!session.hasAgentKey() || credentialKind(session.getAgentKey()) !== "account") {
+          return fail("request_promise needs a connected World ID account — call connect first (the legacy wallet mandate path doesn't use promises).");
+        }
+        const accountKey = session.getAgentKey();
+        const res = await fetch(`${config.firewallUrl}/promises`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${accountKey}` },
+          body: JSON.stringify({ task, budgetUsdc, categories, expiresInSeconds: Math.round(expiresInMinutes * 60) }),
+        });
+        const body = (await res.json().catch(() => undefined)) as (CreatePromiseResponse & { error?: string }) | undefined;
+        if (!res.ok || !body?.promiseId) {
+          return fail(`firewall POST /promises failed: HTTP ${res.status} ${JSON.stringify(body)}`);
+        }
+        sendUrlElicitationBestEffort(server, `${body.summary} Code: ${body.userCode}.`, body.verificationUriComplete ?? body.verificationUri);
+        return await waitForPromiseOutcome(config.firewallUrl, accountKey, body.promiseId);
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  );
+
+  server.registerTool(
+    "check_promise",
+    {
+      description: "Check on a pending request_promise() approval, or the current status of any promise on this account.",
+      inputSchema: { promiseId: z.string().min(1).describe("the promiseId returned by request_promise") },
+    },
+    async ({ promiseId }) => {
+      try {
+        if (!session.hasAgentKey() || credentialKind(session.getAgentKey()) !== "account") {
+          return fail("check_promise needs a connected World ID account — call connect first.");
+        }
+        return await waitForPromiseOutcome(config.firewallUrl, session.getAgentKey(), promiseId);
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_promises",
+    {
+      description: "List every promise on this account (pending, active, or resolved), with remaining budget, categories, and expiry.",
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        if (!session.hasAgentKey() || credentialKind(session.getAgentKey()) !== "account") {
+          return fail("list_promises needs a connected World ID account — call connect first.");
+        }
+        return ok(await fetchPromises(config.firewallUrl, session.getAgentKey()));
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  );
+
+  // --- get_mandate (WU-P2, branches by credential kind since P9.3) ------------
+
+  server.registerTool(
+    "get_mandate",
+    {
+      description:
+        "Get what this agent is authorized to do. With a connected World ID account, returns the account and " +
+        "its promises (list_promises gives the same list on its own). With a legacy wallet mandate key, " +
+        "returns that mandate: task, total/remaining USDC budget, categories, expiry, revoked. Call this first, " +
+        "before browsing or buying anything — if it fails with no credential, call connect.",
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        if (!session.hasAgentKey()) {
+          return fail("no credential yet — call connect to link this agent to a human's account via World ID.");
+        }
+        const agentKey = session.getAgentKey();
+        if (credentialKind(agentKey) === "account") {
+          return ok(await fetchAccount(config.firewallUrl, agentKey));
+        }
+        return ok(await fetchMandate(config.firewallUrl, agentKey));
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
@@ -182,21 +562,32 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     {
       description:
         "Buy an x402-protected resource by URL, through the user's payment firewall — you never hold a " +
-        "private key or a signature yourself. GETs the url; if it isn't a 402, returns the body as-is " +
-        "(no payment required). If it is a 402, asks the firewall to sign, using everything fetch_url has " +
-        "seen this session as untrusted context. The firewall may pay immediately, refuse outright (fail-" +
-        "closed — never retry a refusal with different wording), or require fresh human approval via World " +
-        "ID, in which case this returns immediately with a verificationUri and you should call " +
-        "check_approval later. `justification` must state, in your own words, why this specific purchase " +
-        "matches what the human actually asked for.",
+        "private key or a signature yourself. GETs the url; if it isn't a 402, returns the body as-is (no " +
+        "payment required). If it is a 402, asks the firewall to sign, using everything fetch_url has seen " +
+        "this session as untrusted context. With a connected World ID account, pass promiseId to say which " +
+        "promise to spend from — omit it only when the account has exactly one active promise. The firewall " +
+        "may pay immediately, refuse outright (fail-closed — never retry a refusal with different wording), or " +
+        "require fresh human approval via World ID, in which case this returns immediately with a " +
+        "verificationUri and you should call check_approval later. `justification` must state, in your own " +
+        "words, why this specific purchase matches what the human actually asked for.",
       inputSchema: {
         url: z.string().describe("the http(s) URL of the x402-protected resource to buy"),
         justification: z.string().describe("why this purchase matches the human's original request"),
+        promiseId: z
+          .string()
+          .optional()
+          .describe("which promise to spend from (World ID account only) — required unless exactly one active promise exists"),
       },
     },
-    async ({ url, justification }) => {
+    async ({ url, justification, promiseId }) => {
       try {
         assertHttpUrl(url);
+        if (!session.hasAgentKey()) {
+          return fail("no credential yet — call connect to link this agent to a human's account via World ID.");
+        }
+        const agentKey = session.getAgentKey();
+        const kind = credentialKind(agentKey);
+
         const firstRes = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
         if (firstRes.status !== 402) {
           const { text, truncated } = await readCapped(firstRes, MAX_BODY_BYTES);
@@ -219,19 +610,42 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
           return fail(`could not decode PAYMENT-REQUIRED header: ${err instanceof Error ? err.message : String(err)}`);
         }
 
-        const agentKey = session.getAgentKey();
-        const mandate = await fetchMandate(config.firewallUrl, agentKey);
-        const context = { userRequest: mandate.task, justification, untrustedContent: session.untrustedContent };
+        let intentId: string | undefined;
+        let userRequest: string;
+        let autoSelectedPromise = false;
+        if (kind === "account") {
+          const resolved = await resolvePromiseForPayment(config.firewallUrl, agentKey, promiseId);
+          if (!resolved.ok) return fail(resolved.message);
+          intentId = resolved.promiseId;
+          userRequest = resolved.task;
+          autoSelectedPromise = resolved.autoSelected;
+        } else {
+          const mandate = await fetchMandate(config.firewallUrl, agentKey);
+          userRequest = mandate.task;
+        }
+
+        const context = { userRequest, justification, untrustedContent: session.untrustedContent };
         const signRes = await fetch(`${config.firewallUrl}/sign`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${agentKey}` },
-          body: JSON.stringify({ paymentRequiredHeader, resourceUrl: url, context }),
+          body: JSON.stringify({ intentId, paymentRequiredHeader, resourceUrl: url, context }),
         });
         const signBody = (await signRes.json().catch(() => undefined)) as SignResponse | undefined;
         if (!signRes.ok || !signBody) {
           return fail(`firewall /sign failed: HTTP ${signRes.status} ${JSON.stringify(signBody)}`);
         }
-        return ok(await handleSignVerdict(config.firewallUrl, agentKey, url, signBody));
+
+        if (signBody.verdict === "ask_human") {
+          sendUrlElicitationBestEffort(
+            server,
+            `Approve this payment via World ID (code: ${signBody.approval?.userCode ?? "?"}). Resource: ${url}.`,
+            signBody.approval?.verificationUri,
+          );
+        }
+
+        const result = await handleSignVerdict(config.firewallUrl, agentKey, url, signBody);
+        if (intentId) return ok({ ...result, promiseId: intentId, ...(autoSelectedPromise ? { autoSelectedPromise: true } : {}) });
+        return ok(result);
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }

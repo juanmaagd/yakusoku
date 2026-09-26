@@ -10,15 +10,86 @@ export interface SeenContent {
   text: string;
 }
 
-export interface SessionState {
-  untrustedContent: SeenContent[];
-  /** Throws when no agent key is available yet (HTTP mode, before the first
-   * `Authorization: Bearer` header arrives, and no env fallback is set). */
-  getAgentKey: () => string;
+/** The resolved agent key for one MCP session — `undefined` before the first
+ * successful `connect`/`check_connection` (tools.ts) when no env/header/file
+ * credential was found either. A plain mutable cell (not a getter function)
+ * so index.ts's HTTP per-request `Authorization: Bearer` override and this
+ * session's own `connect`-driven updates share the exact same value. */
+export interface CredentialRef {
+  current?: string;
 }
 
-export function createSessionState(getAgentKey: () => string): SessionState {
-  return { untrustedContent: [], getAgentKey };
+/** Everything `connect` (tools.ts) needs to resume polling the SAME device
+ * flow from `check_connection` instead of starting a fresh one. Never sent
+ * back to the client as a whole — only the non-secret fields (verification
+ * link, user code, expiry) ever appear in a tool result; `pollSecret` stays
+ * server-side for the lifetime of this pending request. */
+export interface PendingConnect {
+  connectId: string;
+  pollSecret: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  userCode: string;
+  expiresAt: string;
+  intervalSeconds: number;
+}
+
+export interface SessionState {
+  untrustedContent: SeenContent[];
+  /** The firewall base URL this session talks to — also the credentials
+   * file's lookup key (credentials.ts). */
+  firewallUrl: string;
+  /** Throws a friendly, LLM-actionable error when no credential is set yet. */
+  getAgentKey: () => string;
+  hasAgentKey: () => boolean;
+  /** Called by `connect`/`check_connection` once World ID approves — updates
+   * this session's live credential immediately (no restart needed). */
+  setAgentKey: (key: string) => void;
+  /** Set while a `connect` call is waiting on a human; cleared on any
+   * terminal outcome (approved/denied/expired/error). */
+  pendingConnect?: PendingConnect;
+}
+
+const NO_CREDENTIAL_MESSAGE =
+  "no credential yet for this MCP session — call the connect tool to link this agent to a human's account via " +
+  "World ID (or provide an existing wallet mandate key (yk_...) or account key (ya_...) via the Authorization: " +
+  "Bearer header, OMAMORISAN_AGENT_KEY, or the credentials file)";
+
+export function createSessionState(firewallUrl: string, credential: CredentialRef): SessionState {
+  return {
+    untrustedContent: [],
+    firewallUrl,
+    getAgentKey: () => {
+      if (!credential.current) throw new Error(NO_CREDENTIAL_MESSAGE);
+      return credential.current;
+    },
+    hasAgentKey: () => credential.current !== undefined,
+    setAgentKey: (key: string) => {
+      credential.current = key;
+    },
+  };
+}
+
+/** Polls `check` at `intervalMs` until `isDone` accepts its result, or
+ * `maxWaitMs` elapses — whichever comes first. Never throws on a timeout: it
+ * just returns the last (still-not-done) result, so callers decide what
+ * "still pending" means for their own tool response. Shared by `connect`/
+ * `check_connection` (device-flow polling) and `request_promise`/
+ * `check_promise` (promise-approval polling), so every "wait briefly for a
+ * human" tool in this server has the exact same ≤~30s budget. */
+export async function pollWithTimeout<T>(
+  check: () => Promise<T>,
+  isDone: (result: T) => boolean,
+  { intervalMs = 3000, maxWaitMs = 30_000 }: { intervalMs?: number; maxWaitMs?: number } = {},
+): Promise<T> {
+  const deadline = Date.now() + maxWaitMs;
+  for (;;) {
+    const result = await check();
+    if (isDone(result)) return result;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return result;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, remaining)));
+  }
 }
 
 // --- fetch_url / pay_x402 shared HTTP helpers (demo-scoped) -----------------
