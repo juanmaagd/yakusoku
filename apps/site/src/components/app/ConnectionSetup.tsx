@@ -26,7 +26,7 @@ export default function ConnectionSetup({ agentKey, entryPath = "" }: { agentKey
   return <div className="mt-8 space-y-6 rounded-card border border-hairline bg-surface p-5 md:p-6" id="connect-agent">
     <div>
       <h2 className="text-subheading font-medium">Connect your agent, step by step</h2>
-      <p className="mt-2 text-body-sm text-graphite">This setup connects the wallet promise you just signed. Your client starts MCP and supplies its key. Keep the firewall and store running. For the agent-first World ID flow, use <a href="/#setup-claude" className="underline">Set up with Claude</a> on the home page; it needs no copied key.</p>
+      <p className="mt-2 text-body-sm text-graphite">This setup connects the wallet promise you just signed. Your client starts MCP and supplies its key. Keep the firewall and store running. For the agent-first World ID flow, use <a href="/#setup-agent" className="underline">Set up your agent</a> on the home page; it needs no copied key.</p>
     </div>
     <div>
       <label className={label} htmlFor="mcp-client">1. Which app do you use?</label>

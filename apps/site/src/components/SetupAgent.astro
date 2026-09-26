@@ -1,5 +1,5 @@
 ---
-import SetupClaudeCard from "./SetupClaudeCard";
+import SetupAgentCard from "./SetupAgentCard";
 
 // Order carries meaning: connect happens once, before any promise; a promise
 // is approved per task; a doubt approval is the exception, not the rule.
@@ -7,12 +7,12 @@ const MOMENTS = [
   {
     dt: "Connect",
     headline: "Once, up front",
-    body: "Approve the MCP connection in World App the first time Claude asks.",
+    body: "Approve the MCP connection in World App the first time your agent asks.",
   },
   {
     dt: "Promise",
     headline: "Every new task",
-    body: "A budget and an expiry, approved before Claude can spend against it.",
+    body: "A budget and an expiry, approved before your agent can spend against it.",
   },
   {
     dt: "Doubt",
@@ -22,13 +22,13 @@ const MOMENTS = [
 ] as const;
 ---
 
-<section id="setup-claude" class="band" aria-labelledby="setup-heading">
+<section id="setup-agent" class="band" aria-labelledby="setup-heading">
   <h2 id="setup-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
-    Set up with <strong>Claude.</strong>
+    Set up your <strong>agent.</strong>
   </h2>
   <p class="mt-6 max-w-[54ch] text-body-lg text-graphite">
-    One prompt wires up the connection. After that, Claude can only spend through a promise you approved yourself —
-    every human moment happens on your phone with World ID.
+    One prompt wires up the connection. After that, your agent can only spend through a promise you approved
+    yourself — every human moment happens on your phone with World ID.
   </p>
 
   <dl class="mt-10 grid grid-cols-1 border-y border-hairline sm:grid-cols-3">
@@ -43,7 +43,7 @@ const MOMENTS = [
     }
   </dl>
 
-  <SetupClaudeCard client:visible />
+  <SetupAgentCard client:visible />
 
   <p class="mt-6 text-caption text-stone">
     Testnet demo on Base Sepolia with test USDC. Approvals happen in the real World App.
