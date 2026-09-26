@@ -32,7 +32,12 @@ Existing guards are deterministic (spend caps, allow/deny lists, network/asset c
 - Testnet only; no mainnet funds. Control endpoints are localhost-guarded, not authenticated.
 - The key-case attack in the demo is a disclosed scripted compromised agent (`bun run attack`), because current LLMs are not fooled on cue.
 - Intercepta live screening pending the sandbox key; without it every payment escalates to World ID.
-- **Open decision: product name and brand.** "Yakusoku" (約束, "promise") is a working name that will change; no logo or brand assets exist yet. The EIP-712 domain name, package scope (`@yakusoku/*`), repo name and all copy follow the final name.
+- **Product name: "Omamorisan"** (decided Sat Sep 26, "for now"; may still change). Replaces the working name "Yakusoku". User-facing surfaces (site, dashboard, EIP-712 signing domain, agent output, README) use it; internal identifiers (package scope `@yakusoku/*`, repo and folder name) stay until the name is final. No logo or brand assets yet.
+
+## Brand Commitments
+- Name: Omamorisan (working name, may change).
+- **No Japanese aesthetic**, even though the name is Japanese: no kanji, torii, washi, seals, vermilion-as-Japan, cherry blossoms or similar motifs. The visual language is the warm paper-notebook reference in DESIGN.md.
+- No logo yet; never invent one that implies an existing brand.
 
 ## Evidence on Hand
 All verified, nothing else may be claimed:
