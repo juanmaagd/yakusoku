@@ -1,3 +1,4 @@
+import TutorialVideo from "../ui/TutorialVideo";
 import type { ReactNode } from "react";
 import { SITE } from "../../config";
 import { shortAddress } from "../../lib/format";
@@ -32,57 +33,60 @@ export default function SignInGate({ session }: { session: WalletSession }) {
   const error = "error" in stage ? stage.error : undefined;
 
   return (
-    <div className="mx-auto flex max-w-[480px] flex-col items-center pt-2 md:pt-8">
-      <img src="/art/app/wallet.webp" alt="" width={1024} height={1024} decoding="async" className="size-32 md:size-36" />
-      <h1 className="headline mt-2 text-center text-heading-sm md:text-heading">
-        Sign in to <strong>{SITE.name}</strong>
-      </h1>
-      <p className="mt-3 text-center text-body text-graphite">Your wallet is your account. Nothing here moves funds.</p>
+    <>
+      <div className="mx-auto flex max-w-[480px] flex-col items-center pt-2 md:pt-8">
+        <img src="/art/app/wallet.webp" alt="" width={1024} height={1024} decoding="async" className="size-32 md:size-36" />
+        <h1 className="headline mt-2 text-center text-heading-sm md:text-heading">
+          Sign in to <strong>{SITE.name}</strong>
+        </h1>
+        <p className="mt-3 text-center text-body text-graphite">Your wallet is your account. Nothing here moves funds.</p>
 
-      {stage.kind === "checking" ? (
-        <ol aria-busy="true" aria-label="Checking your wallet" className="mt-8 w-full divide-y divide-hairline rounded-card border border-hairline">
-          {[0, 1, 2].map((i) => (
-            <li key={i} className="flex items-center gap-4 px-5 py-4">
-              <Skeleton className="size-5 rounded-full" />
-              <Skeleton className="h-3.5 w-40" />
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <ol className="mt-8 w-full divide-y divide-hairline rounded-card border border-hairline bg-surface">
-          <Step n={1} state={s1} error={error} title="Connect a wallet" doneText={stage.kind === "sign-in" ? `Connected · ${shortAddress(stage.address)}` : "Connected"}>
-            {stage.kind === "no-wallet" ? (
-              <>
-                <p className="text-body-sm text-graphite">No browser wallet found.</p>
-                <a href="https://metamask.io/download/" target="_blank" rel="noreferrer" className={`${primaryButton} mt-3`}>
-                  Get MetaMask
-                  <IconExternal size={14} />
-                </a>
-              </>
-            ) : (
-              <button type="button" onClick={() => void session.connect()} className={primaryButton}>
-                Connect wallet
+        {stage.kind === "checking" ? (
+          <ol aria-busy="true" aria-label="Checking your wallet" className="mt-8 w-full divide-y divide-hairline rounded-card border border-hairline">
+            {[0, 1, 2].map((i) => (
+              <li key={i} className="flex items-center gap-4 px-5 py-4">
+                <Skeleton className="size-5 rounded-full" />
+                <Skeleton className="h-3.5 w-40" />
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <ol className="mt-8 w-full divide-y divide-hairline rounded-card border border-hairline bg-surface">
+            <Step n={1} state={s1} error={error} title="Connect a wallet" doneText={stage.kind === "sign-in" ? `Connected · ${shortAddress(stage.address)}` : "Connected"}>
+              {stage.kind === "no-wallet" ? (
+                <>
+                  <p className="text-body-sm text-graphite">No browser wallet found.</p>
+                  <a href="https://metamask.io/download/" target="_blank" rel="noreferrer" className={`${primaryButton} mt-3`}>
+                    Get MetaMask
+                    <IconExternal size={14} />
+                  </a>
+                </>
+              ) : (
+                <button type="button" onClick={() => void session.connect()} className={primaryButton}>
+                  Connect wallet
+                </button>
+              )}
+            </Step>
+            <Step n={2} state={s2} error={error} title={`Switch to ${SITE.network}`} doneText={`On ${SITE.network}`}>
+              <p className="text-body-sm text-graphite">Promises are signed on {SITE.network}, a testnet.</p>
+              <button type="button" onClick={() => void session.switchNetwork()} className={`${primaryButton} mt-3`}>
+                Switch network
               </button>
-            )}
-          </Step>
-          <Step n={2} state={s2} error={error} title={`Switch to ${SITE.network}`} doneText={`On ${SITE.network}`}>
-            <p className="text-body-sm text-graphite">Promises are signed on {SITE.network}, a testnet.</p>
-            <button type="button" onClick={() => void session.switchNetwork()} className={`${primaryButton} mt-3`}>
-              Switch network
-            </button>
-          </Step>
-          <Step n={3} state={s3} error={error} title="Sign in" doneText="Signed in">
-            <p className="text-body-sm text-graphite">A signature, not a transaction. It&rsquo;s free.</p>
-            {stage.kind === "sign-in" && (
-              <button type="button" onClick={() => void session.signIn()} disabled={stage.busy} className={`${primaryButton} mt-3`}>
-                {stage.busy ? "Waiting for your wallet…" : "Sign in with wallet"}
-              </button>
-            )}
-          </Step>
-        </ol>
-      )}
+            </Step>
+            <Step n={3} state={s3} error={error} title="Sign in" doneText="Signed in">
+              <p className="text-body-sm text-graphite">A signature, not a transaction. It&rsquo;s free.</p>
+              {stage.kind === "sign-in" && (
+                <button type="button" onClick={() => void session.signIn()} disabled={stage.busy} className={`${primaryButton} mt-3`}>
+                  {stage.busy ? "Waiting for your wallet…" : "Sign in with wallet"}
+                </button>
+              )}
+            </Step>
+          </ol>
+        )}
 
-    </div>
+      </div>
+      <TutorialVideo topic="signin" />
+    </>
   );
 }
 

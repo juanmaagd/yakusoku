@@ -1,3 +1,4 @@
+import TutorialVideo from "../ui/TutorialVideo";
 import { useCallback, useEffect, useState } from "react";
 import { MANDATE_CATEGORY_OPTIONS, SITE } from "../../config";
 import { listMandates, revokeMandate, type SerializedMandate } from "../../lib/api";
@@ -111,6 +112,7 @@ export default function PromiseList({ sessionToken, refreshSignal, onNew }: Prom
           </ul>
         )}
       </div>
+      <TutorialVideo topic="promises" />
     </section>
   );
 }

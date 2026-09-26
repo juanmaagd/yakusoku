@@ -1,3 +1,4 @@
+import TutorialVideo from "../ui/TutorialVideo";
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { DecisionReceipt } from "@yakusoku/shared";
@@ -77,6 +78,7 @@ export default function ApprovalBanner({ receipt, approval }: ApprovalBannerProp
           </div>
         </div>
       </div>
+      <TutorialVideo topic="approval" />
     </section>
   );
 }

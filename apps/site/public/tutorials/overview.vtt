@@ -1,0 +1,21 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:16.000
+Choose how to begin
+On the landing page, use Set up with Claude for the agent-first World ID route. Your agent connects through MCP, and you approve its first connection on your phone. The wallet route remains available through Launch app.
+
+00:00:16.000 --> 00:00:32.000
+Agent-first setup
+The landing page gives Claude Code a prompt and other clients an MCP URL. Connect once in World App, then approve each task and budget before the agent spends. No agent key needs to be pasted into chat.
+
+00:00:32.000 --> 00:00:45.000
+Wallet-signed alternative
+At /app, sign in with your browser wallet and create a promise with a task, budget, categories, and expiry. This creates a one-time key for an existing wallet mandate.
+
+00:00:45.000 --> 00:00:58.000
+Hand the wallet promise to your client
+On the signed-promise screen choose your MCP client, then save its generated configuration in the location shown. This configuration passes the key to MCP without putting it in a model prompt.
+
+00:00:58.000 --> 00:01:11.000
+Supervise decisions
+The Live page shows payment attempts and reasons. Approve a human check only when the request matches your purchase. Pause all signing or revoke an individual promise to stop future requests.
