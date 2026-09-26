@@ -10,6 +10,11 @@ export const SITE = {
   githubUrl: "https://github.com/juanmaagd/yakusoku",
   appRoute: "/app",
   dashboardRoute: "/app/dashboard",
+  /** The one-time, agent-issued link that links a wallet as the owner of a
+   * per-user `OmamorisanAccount` (P11.4). The agent appends `?token=...`. */
+  setupRoute: "/setup",
+  /** Where a signer without testnet USDC can top up before depositing. */
+  circleFaucetUrl: "https://faucet.circle.com",
   /** The current (pre-`/app`) intent-signing screen, still served by the legacy Next.js app. */
   legacySigningUrl: "http://localhost:3000",
   network: "Base Sepolia",
@@ -69,6 +74,10 @@ export function claudeSetupPrompt(): string {
 
 export function basescanTx(hash: string): string {
   return `https://sepolia.basescan.org/tx/${hash}`;
+}
+
+export function basescanAddress(address: string): string {
+  return `https://sepolia.basescan.org/address/${address}`;
 }
 
 // Verified on-chain evidence (PRODUCT.md, "Evidence on Hand"). Nothing else
