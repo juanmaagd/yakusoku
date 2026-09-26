@@ -26,8 +26,8 @@ type Balance = { kind: "loading" } | { kind: "loaded"; atomic: bigint } | { kind
 type Paused = { kind: "loading" } | { kind: "loaded"; value: boolean } | { kind: "error" };
 
 /** State 3 (`deployed`): the account's live on-chain balance, its registered
- * merchants and limit, a deposit form open to anyone, and — only when the
- * connected wallet is the owner — withdraw and pause/resume. */
+ * merchants and limit, and — only when the connected wallet is the owner —
+ * deposit, withdraw and pause/resume (a warning otherwise). */
 export default function DeployedCard({ info, justDeployedTxHash }: Props) {
   const wallet = useSetupWallet();
   const address = wallet.stage.kind === "ready" ? wallet.stage.address : undefined;
