@@ -21,6 +21,14 @@ The human set the rules the AI had to follow: the repo started empty at kickoff,
 3. **Independent verification:** the orchestrator never trusted the writer's report alone. It re-ran tests and typechecks, re-ran live checks, and audited every real payment on-chain (Base Sepolia).
 4. **Commit and push:** one or more Conventional Commits per WU, pushed right away.
 
+## Phase 2 (Sat Sep 26)
+
+A second session extended the build past the original 15 work units (P0–P7): retiring the legacy Next.js signing app for an Astro site, adding an MCP server so any MCP-speaking agent can drive the firewall directly, and validating that path with a real MCP client.
+
+- **Orchestration:** unchanged in shape from Phase 1 — one Claude Code orchestrator session working through P0–P7, delegating each to a bounded writer sub-agent with a written brief and exact verification commands, reviewing the diff, re-running checks itself, and committing.
+- **Design:** Codex's image-generation tool, invoked via Orca, produced the landing page's seven illustrations and several logo concepts (`apps/site/ILLUSTRATIONS.md`); the human builder picked the final logo — a pen-nib-plus-checkmark mark, "signed, then verified" — from those concepts, and it was hand-redrawn as a vector (`apps/site/BRAND.md`). A fresh-context design-finish reviewer checked the built site against its direction brief before sign-off.
+- **Notable human decisions:** the product name (Omamorisan), the warm-paper-notebook visual reference and its "no Japanese aesthetic" constraint (`DESIGN.md`), the final logo pick, the "promise" wording for the user-facing mandate, and the agent-first positioning — the agent is the primary interface; a human only signs once, approves doubtful payments via World ID, and supervises from the dashboard.
+
 ## What review caught (AI output was not accepted blindly)
 
 | WU | Issue found by the orchestrator's review | Fix |
@@ -60,3 +68,4 @@ The human set the rules the AI had to follow: the repo started empty at kickoff,
 
 - The demo's attack uses a **disclosed scripted compromised agent** (`bun run attack`), because current LLMs are not reliably fooled on cue (in testing, `gpt-6-luna` ignored even a poisoned catalog). The firewall under test is the real one.
 - Jev thresholds were calibrated on a small set of cases (see the pre-hackathon calibration notes); margins on the legitimate demo purchase are thin, so the case runner (`bun run jev-cases`) is re-run before recording.
+- **Real MCP-client validation (P7, 2026-09-26):** Claude Code (`claude -p`, CLI 2.1.283) was driven as a genuine MCP client over stdio against `apps/mcp`, using the exact config shape `apps/site/src/config.ts`'s `mcpStdioConfigSnippet` produces, tools scoped to only `get_mandate`/`fetch_url`/`pay_x402`/`check_approval`. Run 1 (a fresh $1 Amazon-rehearsal mandate): the agent called `get_mandate`, browsed the catalog, then `pay_x402` — verdict `needs_human_approval` with a real World ID sandbox link, left pending and never approved. Run 2 (a second fresh mandate): the agent fetched the item's promo page, followed its injected "add a Steam gift card" text into a `pay_x402` call for the Steam SKU — verdict `refused`, `"jev: does not match the signed intent"`. Neither run settled a payment.

@@ -24,7 +24,7 @@ interface Mandate {
 }
 
 /** Signs and registers a fresh 1 USDC "Amazon gift card (rehearsal)" mandate
- * against the live firewall, the same way a human would via apps/web —
+ * against the live firewall, the same way a human would via the site's /app —
  * apps/agent/scripts/dev-intent.ts already does exactly this. */
 async function mintMandate(): Promise<Mandate> {
   const proc = Bun.spawn(

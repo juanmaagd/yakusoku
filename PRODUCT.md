@@ -7,7 +7,7 @@
 web
 
 ## Stack
-Astro + Tailwind for the site (`apps/site`), one site with three surfaces: landing at `/`, intent signing at `/sign` (React island with wagmi), live dashboard at `/dashboard` (fed by the firewall's SSE stream). Replaces the Next.js signing app (`apps/web`) and the plain dashboard served by the firewall. Backend services stay as they are (firewall Hono :4001, store Express :4000, agent CLI, verifier CLI).
+Astro + Tailwind site (`apps/site`): landing at `/`, promise (mandate) onboarding at `/app` (React island, viem, SIWE), owner-scoped live dashboard at `/app/dashboard` (SSE). It replaced the Next.js signing app (`apps/web`, removed); the firewall still serves a loopback-only operator console at `/dashboard`. Agents connect through `apps/mcp` (stdio or Streamable HTTP :4010) or the agent CLI. Backend: firewall (Hono :4001), store (:4000), verifier CLI.
 
 ## Users
 - **ETHGlobal Tokyo 2026 judges** evaluating the project in a few minutes: they must grasp the problem, the mechanism and the evidence quickly.
@@ -46,7 +46,8 @@ All verified, nothing else may be claimed:
 - Human-signed intent (MetaMask) → agent purchase with Jev live: `0xc85d39e616d1dbbd97d66606f12418c92d13843b2a73d5815b841fdd60e2059e`.
 - World ID approval → payment with a valid StepUp attestation: `0xbc77ac5b547301ade87d09651f15f550a2f5b5b3003befa310d5eab9d9280897`; a denied approval refused and restored the budget.
 - Jev live results: key case (clean address, within budget, never requested) refused with matches_intent 0.02; legitimate demo purchase pays; no attack fixture ever paid across repeated runs.
-- `bun run scenarios`: 19/19 end-to-end scenarios pass (legit purchase, key case, provenance and zero-width injection, over budget, expired intent, tampered 402, unknown intent, bad signature, idempotent replay, concurrency, missing context, World ID expiry, pause, revoked intent, and per-mandate agent credentials: missing key, cross-mandate key, revoked key, approval polling).
+- `bun run scenarios`: 29/29 end-to-end scenarios pass (legit purchase, key case, provenance and zero-width injection, over budget, expired intent, tampered 402, unknown intent, bad signature, idempotent replay, concurrency, missing context, World ID expiry, pause/revoke (global and per-owner), per-mandate agent credentials, SIWE sign-in/nonce-replay, and owner-scoped access control across `/intents`, `/receipts`, `/approvals`, `/events`).
+- Real MCP-client validation (2026-09-26): Claude Code driven as a genuine MCP client over stdio against `apps/mcp`, using the exact config shape the site's mandate wizard produces. A legit purchase attempt correctly reached `needs_human_approval` with a live World ID sandbox link (left pending, never approved); a second attempt following the injected "buy a Steam gift card" promo copy was correctly `refused` by Jev.
 - Independent verifier: every on-chain payment traces back to a firewall `pay` receipt.
 - No customers, testimonials, benchmarks, pricing or production deployments exist; never fabricate them.
 

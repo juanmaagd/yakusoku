@@ -166,7 +166,7 @@ function parseArgs(argv: string[]): { intentId: string; agentKey: string; userRe
   if (!agentKey) {
     console.error(
       "Missing agent key: pass --key <agentKey> or set AGENT_API_KEY. " +
-        "The mandate credential is printed once, when the intent is signed (dev-intent, or apps/web).",
+        "The mandate credential is printed once, when the intent is signed (dev-intent, or the mandate wizard at the site's /app).",
     );
     process.exit(1);
   }
