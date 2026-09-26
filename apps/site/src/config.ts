@@ -8,6 +8,9 @@ export const SITE = {
   description:
     "Give your AI agent a budget, not your keys. It shops for you from an account you fund, and can't be talked into buying anything you didn't ask for.",
   githubUrl: "https://github.com/juanmaagd/yakusoku",
+  /** skills.sh bundle with the omamori-setup and omamori-purchase Agent
+   * Skills packages (sources in `skills/`). */
+  skillsUrl: "https://skills.sh/p/rH35i7aDoIcFdvKV",
   appRoute: "/app",
   dashboardRoute: "/app/dashboard",
   /** The owner account panel (P-account) — balances, deposit, withdraw,
