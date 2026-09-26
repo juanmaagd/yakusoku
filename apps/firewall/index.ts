@@ -54,7 +54,15 @@ const SITE_ORIGINS = (process.env.OMAMORISAN_SITE_ORIGINS ?? "http://localhost:4
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
-app.use("/*", cors({ origin: SITE_ORIGINS, allowHeaders: ["Content-Type", "Authorization", "x-yakusoku-admin"] }));
+// P6: "Accept" wasn't on this list — harmless for a plain `fetch()`, but a
+// cross-origin `EventSource` (which always sends `Accept: text/event-stream`
+// itself, non-optionally per spec) preflights on it and then hangs instead of
+// failing fast when the preflight doesn't allow it back (confirmed while
+// QA'ing the P6 dashboard's live SSE stream). The dashboard's own fetch-based
+// SSE client (apps/site/src/lib/sse.ts) works around it by never sending that
+// header at all, but any other cross-origin consumer using a native
+// `EventSource` still needs this listed.
+app.use("/*", cors({ origin: SITE_ORIGINS, allowHeaders: ["Content-Type", "Authorization", "Accept", "x-yakusoku-admin"] }));
 
 app.onError((err, c) => {
   console.error("unhandled error", err);
@@ -585,22 +593,38 @@ app.post("/receipts/:id/settlement", async (c) => {
 // --- GET /approvals/:receiptId (WU11, WU-P1 auth) -----------------------------
 
 app.get("/approvals/:receiptId", (c) => {
-  // The dashboard (WU10/WU13) also polls this route to show live approval
-  // status for any receipt — as a local admin, not as the agent that owns
-  // the mandate — so it authenticates the same way it already does for
-  // pause/resume/revoke (`isLocalAdminRequest`) instead of a Bearer token.
-  // Every other caller (the agent itself) needs the mandate's own key.
-  if (!isLocalAdminRequest(c)) {
-    const auth = authenticateAgent(c);
-    if (!auth.ok) return c.json(auth.body, auth.status);
+  // The legacy plain `/dashboard` (WU10/WU13) polls this route as a local
+  // admin, not as the agent that owns the mandate — same
+  // `isLocalAdminRequest` identity it already uses for pause/resume/revoke.
+  if (isLocalAdminRequest(c)) {
     const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
     if (!approval) return c.json({ error: "approval_not_found" }, 404);
-    if (approval.intentId !== auth.mandate.id) return c.json({ error: "forbidden" }, 403);
     return c.json(approvalStatusResponse(approval));
   }
 
+  // P6: the site's `/app/dashboard` runs on a different origin, so it's never
+  // a loopback+admin request — it needs its own way in. A SIWE session reads
+  // the World ID approval card for a receipt it owns, same "own session or
+  // own agent key" split (and the same 404-on-mismatch, never a 403, to
+  // avoid confirming another owner's receipt exists) as `GET /receipts/:id`
+  // above. Every other caller (the agent itself, e.g. approvals.test.ts's
+  // callers and apps/agent's polling) still needs the mandate's own key.
+  const sessionAuth = authenticateSession(c);
+  if (sessionAuth.ok) {
+    const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
+    if (!approval) return c.json({ error: "approval_not_found" }, 404);
+    const intent = getIntent(approval.intentId);
+    if (!intent || intent.signer.toLowerCase() !== sessionAuth.address.toLowerCase()) {
+      return c.json({ error: "approval_not_found" }, 404);
+    }
+    return c.json(approvalStatusResponse(approval));
+  }
+
+  const auth = authenticateAgent(c);
+  if (!auth.ok) return c.json(auth.body, auth.status);
   const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
   if (!approval) return c.json({ error: "approval_not_found" }, 404);
+  if (approval.intentId !== auth.mandate.id) return c.json({ error: "forbidden" }, 403);
   return c.json(approvalStatusResponse(approval));
 });
 
@@ -656,6 +680,9 @@ app.get("/events", (c) => {
       void stream.writeSSE({ data: JSON.stringify(evt.payload), event: evt.event, id: evt.id });
     });
     stream.onAbort(unsubscribe);
+    // Write a first frame right away so clients see the stream open without
+    // waiting for the first 15 s heartbeat.
+    await stream.writeSSE({ event: "heartbeat", data: "", id: crypto.randomUUID() });
     while (!stream.aborted) {
       await stream.sleep(SSE_HEARTBEAT_MS);
       if (!stream.aborted) {

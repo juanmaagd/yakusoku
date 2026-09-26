@@ -183,6 +183,10 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
     paymentIdentifier,
     intentId: req.intentId,
     task: intent?.message.task,
+    // Same `typeof` guard jev.ts uses for the same field (jev.ts's
+    // `agentContext.justification`) — an untrusted request body can put
+    // anything under `context`, so this only ever carries a real string.
+    justification: typeof req.context?.justification === "string" ? req.context.justification : undefined,
     resourceUrl: req.resourceUrl,
     amount: accepts0.amount,
     payTo: accepts0.payTo,

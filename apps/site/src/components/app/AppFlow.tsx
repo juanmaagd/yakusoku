@@ -1,122 +1,28 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import type { Address } from "viem";
-import { createSiweMessage } from "viem/siwe";
+import { useCallback, useState, type ReactNode } from "react";
 import { SITE } from "../../config";
-import { fetchMe, fetchNonce, logoutSession, verifySiwe } from "../../lib/api";
 import { shortAddress } from "../../lib/format";
-import { clearSessionToken, readSessionToken, writeSessionToken } from "../../lib/storage";
-import { outlinedButton, primaryButton } from "../../lib/ui";
-import { createTargetWalletClient, describeWalletError, ensureTargetChain, getInjectedProvider, TARGET_CHAIN } from "../../lib/wallet";
+import { outlinedButton, primaryButton, textButton } from "../../lib/ui";
+import { getInjectedProvider } from "../../lib/wallet";
+import { useWalletSession } from "../../lib/useWalletSession";
 import MandateList from "./MandateList";
 import MandateResult, { type MandateResultData } from "./MandateResult";
 import MandateWizard from "./MandateWizard";
 
-type Stage =
-  | { kind: "checking" }
-  | { kind: "no-wallet" }
-  | { kind: "connect"; error?: string }
-  | { kind: "wrong-network"; error?: string }
-  | { kind: "sign-in"; address: Address; error?: string; busy?: boolean }
-  | { kind: "signed-in"; address: Address; sessionToken: string };
-
 /** Single React island driving the whole /app onboarding flow (P5): connect
  * wallet -> ensure Base Sepolia -> SIWE sign-in -> create-mandate wizard ->
  * sign -> one-time result -> mandate list. See the P5 brief for the full
- * spec; each screen below maps to one `Stage`. */
+ * spec; each screen below maps to one `WalletSessionStage` (P6: the
+ * connect/sign-in state machine itself now lives in `useWalletSession`, so
+ * `/app/dashboard` can reuse it verbatim). */
 export default function AppFlow() {
-  const [stage, setStage] = useState<Stage>({ kind: "checking" });
+  const session = useWalletSession();
   const [result, setResult] = useState<MandateResultData | undefined>();
   const [refreshSignal, setRefreshSignal] = useState(0);
 
-  const evaluate = useCallback(async () => {
-    const provider = getInjectedProvider();
-    if (!provider) {
-      setStage({ kind: "no-wallet" });
-      return;
-    }
-    const client = createTargetWalletClient(provider);
-    const accounts = await client.getAddresses().catch(() => [] as Address[]);
-    if (accounts.length === 0) {
-      setStage({ kind: "connect" });
-      return;
-    }
-    const address = accounts[0]!;
-    const chainId = await client.getChainId().catch(() => undefined);
-    if (chainId !== TARGET_CHAIN.id) {
-      setStage({ kind: "wrong-network" });
-      return;
-    }
-    const storedToken = readSessionToken();
-    if (storedToken) {
-      const me = await fetchMe(storedToken).catch(() => undefined);
-      if (me && me.address.toLowerCase() === address.toLowerCase()) {
-        setStage({ kind: "signed-in", address, sessionToken: storedToken });
-        return;
-      }
-      clearSessionToken();
-    }
-    setStage({ kind: "sign-in", address });
-  }, []);
-
-  useEffect(() => {
-    void evaluate();
-  }, [evaluate]);
-
-  const handleConnect = useCallback(async () => {
-    const provider = getInjectedProvider();
-    if (!provider) return;
-    try {
-      await createTargetWalletClient(provider).requestAddresses();
-      await evaluate();
-    } catch (err) {
-      setStage({ kind: "connect", error: describeWalletError(err, "Could not connect to your wallet.") });
-    }
-  }, [evaluate]);
-
-  const handleSwitchNetwork = useCallback(async () => {
-    const provider = getInjectedProvider();
-    if (!provider) return;
-    try {
-      await ensureTargetChain(provider);
-      await evaluate();
-    } catch (err) {
-      setStage({ kind: "wrong-network", error: describeWalletError(err, "Could not switch network.") });
-    }
-  }, [evaluate]);
-
-  const handleSignIn = useCallback(async () => {
-    if (stage.kind !== "sign-in") return;
-    const provider = getInjectedProvider();
-    if (!provider) return;
-    const address = stage.address;
-    setStage({ kind: "sign-in", address, busy: true });
-    try {
-      const { nonce } = await fetchNonce();
-      const message = createSiweMessage({
-        address,
-        chainId: TARGET_CHAIN.id,
-        domain: window.location.host,
-        uri: window.location.origin,
-        version: "1",
-        statement: `Sign in to ${SITE.name} to manage your agent mandates.`,
-        nonce,
-      });
-      const signature = await createTargetWalletClient(provider).signMessage({ account: address, message });
-      const verified = await verifySiwe(message, signature);
-      writeSessionToken(verified.sessionToken);
-      setStage({ kind: "signed-in", address, sessionToken: verified.sessionToken });
-    } catch (err) {
-      setStage({ kind: "sign-in", address, error: describeWalletError(err, "Sign-in was rejected.") });
-    }
-  }, [stage]);
-
   const handleSignOut = useCallback(async () => {
-    if (stage.kind !== "signed-in") return;
-    await logoutSession(stage.sessionToken);
-    clearSessionToken();
+    await session.signOut();
     setResult(undefined);
-    await evaluate();
-  }, [stage, evaluate]);
+  }, [session]);
 
   const handleCreated = useCallback((data: MandateResultData) => {
     setResult(data);
@@ -126,6 +32,8 @@ export default function AppFlow() {
     setResult(undefined);
     setRefreshSignal((v) => v + 1);
   }, []);
+
+  const { stage } = session;
 
   switch (stage.kind) {
     case "checking":
@@ -160,7 +68,7 @@ export default function AppFlow() {
               {stage.error}
             </p>
           )}
-          <button type="button" onClick={() => void handleConnect()} className={`${primaryButton} mt-5`}>
+          <button type="button" onClick={() => void session.connect()} className={`${primaryButton} mt-5`}>
             Connect wallet
           </button>
         </StatusCard>
@@ -178,7 +86,7 @@ export default function AppFlow() {
               {stage.error}
             </p>
           )}
-          <button type="button" onClick={() => void handleSwitchNetwork()} className={`${primaryButton} mt-5`}>
+          <button type="button" onClick={() => void session.switchNetwork()} className={`${primaryButton} mt-5`}>
             Switch network
           </button>
         </StatusCard>
@@ -196,7 +104,7 @@ export default function AppFlow() {
               {stage.error}
             </p>
           )}
-          <button type="button" onClick={() => void handleSignIn()} disabled={stage.busy} className={`${primaryButton} mt-5`}>
+          <button type="button" onClick={() => void session.signIn()} disabled={stage.busy} className={`${primaryButton} mt-5`}>
             {stage.busy ? "Waiting for signature…" : "Sign in"}
           </button>
         </StatusCard>
@@ -207,7 +115,6 @@ export default function AppFlow() {
       if (!provider) {
         // The wallet extension disappeared after sign-in (rare) — bounce
         // back through the normal state machine instead of crashing.
-        void evaluate();
         return <StatusCard title="Reconnecting…" />;
       }
       return (
@@ -217,9 +124,14 @@ export default function AppFlow() {
               <p className="text-body-sm text-stone">Signed in as</p>
               <p className="text-body font-medium text-ink">{shortAddress(stage.address)}</p>
             </div>
-            <button type="button" onClick={() => void handleSignOut()} className={outlinedButton}>
-              Sign out
-            </button>
+            <div className="flex items-center gap-4">
+              <a href={SITE.dashboardRoute} className={textButton}>
+                Open dashboard
+              </a>
+              <button type="button" onClick={() => void handleSignOut()} className={outlinedButton}>
+                Sign out
+              </button>
+            </div>
           </div>
 
           {result ? (

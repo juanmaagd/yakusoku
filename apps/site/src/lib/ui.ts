@@ -32,3 +32,27 @@ export const chip =
 export function chipClass(selected: boolean): string {
   return `${chip} ${selected ? "border-primary bg-sky-tint text-primary" : "border-black/[0.14] bg-surface text-ink/70 hover:border-black/30"}`;
 }
+
+/** P6 dashboard status pill — one tint per `LaneStatus` (lib/receiptView.ts).
+ * DESIGN.md has no dedicated "success" hue, so `paid` reuses the same
+ * primary/sky-tint pairing Stage.astro already uses for a passing verdict;
+ * `blocked` gets the same tinted (not full-saturation) treatment out of
+ * `craft-floor`'s "heavy color on inactive/dense states" caution — a small
+ * pill in a dense list stays restrained even where a hero verdict banner
+ * would go bold. */
+const badgeBase = "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-caption font-semibold";
+
+export function laneBadgeClass(status: "paid" | "blocked" | "waiting" | "expired" | "paused"): string {
+  switch (status) {
+    case "paid":
+      return `${badgeBase} bg-sky-tint text-primary`;
+    case "blocked":
+      return `${badgeBase} bg-vermillion/10 text-vermillion`;
+    case "waiting":
+      return `${badgeBase} bg-saffron/15 text-saffron`;
+    case "expired":
+      return `${badgeBase} bg-black/[0.06] text-stone`;
+    case "paused":
+      return `${badgeBase} bg-black/[0.08] text-graphite`;
+  }
+}

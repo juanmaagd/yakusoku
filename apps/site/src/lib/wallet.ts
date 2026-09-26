@@ -3,10 +3,19 @@
 // Sepolia). See root CLAUDE.md and docs/research/ref-wagmi-viem.md for why
 // viem's own `createWalletClient` + `custom()` transport is preferred here.
 
-import { createWalletClient, custom, type EIP1193Provider } from "viem";
+import { createPublicClient, createWalletClient, custom, http, type EIP1193Provider } from "viem";
 import { baseSepolia } from "viem/chains";
 
 export const TARGET_CHAIN = baseSepolia;
+
+/** Read-only client over the chain's own default public RPC (no wallet, no
+ * injected provider needed) — used by the P6 dashboard to independently
+ * confirm a settlement tx on-chain instead of only trusting the firewall's
+ * own `settlement` record. Cheap to construct — same pattern as
+ * `createTargetWalletClient` below. */
+export function createPublicReadClient() {
+  return createPublicClient({ chain: TARGET_CHAIN, transport: http() });
+}
 
 declare global {
   interface Window {

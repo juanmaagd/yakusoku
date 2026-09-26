@@ -3,6 +3,7 @@
 // before changing this file, not the other way around.
 
 import type { Address, Hex } from "viem";
+import type { DecisionReceipt, StepUpAttestation } from "@yakusoku/shared";
 import { SITE } from "../config";
 
 const FIREWALL_URL = SITE.firewallUrl;
@@ -128,4 +129,94 @@ export async function revokeMandate(sessionToken: string, id: string): Promise<v
     headers: { authorization: `Bearer ${sessionToken}` },
   });
   if (!res.ok) throw new Error("Could not revoke this mandate.");
+}
+
+// --- Live dashboard (P6, apps/firewall/index.ts's owner-scoped routes) -----
+
+/** Thrown by any owner-scoped call below on a 401 — the dashboard's caller
+ * should route this straight into `useWalletSession`'s `handleUnauthorized`
+ * (P6 brief: "401 anywhere -> back to sign-in") instead of a generic error. */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super("Your session has expired. Please sign in again.");
+    this.name = "UnauthorizedError";
+  }
+}
+
+async function ownerScopedJson<T>(path: string, sessionToken: string, init?: RequestInit): Promise<T> {
+  const res = await request(path, {
+    ...init,
+    headers: { ...init?.headers, authorization: `Bearer ${sessionToken}` },
+  });
+  if (res.status === 401) throw new UnauthorizedError();
+  const body = await parseJson<T & ApiErrorBody>(res);
+  if (!res.ok || body === undefined) throw new Error(describeApiError(body, "The firewall rejected this request."));
+  return body;
+}
+
+/** Newest-first, same shape `GET /receipts` returns for the owner's own
+ * mandates only (index.ts). */
+export async function listReceipts(sessionToken: string, limit = 50): Promise<DecisionReceipt[]> {
+  return ownerScopedJson<DecisionReceipt[]>(`/receipts?limit=${limit}`, sessionToken);
+}
+
+export async function getReceipt(sessionToken: string, id: string): Promise<DecisionReceipt> {
+  return ownerScopedJson<DecisionReceipt>(`/receipts/${encodeURIComponent(id)}`, sessionToken);
+}
+
+/** No session required server-side (`GET /receipts/:id/attestation` is
+ * unauthenticated, apps/firewall/index.ts) — returns `undefined` for a
+ * receipt with no attestation (denied/expired/pre-World-ID) instead of
+ * throwing, since that's an expected, common shape. */
+export async function getAttestation(receiptId: string): Promise<StepUpAttestation | undefined> {
+  const res = await request(`/receipts/${encodeURIComponent(receiptId)}/attestation`);
+  if (res.status === 404) return undefined;
+  const body = await parseJson<StepUpAttestation & ApiErrorBody>(res);
+  if (!res.ok || !body) throw new Error(describeApiError(body, "Could not load the attestation."));
+  return body;
+}
+
+export interface ApprovalStatus {
+  status: "pending" | "approved" | "denied" | "expired" | "error" | "paused" | "revoked";
+  verificationUri?: string;
+  userCode?: string;
+  expiresAt?: string;
+  verdict: "pay" | "refuse" | "ask_human";
+  reason: string;
+}
+
+/** `GET /approvals/:receiptId` — P6 added session-owner access alongside the
+ * existing agent-key path (apps/firewall/index.ts), so the dashboard reads
+ * this the same way it reads `/receipts`. */
+export async function getApprovalStatus(sessionToken: string, receiptId: string): Promise<ApprovalStatus> {
+  return ownerScopedJson<ApprovalStatus>(`/approvals/${encodeURIComponent(receiptId)}`, sessionToken);
+}
+
+export interface OwnerControlState {
+  paused: boolean;
+  pausedAt?: string;
+  reason?: string;
+}
+
+export async function fetchOwnerControl(sessionToken: string): Promise<OwnerControlState> {
+  return ownerScopedJson<OwnerControlState>("/me/control", sessionToken);
+}
+
+export async function pauseOwnerSigning(sessionToken: string, reason?: string): Promise<OwnerControlState> {
+  return ownerScopedJson<OwnerControlState>("/me/pause", sessionToken, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+}
+
+export async function resumeOwnerSigning(sessionToken: string): Promise<OwnerControlState> {
+  return ownerScopedJson<OwnerControlState>("/me/resume", sessionToken, { method: "POST" });
+}
+
+/** `GET /events?session=...` (apps/firewall/index.ts) — `EventSource` can't
+ * send an `Authorization` header, so the session rides the query string,
+ * same as the firewall's own admin `?admin=1` stream. */
+export function ownerEventsUrl(sessionToken: string): string {
+  return `${FIREWALL_URL}/events?session=${encodeURIComponent(sessionToken)}`;
 }

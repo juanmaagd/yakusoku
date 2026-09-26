@@ -259,6 +259,7 @@ function finalizeResolution(
     paymentIdentifier: receipt.paymentIdentifier,
     intentId: receipt.intentId,
     task: receipt.task,
+    justification: receipt.justification,
     resourceUrl: receipt.resourceUrl ?? "",
     amount: receipt.amount,
     payTo: receipt.payTo,
