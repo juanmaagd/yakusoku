@@ -12,7 +12,9 @@ The tutorials live on the screens they explain, not on a separate help page.
 | Live dashboard | `live.mp4` |
 | Pending World ID approval | `approval.mp4` |
 
-All files are served locally from `apps/site/public/tutorials`. Each clip has a poster, English WebVTT captions, and phase descriptions in its player. A compact dock opens into a large panel at the right of the current page; choosing a phase seeks the video, and the active phase stays highlighted as playback advances. The videos are captioned screen walkthroughs without voice or music. There is no autoplay. The compact dock does not load video data until opened.
+All files are served locally from `apps/site/public/tutorials`. Each clip has a poster, English WebVTT captions, and phase descriptions in its player. A compact dock (a small chip on phones, minimizable on larger screens) opens into a panel at the right of the current page on desktop, which the page makes room for in the same motion, or a bottom sheet on phones. The player uses its own controls: play/pause, a scrubber with phase ticks, time, step counter, captions and fullscreen. Choosing a phase seeks the video, and the active phase shows its own progress as playback advances. The videos are captioned screen walkthroughs without voice or music. Nothing plays on page load; playback starts when the visitor opens the panel. The compact dock does not load video data until opened.
+
+`apps/site/src/lib/tutorial-chapters.json` (a copy of `public/tutorials/chapters.json`, both written by the recorder) is the single source of phase timing for the player.
 
 `apps/site/src/lib/tutorials.json` is the source of the on-screen guidance and transcripts. `TutorialVideo.tsx` embeds the matching clip. The connection screen also provides client-specific configuration downloads in `ConnectionSetup.tsx` and `lib/mcpSetup.ts`.
 
@@ -33,6 +35,8 @@ node scripts/record-tutorials.mjs
 Use the browser executable path for your operating system. Omit `CHROME_PATH` to use Playwright's installed Chromium. `TUTORIAL_ORIGIN` defaults to `http://localhost:4321`; `TUTORIAL_WORK_DIR` defaults to `/private/tmp/omamorisan-tutorials` and can be overridden on other platforms.
 
 The recorder interacts with the actual frontend using a fresh browser context. Wallet requests and firewall responses are intercepted with fictional fixtures. External requests are blocked. It never connects a real wallet, reads `.env.local`, creates a real mandate, or submits a payment. Every frame says **EXAMPLE DATA · NO REAL PAYMENT**. Wallet popups and provider application settings are explained in captions, not represented as verified recordings of third-party apps. The World ID QR uses an invalid example URL.
+
+Clips are composed, not screen-recorded. Captures run at 2x device scale, and the recorder measures each step's target and whether it is a control. A composition page using the site's own fonts renders each frame deterministically from a timeline: the camera eases to the step's target, a white veil and an ink ring spotlight it, a cursor glides to it and clicks when the next step is the result of that click, and the caption changes with a staggered reveal. Frames are rendered only while something moves; holds are single frames with a duration. Output is 1920x1080 at 30 fps (H.264). A step lasts `ceil(1.6 + max(5.5, words / 2.7) + 0.6 if it ends in a click)` seconds. The dashboard's event stream is held open in the capture browser so it shows as live.
 
 The recorder validates all seven configuration downloads, checks the mobile handoff for horizontal overflow, and rejects browser runtime errors. Frames go to the temporary work directory; final MP4s, posters, WebVTT, chapters, and combined transcript go to `apps/site/public/tutorials`.
 

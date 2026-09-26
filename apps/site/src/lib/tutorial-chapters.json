@@ -1,6 +1,6 @@
 {
   "overview": {
-    "duration": 71,
+    "duration": 73,
     "chapters": [
       {
         "title": "Choose how to begin",
@@ -20,17 +20,17 @@
       {
         "title": "Hand the wallet promise to your client",
         "start": 45,
-        "duration": 13
+        "duration": 14
       },
       {
         "title": "Supervise decisions",
-        "start": 58,
-        "duration": 13
+        "start": 59,
+        "duration": 14
       }
     ]
   },
   "signin": {
-    "duration": 59,
+    "duration": 60,
     "chapters": [
       {
         "title": "1. Open the app",
@@ -45,11 +45,11 @@
       {
         "title": "3. Sign the login message",
         "start": 26,
-        "duration": 17
+        "duration": 18
       },
       {
         "title": "4. You should see Promises",
-        "start": 43,
+        "start": 44,
         "duration": 16
       }
     ]
@@ -80,7 +80,7 @@
     ]
   },
   "create": {
-    "duration": 56,
+    "duration": 58,
     "chapters": [
       {
         "title": "1. Describe the purchase",
@@ -90,22 +90,22 @@
       {
         "title": "2. Set the limits",
         "start": 14,
-        "duration": 14
+        "duration": 15
       },
       {
         "title": "3. Review and sign",
-        "start": 28,
-        "duration": 14
+        "start": 29,
+        "duration": 15
       },
       {
         "title": "4. Keep the result screen open",
-        "start": 42,
+        "start": 44,
         "duration": 14
       }
     ]
   },
   "connect": {
-    "duration": 173,
+    "duration": 175,
     "chapters": [
       {
         "title": "1. Understand this key",
@@ -115,57 +115,57 @@
       {
         "title": "2. Choose your agent app",
         "start": 18,
-        "duration": 13
-      },
-      {
-        "title": "3. Check the local file path",
-        "start": 31,
         "duration": 14
       },
       {
-        "title": "4. Download the configuration",
-        "start": 45,
+        "title": "3. Check the local file path",
+        "start": 32,
         "duration": 15
       },
       {
+        "title": "4. Download the configuration",
+        "start": 47,
+        "duration": 16
+      },
+      {
         "title": "5. Save in your client's settings",
-        "start": 60,
+        "start": 63,
         "duration": 13
       },
       {
         "title": "Cursor and Claude Code",
-        "start": 73,
+        "start": 76,
         "duration": 17
       },
       {
         "title": "Codex uses TOML",
-        "start": 90,
+        "start": 93,
         "duration": 16
       },
       {
         "title": "VS Code, Gemini, and Cascade",
-        "start": 106,
+        "start": 109,
         "duration": 15
       },
       {
         "title": "6. Check before buying",
-        "start": 121,
+        "start": 124,
         "duration": 17
       },
       {
         "title": "Why bun index.ts failed before",
-        "start": 138,
-        "duration": 19
+        "start": 141,
+        "duration": 18
       },
       {
         "title": "7. Finish the handoff",
-        "start": 157,
+        "start": 159,
         "duration": 16
       }
     ]
   },
   "live": {
-    "duration": 75,
+    "duration": 76,
     "chapters": [
       {
         "title": "1. Open Live",
@@ -175,21 +175,21 @@
       {
         "title": "2. Inspect each decision",
         "start": 13,
-        "duration": 14
+        "duration": 15
       },
       {
         "title": "3. Handle a human check",
-        "start": 27,
+        "start": 28,
         "duration": 18
       },
       {
         "title": "4. Stop future signing",
-        "start": 45,
+        "start": 46,
         "duration": 15
       },
       {
         "title": "5. If purchases cannot proceed",
-        "start": 60,
+        "start": 61,
         "duration": 15
       }
     ]
@@ -200,17 +200,17 @@
       {
         "title": "1. Review the request",
         "start": 0,
-        "duration": 13
+        "duration": 12
       },
       {
         "title": "2. Use your phone",
-        "start": 13,
+        "start": 12,
         "duration": 17
       },
       {
         "title": "3. Return to Live",
-        "start": 30,
-        "duration": 14
+        "start": 29,
+        "duration": 15
       }
     ]
   }

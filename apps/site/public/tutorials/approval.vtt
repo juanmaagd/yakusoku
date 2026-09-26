@@ -1,13 +1,13 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:13.000
+00:00:00.000 --> 00:00:12.000
 1. Review the request
 Check the task, amount, and reason before proceeding. This example shows a simulated approval request, not a real World ID session. Never approve an unexpected purchase.
 
-00:00:13.000 --> 00:00:30.000
+00:00:12.000 --> 00:00:29.000
 2. Use your phone
 For a real request, open the displayed verification link or scan its QR code. Enter the code if prompted. Complete the World ID flow and approve or deny the request on that service. Do this before the timer expires.
 
-00:00:30.000 --> 00:00:44.000
+00:00:29.000 --> 00:00:44.000
 3. Return to Live
 The dashboard updates as the firewall processes the outcome. Your agent must call check_approval to finish an approved purchase. Denial or expiry prevents that pending purchase; approval alone is not proof of settlement.
