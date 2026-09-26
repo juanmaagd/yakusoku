@@ -4,8 +4,16 @@ import type { Address, Hex } from "viem";
 import type { ReactNode } from "react";
 import { basescanAddress, basescanTx, SITE } from "../../config";
 import { formatUsdc, shortAddress } from "../../lib/format";
-import type { SetupInfo } from "../../lib/setupApi";
-import { depositUsdc, readAccountPaused, readUsdcBalance, setAccountPaused, withdrawFromAccount } from "../../lib/setupAccount";
+import type { KnownMerchant, SetupInfo } from "../../lib/setupApi";
+import {
+  depositUsdc,
+  readAccountPaused,
+  readMerchantRegistered,
+  readUsdcBalance,
+  registerMerchant,
+  setAccountPaused,
+  withdrawFromAccount,
+} from "../../lib/setupAccount";
 import { useSetupWallet } from "../../lib/useSetupWallet";
 import { describeWalletError, getInjectedProvider } from "../../lib/wallet";
 import { errorText, helpText, inputBase, outlinedButton, primaryButton, smallButton } from "../../lib/ui";
@@ -13,6 +21,7 @@ import CopyButton from "../ui/CopyButton";
 import { IconExternal, IconPause, IconPlay } from "../ui/Icons";
 import InlineError from "../ui/InlineError";
 import Skeleton from "../ui/Skeleton";
+import StatusPill from "../ui/StatusPill";
 import WalletConnectPrompt from "./WalletConnectPrompt";
 
 interface Props {
@@ -121,17 +130,12 @@ export default function DeployedCard({ info, justDeployedTxHash }: Props) {
         </dl>
       </section>
 
-      <section className="mt-6 rounded-card border border-hairline bg-surface p-5 md:p-6">
-        <h2 className="text-subheading font-medium">Registered merchants</h2>
-        <ul className="mt-3 divide-y divide-hairline">
-          {info.recipients.map((r) => (
-            <li key={r.address} className="flex items-center justify-between gap-3 py-2.5 text-body-sm">
-              <span className="text-ink">{r.label}</span>
-              <span className="font-mono text-caption text-graphite">{shortAddress(r.address)}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <KnownMerchantsSection
+        knownMerchants={info.knownMerchants}
+        smartAccount={info.smartAccount}
+        address={address}
+        isOwner={isOwner}
+      />
 
       <section className="mt-6 rounded-card border border-hairline bg-surface p-5 md:p-6">
         <div className="flex items-center justify-between gap-3">
@@ -203,6 +207,82 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
       <dt className="text-graphite">{label}</dt>
       <dd className="flex flex-wrap items-center gap-2 text-ink">{children}</dd>
     </div>
+  );
+}
+
+// --- Registered merchants (multi-store M2) ----------------------------------
+// Every demo store the firewall knows about, each with its live on-chain
+// registration status against this account. An unregistered store gets a
+// "Register" button (owner-only, sends setRecipient(address, true)); the
+// status pill is the only colored element (verified blue = registered,
+// per DESIGN.md's "color only reports state" rule — "not registered" and
+// "unknown" stay neutral/muted, since neither one is an error).
+
+function KnownMerchantsSection({
+  knownMerchants,
+  smartAccount,
+  address,
+  isOwner,
+}: {
+  knownMerchants: KnownMerchant[];
+  smartAccount: Address;
+  address: Address | undefined;
+  isOwner: boolean;
+}) {
+  const [merchants, setMerchants] = useState<KnownMerchant[]>(knownMerchants);
+  const [registeringAddress, setRegisteringAddress] = useState<Address | undefined>();
+  const [registerError, setRegisterError] = useState<string | undefined>();
+
+  async function register(merchant: Address) {
+    const provider = getInjectedProvider();
+    if (!provider || !address) return;
+    setRegisteringAddress(merchant);
+    setRegisterError(undefined);
+    try {
+      await registerMerchant(provider, address, smartAccount, merchant);
+      // Re-read the flag from the chain rather than optimistically flipping
+      // it locally, matching OwnerControls's own pause/resume discipline.
+      const registered = await readMerchantRegistered(smartAccount, merchant);
+      setMerchants((prev) => prev.map((m) => (m.address === merchant ? { ...m, registered } : m)));
+    } catch (err) {
+      setRegisterError(describeWalletError(err, "Could not register this merchant. Try again."));
+    } finally {
+      setRegisteringAddress(undefined);
+    }
+  }
+
+  return (
+    <section className="mt-6 rounded-card border border-hairline bg-surface p-5 md:p-6">
+      <h2 className="text-subheading font-medium">Registered merchants</h2>
+      <p className="mt-1 text-body-sm text-graphite">
+        Stores this account can pay. An unregistered store needs the owner to add it before the firewall can send it a payment.
+      </p>
+      <ul className="mt-3 divide-y divide-hairline">
+        {merchants.map((m) => (
+          <li key={m.address} className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-body-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-ink">{m.label}</span>
+              <span className="font-mono text-caption text-graphite">{shortAddress(m.address)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <StatusPill tone={m.registered === true ? "verified" : m.registered === false ? "neutral" : "muted"}>
+                {m.registered === true ? "Registered" : m.registered === false ? "Not registered" : "Unknown"}
+              </StatusPill>
+              {address && isOwner && m.registered === false && (
+                <button type="button" disabled={registeringAddress === m.address} onClick={() => void register(m.address)} className={smallButton}>
+                  {registeringAddress === m.address ? "Registering…" : "Register"}
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {registerError && (
+        <p className={`${errorText} mt-2`} role="alert">
+          {registerError}
+        </p>
+      )}
+    </section>
   );
 }
 

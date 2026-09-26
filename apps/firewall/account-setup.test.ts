@@ -28,7 +28,7 @@ process.env.OMAMORISAN_DEFAULT_RECIPIENTS = JSON.stringify([
 ]);
 
 const { findOrCreateAccountBySubjectHash, getAccount } = await import("./store");
-const { createSetupLink, fillSetupMessage, getSetupStatus, linkOwner, setupMessageTemplate } = await import("./account-setup");
+const { createSetupLink, fillSetupMessage, getKnownMerchants, getSetupStatus, linkOwner, setupMessageTemplate } = await import("./account-setup");
 const { hashWorldIdSubject } = await import("@yakusoku/shared");
 
 let seq = 0;
@@ -169,5 +169,78 @@ describe("stub deployer", () => {
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.txHash).toBeUndefined();
+  });
+});
+
+describe("known merchants (multi-store M2)", () => {
+  const TEST_RECIPIENT = "0x000000000000000000000000000000000000dEaD";
+
+  // OMAMORISAN_ACCOUNT_READER is a process-wide env var other suites in this
+  // same bun test run also set (funding.test.ts pins it to "stub" for its
+  // whole file, with no cleanup) — every test below saves whatever value it
+  // finds and restores it afterward, rather than assuming "unset" going in.
+  async function withAccountReader<T>(value: "stub" | undefined, fn: () => Promise<T>): Promise<T> {
+    const original = process.env.OMAMORISAN_ACCOUNT_READER;
+    if (value === undefined) delete process.env.OMAMORISAN_ACCOUNT_READER;
+    else process.env.OMAMORISAN_ACCOUNT_READER = value;
+    try {
+      return await fn();
+    } finally {
+      if (original === undefined) delete process.env.OMAMORISAN_ACCOUNT_READER;
+      else process.env.OMAMORISAN_ACCOUNT_READER = original;
+    }
+  }
+
+  test("needs_owner: the default recipient list, all reported registered: null — there's no smart account yet to read", async () => {
+    const account = freshAccount();
+    const link = createSetupLink(account.id);
+
+    const status = await getSetupStatus(link.token);
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    expect(status.knownMerchants).toEqual([{ address: TEST_RECIPIENT, label: "Test recipient", registered: null }]);
+  });
+
+  test("deployed, real reader: a stub-deployed account has no real on-chain code, so the live read fails closed to null, never a wrong true", async () => {
+    await withAccountReader(undefined, async () => {
+      const account = freshAccount();
+      const link = createSetupLink(account.id);
+      const owner = privateKeyToAccount(generatePrivateKey());
+      const signature = await signSetupMessage(account.id, link.token, owner);
+      const deployed = await linkOwner(link.token, owner.address, signature);
+      expect(deployed.ok).toBe(true);
+
+      const status = await getSetupStatus(link.token);
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.knownMerchants).toHaveLength(1);
+      expect(status.knownMerchants[0]?.address).toBe(TEST_RECIPIENT);
+      expect(status.knownMerchants[0]?.registered).toBeNull();
+    });
+  }, 15_000);
+
+  test("deployed, stub reader (OMAMORISAN_ACCOUNT_READER=stub): true for a merchant the account was actually (stub-)deployed with", async () => {
+    await withAccountReader("stub", async () => {
+      const account = freshAccount();
+      const link = createSetupLink(account.id);
+      const owner = privateKeyToAccount(generatePrivateKey());
+      const signature = await signSetupMessage(account.id, link.token, owner);
+      await linkOwner(link.token, owner.address, signature);
+
+      const merchants = await getKnownMerchants(getAccount(account.id)!);
+      expect(merchants).toEqual([{ address: TEST_RECIPIENT, label: "Test recipient", registered: true }]);
+    });
+  });
+
+  test("deployed, stub reader: false for a known merchant the account was NOT deployed with", async () => {
+    await withAccountReader("stub", async () => {
+      const account = freshAccount();
+      const stored = getAccount(account.id)!;
+      // Force a smartAccount so getKnownMerchants doesn't short-circuit to
+      // null for "not deployed yet" — this account's own recipients stay
+      // undefined, so the stub reader has nothing matching TEST_RECIPIENT.
+      const merchants = await getKnownMerchants({ ...stored, smartAccount: "0x1111111111111111111111111111111111111a" });
+      expect(merchants).toEqual([{ address: TEST_RECIPIENT, label: "Test recipient", registered: false }]);
+    });
   });
 });

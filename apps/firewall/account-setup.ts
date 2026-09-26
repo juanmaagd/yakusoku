@@ -19,11 +19,12 @@
 // deployed -> idempotent replay, no second transaction, no signature
 // re-check (the account is already exactly what it should be).
 
-import { createWalletClient, formatUnits, getAddress, http, keccak256, toHex, type Hex } from "viem";
+import { createWalletClient, formatUnits, getAddress, http, keccak256, toHex, type Address, type Hex } from "viem";
 import { baseSepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import {
   CHAIN_ID,
+  OMAMORISAN_ACCOUNT_ABI,
   OMAMORISAN_ACCOUNT_FACTORY_ABI,
   OMAMORISAN_ACCOUNT_FACTORY_ADDRESS,
   USDC_DECIMALS,
@@ -62,14 +63,14 @@ function perPaymentLimitDefaultAtomic(): bigint {
   return BigInt(Math.round(perPaymentLimitDefaultUsdc() * 10 ** USDC_DECIMALS));
 }
 
-/** Mirrors apps/store/index.ts's `resolveMerchantAddress` — the demo store's
- * OWN payTo resolution — so the default recipient allow-list actually points
- * at the store an agent will be buying from, without a build-time dependency
- * between the two apps (each is its own bun workspace package). Returns
- * `undefined` (never throws) when neither env var is set: unlike the store,
- * a firewall with no merchant configured yet is a normal boot state, not a
- * fatal one — `defaultRecipients` below just deploys with an empty
- * allow-list and warns once. */
+/** Mirrors apps/store/index.ts's `resolveMerchantAddress` for the gift-card
+ * store — the demo store's OWN payTo resolution — so the default recipient
+ * allow-list actually points at the store an agent will be buying from,
+ * without a build-time dependency between the two apps (each is its own bun
+ * workspace package). Returns `undefined` (never throws) when neither env var
+ * is set: unlike the store, a firewall with no merchant configured yet is a
+ * normal boot state, not a fatal one — `defaultRecipients` below just leaves
+ * the gift-card store out of the default list and warns once. */
 function resolveDefaultMerchantAddress(): `0x${string}` | undefined {
   const override = process.env.MERCHANT_ADDRESS;
   if (override) return override as `0x${string}`;
@@ -82,14 +83,33 @@ function resolveDefaultMerchantAddress(): `0x${string}` | undefined {
   }
 }
 
-let warnedNoDefaultRecipient = false;
+// Local-dev fallback payTo addresses for the Data & APIs and Cloud Credits
+// stores (odd/tasks/multi-store.md's "Stores" table) — mirrors
+// apps/store/catalog.ts's own fallback constants for the same two stores.
+// Unlike the gift-card store, these two always resolve to SOME address, so a
+// fresh account's default recipient list always includes all three demo
+// stores even with no env configured at all.
+const DEFAULT_MERCHANT_ADDRESS_DATA = "0xbDc31ea7520D358c3932600499e546385E649394" as const;
+const DEFAULT_MERCHANT_ADDRESS_CLOUD = "0xAbDCC40aFf5772F32A54C452D68E1F23A128e173" as const;
+
+function resolveDataMerchantAddress(): `0x${string}` {
+  return (process.env.MERCHANT_ADDRESS_DATA as `0x${string}` | undefined) ?? DEFAULT_MERCHANT_ADDRESS_DATA;
+}
+
+function resolveCloudMerchantAddress(): `0x${string}` {
+  return (process.env.MERCHANT_ADDRESS_CLOUD as `0x${string}` | undefined) ?? DEFAULT_MERCHANT_ADDRESS_CLOUD;
+}
+
+let warnedNoGiftCardDefault = false;
 
 /** `OMAMORISAN_DEFAULT_RECIPIENTS` (JSON `[{address,label}]`) if set and
- * well-formed; otherwise the demo store's own merchant address (see
- * `resolveDefaultMerchantAddress`), labeled "Demo store"; otherwise an empty
- * allow-list (warned once, never thrown — a freshly deployed account with no
- * allow-listed recipient yet simply can't pay anyone until the owner calls
- * `setRecipient` themselves, which is safe, just inconvenient for the demo). */
+ * well-formed; otherwise the three demo stores: the gift-card store's own
+ * merchant address (see `resolveDefaultMerchantAddress`) when configured,
+ * plus the Data & APIs and Cloud Credits stores (always present, via their
+ * own env override or local-dev fallback) — so local dev and a freshly
+ * created account both get all three stores by default (odd/tasks/multi-store.md).
+ * Never throws: a gift-card store left unconfigured is simply left out,
+ * warned once, rather than emptying the whole list. */
 function defaultRecipients(): AccountRecipient[] {
   const raw = process.env.OMAMORISAN_DEFAULT_RECIPIENTS;
   if (raw) {
@@ -102,24 +122,25 @@ function defaultRecipients(): AccountRecipient[] {
         }));
       }
       console.warn(
-        "[account-setup] OMAMORISAN_DEFAULT_RECIPIENTS is set but is not a valid [{address,label}] JSON array — falling back to the demo store default",
+        "[account-setup] OMAMORISAN_DEFAULT_RECIPIENTS is set but is not a valid [{address,label}] JSON array — falling back to the demo store defaults",
       );
     } catch {
-      console.warn("[account-setup] OMAMORISAN_DEFAULT_RECIPIENTS is set but is not valid JSON — falling back to the demo store default");
+      console.warn("[account-setup] OMAMORISAN_DEFAULT_RECIPIENTS is set but is not valid JSON — falling back to the demo store defaults");
     }
   }
-  const merchant = resolveDefaultMerchantAddress();
-  if (!merchant) {
-    if (!warnedNoDefaultRecipient) {
-      warnedNoDefaultRecipient = true;
-      console.warn(
-        "[account-setup] no OMAMORISAN_DEFAULT_RECIPIENTS and neither MERCHANT_ADDRESS nor MERCHANT_KEY is set — " +
-          "newly deployed accounts will have an EMPTY recipient allow-list",
-      );
-    }
-    return [];
+  const recipients: AccountRecipient[] = [];
+  const giftCardMerchant = resolveDefaultMerchantAddress();
+  if (giftCardMerchant) {
+    recipients.push({ address: giftCardMerchant, label: "Gift Cards store" });
+  } else if (!warnedNoGiftCardDefault) {
+    warnedNoGiftCardDefault = true;
+    console.warn(
+      "[account-setup] neither MERCHANT_ADDRESS nor MERCHANT_KEY is set — the default recipient list will not include the gift-card store",
+    );
   }
-  return [{ address: merchant, label: "Demo store" }];
+  recipients.push({ address: resolveDataMerchantAddress(), label: "Data & APIs store" });
+  recipients.push({ address: resolveCloudMerchantAddress(), label: "Cloud Credits store" });
+  return recipients;
 }
 
 // --- On-chain reads/writes ----------------------------------------------------
@@ -282,6 +303,92 @@ export async function describeAccountDeployment(account: StoredAccount): Promise
   };
 }
 
+// --- Known merchants (multi-store M2) ------------------------------------------
+// `GET /setup/:token`'s `knownMerchants` list: the demo stores this
+// deployment knows about (`defaultRecipients()` — the config-level canonical
+// list, NOT `account.recipients`, so a store added after this account was
+// deployed still shows up here for the owner to register), each annotated
+// with whether the account's OWN on-chain recipient allow-list currently
+// accepts it. Lets `/setup`'s "Registered merchants" card offer a "Register"
+// button for a known store the account hasn't been given yet.
+
+export interface KnownMerchantDto {
+  address: `0x${string}`;
+  label: string;
+  /** `true`/`false` from a live on-chain read of `recipients(address)`;
+   * `null` when there's nothing to read yet (not deployed) or the read
+   * itself failed — never asserted `true` on a doubtful read. */
+  registered: boolean | null;
+}
+
+export interface MerchantRegistrationReadParams {
+  smartAccount: Address;
+  merchant: Address;
+  /** Only the stub reader uses this, to look up the account's own recorded
+   * recipients (same shape as funding.ts's `AccountHealthReader`). */
+  accountId: string;
+}
+
+export interface MerchantRegistrationReader {
+  isRegistered(params: MerchantRegistrationReadParams): Promise<boolean | null>;
+}
+
+/** Real reader: a live `recipients(address)` view call against the deployed
+ * `OmamorisanAccount` (same ABI/`publicClient` funding.ts's `AccountHealthReader`
+ * already uses for the same view function). A failed read — no code at that
+ * address, a flaky RPC, anything — reports `null`, never a wrong `true`. */
+const realMerchantRegistrationReader: MerchantRegistrationReader = {
+  async isRegistered({ smartAccount, merchant }) {
+    try {
+      return await publicClient.readContract({
+        address: smartAccount,
+        abi: OMAMORISAN_ACCOUNT_ABI,
+        functionName: "recipients",
+        args: [merchant],
+      });
+    } catch {
+      return null;
+    }
+  },
+};
+
+/** Stub reader (`OMAMORISAN_ACCOUNT_READER=stub` — the same dev seam
+ * funding.ts's `AccountHealthReader` uses, since both read the same kind of
+ * on-chain smart-account state): never touches the chain, simulates
+ * "registered" as membership in this account's own recorded `recipients`
+ * (`StoredAccount.recipients`) — a real simulation of on-chain state for an
+ * account whose stub deploy never sent a transaction that could change it. */
+const stubMerchantRegistrationReader: MerchantRegistrationReader = {
+  async isRegistered({ accountId, merchant }) {
+    const account = getAccount(accountId);
+    return (account?.recipients ?? []).some((r) => r.address.toLowerCase() === merchant.toLowerCase());
+  },
+};
+
+export function getMerchantRegistrationReader(): MerchantRegistrationReader {
+  return process.env.OMAMORISAN_ACCOUNT_READER === "stub" ? stubMerchantRegistrationReader : realMerchantRegistrationReader;
+}
+
+/** Builds `knownMerchants` for `GET /setup/:token`. Before deployment there's
+ * no smart account to read `recipients(address)` from at all, so every entry
+ * reports `registered: null` (never a guessed `false`) rather than skipping
+ * the list. */
+export async function getKnownMerchants(account: StoredAccount): Promise<KnownMerchantDto[]> {
+  const merchants = defaultRecipients();
+  if (!account.smartAccount) {
+    return merchants.map((m) => ({ address: m.address, label: m.label, registered: null }));
+  }
+  const smartAccount = account.smartAccount;
+  const reader = getMerchantRegistrationReader();
+  return Promise.all(
+    merchants.map(async (m) => ({
+      address: m.address,
+      label: m.label,
+      registered: await reader.isRegistered({ smartAccount, merchant: m.address, accountId: account.id }),
+    })),
+  );
+}
+
 // --- GET /setup/:token ---------------------------------------------------------
 
 interface SetupStatusCommon {
@@ -292,7 +399,13 @@ interface SetupStatusCommon {
   operator: string;
   /** Decimal USDC string — see {@link AccountDeploymentInfo}. */
   perPaymentLimitUsdc: string;
+  /** Kept for compatibility — this account's OWN recorded (or, pre-deploy,
+   * would-be) recipients. See {@link KnownMerchantDto}/`knownMerchants` for
+   * the config-level list with live on-chain registration status. */
   recipients: SetupRecipientDto[];
+  /** Every demo store this deployment knows about, each with its live
+   * on-chain registration status against THIS account. */
+  knownMerchants: KnownMerchantDto[];
   message: string;
   /** ISO 8601 — the setup token's own expiry. */
   expiresAt: string;
@@ -320,6 +433,7 @@ export async function getSetupStatus(token: string): Promise<SetupStatusOutcome>
   }
 
   const message = setupMessageTemplate(account.id, token);
+  const knownMerchants = await getKnownMerchants(account);
   const common = {
     accountId: account.id,
     chainId: CHAIN_ID,
@@ -328,6 +442,7 @@ export async function getSetupStatus(token: string): Promise<SetupStatusOutcome>
     operator: operatorAccount.address,
     message,
     expiresAt: record.expiresAt,
+    knownMerchants,
   };
 
   const deployment = await describeAccountDeployment(account);

@@ -38,6 +38,12 @@ export async function readAccountPaused(account: Address): Promise<boolean> {
   return createPublicReadClient().readContract({ address: account, abi: OMAMORISAN_ACCOUNT_ABI, functionName: "paused" });
 }
 
+/** Live `recipients(address)` read — never trust the firewall's `knownMerchants`
+ * snapshot for the figure shown right after a `registerMerchant` write. */
+export async function readMerchantRegistered(account: Address, merchant: Address): Promise<boolean> {
+  return createPublicReadClient().readContract({ address: account, abi: OMAMORISAN_ACCOUNT_ABI, functionName: "recipients", args: [merchant] });
+}
+
 /** Deposits USDC from the connected wallet straight into the smart account —
  * a plain ERC-20 transfer, no allowance/approve step needed since the account
  * never pulls funds itself. Simulated first so an insufficient-balance revert
@@ -67,6 +73,31 @@ export async function setAccountPaused(provider: EIP1193Provider, owner: Address
   await publicClient.simulateContract({ account: owner, address: smartAccount, abi: OMAMORISAN_ACCOUNT_ABI, functionName: "setPaused", args: [newPaused] });
   const wallet = createTargetWalletClient(provider);
   const hash = await wallet.writeContract({ account: owner, address: smartAccount, abi: OMAMORISAN_ACCOUNT_ABI, functionName: "setPaused", args: [newPaused] });
+  await publicClient.waitForTransactionReceipt({ hash });
+  return hash;
+}
+
+/** Owner-only: `OmamorisanAccount.setRecipient(address, true)` — registers a
+ * known store so this account can pay it (funding.ts's `recipientAllowed`
+ * check). Never de-registers from here — the "Registered merchants" card only
+ * offers "Register", not "Unregister" (out of scope for M2). */
+export async function registerMerchant(provider: EIP1193Provider, owner: Address, smartAccount: Address, merchant: Address): Promise<Hex> {
+  const publicClient = createPublicReadClient();
+  await publicClient.simulateContract({
+    account: owner,
+    address: smartAccount,
+    abi: OMAMORISAN_ACCOUNT_ABI,
+    functionName: "setRecipient",
+    args: [merchant, true],
+  });
+  const wallet = createTargetWalletClient(provider);
+  const hash = await wallet.writeContract({
+    account: owner,
+    address: smartAccount,
+    abi: OMAMORISAN_ACCOUNT_ABI,
+    functionName: "setRecipient",
+    args: [merchant, true],
+  });
   await publicClient.waitForTransactionReceipt({ hash });
   return hash;
 }

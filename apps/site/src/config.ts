@@ -33,14 +33,22 @@ export const SITE = {
 } as const;
 
 /**
- * Categories a mandate can authorize (P5). Matches the demo store's real
- * catalog (`apps/store/catalog.ts`) — the firewall's policy layer treats
- * `TaskIntent.categories` as free-form context for Jev, not a fixed enum, so
- * the wizard also lets a signer add a custom category alongside these.
+ * Categories a mandate can authorize (P5). Matches the demo stores' real
+ * catalogs (`apps/store/catalog.ts` — gift cards, data & APIs, cloud
+ * credits) — the firewall's policy layer treats `TaskIntent.categories` as
+ * free-form context for Jev, not a fixed enum, so the wizard also lets a
+ * signer add a custom category alongside these.
  */
 export const MANDATE_CATEGORY_OPTIONS = [
   { value: "gift_card:amazon", label: "Amazon gift cards" },
   { value: "gift_card:steam", label: "Steam gift cards" },
+  { value: "gift_card:apple", label: "Apple gift cards" },
+  { value: "gift_card:netflix", label: "Netflix gift cards" },
+  { value: "data:weather", label: "Weather data" },
+  { value: "data:market", label: "Market data" },
+  { value: "content:article", label: "Articles" },
+  { value: "cloud:compute", label: "Cloud compute credits" },
+  { value: "cloud:storage", label: "Cloud storage credits" },
 ] as const;
 
 /** Expiry presets offered by the mandate wizard (P5 brief). */

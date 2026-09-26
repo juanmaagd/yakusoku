@@ -13,6 +13,16 @@ export interface SetupRecipient {
   label: string;
 }
 
+/** One demo store the firewall knows about, with its live on-chain
+ * registration status against this specific account — `null` means there's
+ * nothing to read yet (not deployed) or the read itself failed, never a
+ * guessed `false`. */
+export interface KnownMerchant {
+  address: Address;
+  label: string;
+  registered: boolean | null;
+}
+
 /**
  * `GET /setup/:token`. `perPaymentLimitUsdc`/`balanceUsdc` are assumed to
  * already be decimal-formatted USDC strings (e.g. `"5.00"`), not atomic
@@ -33,6 +43,10 @@ export interface SetupInfo {
   operator: Address;
   perPaymentLimitUsdc: string;
   recipients: SetupRecipient[];
+  /** Every demo store the firewall knows about, each with its live on-chain
+   * registration status against this account (P11.4's "Registered merchants"
+   * card, DeployedCard.tsx). */
+  knownMerchants: KnownMerchant[];
   /** Contains the literal placeholder `{owner}` — replace with the connected
    * checksummed address before signing. */
   message: string;
@@ -100,7 +114,8 @@ export async function fetchSetup(token: string): Promise<SetupInfo> {
   if (res.status === 404) throw new SetupNotFoundError();
   const body = await parseJson<SetupInfo & ApiErrorBody>(res);
   if (!res.ok || !body?.status) throw new Error(describeApiError(body, "Could not load this setup link."));
-  return body;
+  // Defensive fallback for a firewall build from before knownMerchants existed.
+  return { ...body, knownMerchants: body.knownMerchants ?? [] };
 }
 
 export async function submitSetupOwner(token: string, owner: Address, signature: Hex): Promise<SubmitOwnerResponse> {
