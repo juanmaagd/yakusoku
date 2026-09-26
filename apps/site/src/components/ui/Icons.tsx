@@ -1,11 +1,11 @@
 // Authored 16px icon set for the app: one stroke weight (1.5), round caps,
 // `currentColor`, so state color always comes from the parent text color.
 
-import type { SVGProps } from "react";
+import type { ReactNode, SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
-function Svg({ size = 16, children, ...rest }: IconProps & { children: React.ReactNode }) {
+function Svg({ size = 16, children, ...rest }: IconProps & { children: ReactNode }) {
   return (
     <svg
       width={size}

@@ -42,3 +42,41 @@ function formatDuration(ms: number): string {
 export function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
+
+/** Atomic USDC as a fixed two-decimal amount (`"25000000"` -> `"25.00"`),
+ * for tabular display where trailing zeros keep columns aligned. */
+export function formatUsdcFixed(atomic: string | bigint): string {
+  const value = typeof atomic === "bigint" ? atomic : BigInt(atomic);
+  const cents = (value + 5_000n) / 10_000n; // 6 decimals -> 2, rounded
+  const whole = cents / 100n;
+  const frac = (cents % 100n).toString().padStart(2, "0");
+  return `${whole}.${frac}`;
+}
+
+/** "23h 12m" / "12m" / "3d 4h" — remaining time with two units of precision. */
+export function formatRemaining(ms: number): string {
+  const totalMinutes = Math.max(Math.floor(ms / 60_000), 0);
+  if (totalMinutes < 1) return "under a minute";
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  return `${minutes}m`;
+}
+
+/** "just now" / "4m ago" / "3h ago" / "2d ago" for an ISO timestamp. */
+export function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 45_000) return "just now";
+  const minutes = Math.round(diffMs / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+/** Short hex for ids and nonces: `0x9f3a…c21e`. */
+export function shortHex(value: string, head = 6, tail = 4): string {
+  return value.length <= head + tail + 1 ? value : `${value.slice(0, head)}…${value.slice(-tail)}`;
+}
