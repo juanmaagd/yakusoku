@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "omamorisan": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://omamorisan-mcp-8e4dca-91-98-199-240.sslip.io/mcp",
+        "--header",
+        "Authorization:${AUTH_HEADER}"
+      ],
+      "env": {
+        "AUTH_HEADER": "Bearer <YOUR_AGENT_KEY>"
+      }
+    }
+  }
+}
