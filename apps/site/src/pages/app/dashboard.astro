@@ -1,15 +1,9 @@
 ---
 import Layout from "../../layouts/Layout.astro";
-import Nav from "../../components/Nav.astro";
-import Footer from "../../components/Footer.astro";
 import DashboardApp from "../../components/dashboard/DashboardApp";
 import { SITE } from "../../config";
 ---
 
-<Layout title={`Dashboard — ${SITE.name}`}>
-  <Nav />
-  <main class="min-h-[70vh] px-6 py-12 md:px-10">
-    <DashboardApp client:load />
-  </main>
-  <Footer />
+<Layout title={`Live — ${SITE.name}`}>
+  <DashboardApp client:load />
 </Layout>

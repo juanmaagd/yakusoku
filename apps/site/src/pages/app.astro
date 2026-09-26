@@ -1,15 +1,9 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import Nav from "../components/Nav.astro";
-import Footer from "../components/Footer.astro";
 import AppFlow from "../components/app/AppFlow";
 import { SITE } from "../config";
 ---
 
-<Layout title={`Launch app — ${SITE.name}`}>
-  <Nav />
-  <main class="min-h-[70vh] px-6 py-12 md:px-10">
-    <AppFlow client:load />
-  </main>
-  <Footer />
+<Layout title={`Promises — ${SITE.name}`}>
+  <AppFlow client:load />
 </Layout>

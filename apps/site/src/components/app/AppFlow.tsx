@@ -1,9 +1,10 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { SITE } from "../../config";
 import { shortAddress } from "../../lib/format";
-import { outlinedButton, primaryButton, textButton } from "../../lib/ui";
+import { primaryButton } from "../../lib/ui";
 import { getInjectedProvider } from "../../lib/wallet";
-import { useWalletSession } from "../../lib/useWalletSession";
+import { useWalletSession, type WalletSession } from "../../lib/useWalletSession";
+import AppShell from "../ui/AppShell";
 import MandateList from "./MandateList";
 import MandateResult, { type MandateResultData } from "./MandateResult";
 import MandateWizard from "./MandateWizard";
@@ -16,13 +17,16 @@ import MandateWizard from "./MandateWizard";
  * `/app/dashboard` can reuse it verbatim). */
 export default function AppFlow() {
   const session = useWalletSession();
+  return (
+    <AppShell active="promises" session={session}>
+      <AppContent session={session} />
+    </AppShell>
+  );
+}
+
+function AppContent({ session }: { session: WalletSession }) {
   const [result, setResult] = useState<MandateResultData | undefined>();
   const [refreshSignal, setRefreshSignal] = useState(0);
-
-  const handleSignOut = useCallback(async () => {
-    await session.signOut();
-    setResult(undefined);
-  }, [session]);
 
   const handleCreated = useCallback((data: MandateResultData) => {
     setResult(data);
@@ -119,21 +123,6 @@ export default function AppFlow() {
       }
       return (
         <div className="mx-auto w-full max-w-[720px] space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-body-sm text-stone">Signed in as</p>
-              <p className="text-body font-medium text-ink">{shortAddress(stage.address)}</p>
-            </div>
-            <div className="flex items-center gap-4">
-              <a href={SITE.dashboardRoute} className={textButton}>
-                Open dashboard
-              </a>
-              <button type="button" onClick={() => void handleSignOut()} className={outlinedButton}>
-                Sign out
-              </button>
-            </div>
-          </div>
-
           {result ? (
             <MandateResult result={result} onDone={handleBackFromResult} />
           ) : (

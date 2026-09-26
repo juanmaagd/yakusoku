@@ -2,13 +2,10 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { DecisionReceipt } from "@yakusoku/shared";
 import { agentCliCommand, SITE } from "../../config";
 import {
-  fetchOwnerControl,
   getApprovalStatus,
   listMandates,
   listReceipts,
   ownerEventsUrl,
-  pauseOwnerSigning,
-  resumeOwnerSigning,
   revokeMandate,
   UnauthorizedError,
   type ApprovalStatus,
@@ -19,7 +16,7 @@ import { connectSseWithRetry } from "../../lib/sse";
 import { primaryButton } from "../../lib/ui";
 import { useWalletSession, type WalletSessionStage } from "../../lib/useWalletSession";
 import ApprovalCard from "./ApprovalCard";
-import DashboardHeader from "./DashboardHeader";
+import AppShell from "../ui/AppShell";
 import MandateFilterList from "./MandateFilterList";
 import ReceiptDetailPanel from "./ReceiptDetailPanel";
 import Timeline from "./Timeline";
@@ -70,18 +67,21 @@ const initialState: DashboardState = { receipts: new Map(), mandates: new Map(),
 export default function DashboardApp() {
   const session = useWalletSession();
 
-  if (session.stage.kind !== "signed-in") {
-    return <AuthRequired stage={session.stage} />;
-  }
+  const [liveStatus, setLiveStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
 
   return (
-    <DashboardContent
-      key={session.stage.sessionToken}
-      address={session.stage.address}
-      sessionToken={session.stage.sessionToken}
-      onSignOut={session.signOut}
-      onUnauthorized={session.handleUnauthorized}
-    />
+    <AppShell active="live" session={session} liveStatus={liveStatus}>
+      {session.stage.kind !== "signed-in" ? (
+        <AuthRequired stage={session.stage} />
+      ) : (
+        <DashboardContent
+          key={session.stage.sessionToken}
+          sessionToken={session.stage.sessionToken}
+          onUnauthorized={session.handleUnauthorized}
+          onLiveStatus={setLiveStatus}
+        />
+      )}
+    </AppShell>
   );
 }
 
@@ -107,16 +107,22 @@ function AuthRequired({ stage }: { stage: WalletSessionStage }) {
 }
 
 interface DashboardContentProps {
-  address: string;
   sessionToken: string;
-  onSignOut: () => Promise<void>;
   onUnauthorized: () => void;
+  onLiveStatus: (status: "connecting" | "connected" | "disconnected") => void;
 }
 
-function DashboardContent({ address, sessionToken, onSignOut, onUnauthorized }: DashboardContentProps) {
+function DashboardContent({ sessionToken, onUnauthorized, onLiveStatus }: DashboardContentProps) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [loadError, setLoadError] = useState<string | undefined>();
-  const [connStatus, setConnStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const [connStatus, setConnStatusState] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const setConnStatus = useCallback(
+    (status: "connecting" | "connected" | "disconnected") => {
+      setConnStatusState(status);
+      onLiveStatus(status);
+    },
+    [onLiveStatus],
+  );
   const [selectedMandateId, setSelectedMandateId] = useState<string | undefined>();
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | undefined>();
   const fetchedApprovalsRef = useRef(new Set<string>());
@@ -152,15 +158,10 @@ function DashboardContent({ address, sessionToken, onSignOut, onUnauthorized }: 
     let cancelled = false;
     void (async () => {
       try {
-        const [receipts, mandates, control] = await Promise.all([
-          listReceipts(sessionToken),
-          listMandates(sessionToken),
-          fetchOwnerControl(sessionToken),
-        ]);
+        const [receipts, mandates] = await Promise.all([listReceipts(sessionToken), listMandates(sessionToken)]);
         if (cancelled) return;
         dispatch({ type: "receipts", receipts });
         dispatch({ type: "mandates", mandates });
-        dispatch({ type: "control", control });
         for (const r of receipts) if (r.state === "awaiting_world_id") void fetchApproval(r.receiptId);
       } catch (err) {
         if (cancelled) return;
@@ -230,24 +231,6 @@ function DashboardContent({ address, sessionToken, onSignOut, onUnauthorized }: 
     }
   }
 
-  async function handlePause(reason?: string) {
-    try {
-      const control = await pauseOwnerSigning(sessionToken, reason);
-      dispatch({ type: "control", control });
-    } catch (err) {
-      handleUnauthorized(err);
-    }
-  }
-
-  async function handleResume() {
-    try {
-      const control = await resumeOwnerSigning(sessionToken);
-      dispatch({ type: "control", control });
-    } catch (err) {
-      handleUnauthorized(err);
-    }
-  }
-
   const emptyState =
     mandates.length === 0 ? (
       <>
@@ -274,7 +257,6 @@ function DashboardContent({ address, sessionToken, onSignOut, onUnauthorized }: 
 
   return (
     <div className="mx-auto w-full max-w-[1200px] space-y-5">
-      <DashboardHeader address={address} control={state.control} onPause={handlePause} onResume={handleResume} onSignOut={onSignOut} />
 
       {connStatus !== "connected" && (
         <p className="rounded-btn border border-saffron/40 bg-saffron/10 px-3 py-2 text-body-sm text-saffron">

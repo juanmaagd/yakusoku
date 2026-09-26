@@ -1,58 +1,55 @@
-// Shared Tailwind class strings for the /app flow (P5) — one definition per
-// component vocabulary (DESIGN.md "Components") so every screen uses the
-// exact same button/card/input shape instead of drifting per-file.
+// Shared Tailwind class strings for /app and /app/dashboard — one definition
+// per control so every screen uses the same shape as the landing's world:
+// black primary action, hairline borders, 6px radius, color only for state.
 
-export const primaryButton =
-  "inline-flex items-center justify-center gap-1.5 rounded-btn bg-primary px-[15px] py-[7px] text-body-sm font-medium text-white transition-opacity duration-200 ease-out hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+const focusable = "transition-colors duration-200 ease-out disabled:cursor-not-allowed";
 
-export const ghostButton =
-  "inline-flex items-center justify-center gap-1.5 rounded-btn bg-sky-tint px-[15px] py-[7px] text-body-sm font-medium text-primary transition-opacity duration-200 ease-out hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50";
+export const primaryButton = `inline-flex items-center justify-center gap-2 rounded-btn bg-ink px-[18px] py-[10px] text-body-sm leading-[1.2] font-medium text-surface hover:bg-charcoal disabled:bg-hairline-strong disabled:text-graphite ${focusable}`;
 
-export const outlinedButton =
-  "inline-flex items-center justify-center gap-1.5 rounded-sm border border-black/[0.16] px-[10px] py-[5px] text-body-sm font-medium text-ink/90 transition-colors duration-200 ease-out hover:border-black/30 disabled:cursor-not-allowed disabled:opacity-50";
+export const outlinedButton = `inline-flex items-center justify-center gap-2 rounded-btn border border-ink px-[18px] py-[10px] text-body-sm leading-[1.2] font-medium text-ink hover:bg-fog disabled:border-hairline-strong disabled:text-stone ${focusable}`;
 
-export const dangerOutlinedButton =
-  "inline-flex items-center justify-center gap-1.5 rounded-sm border border-vermillion/40 px-[10px] py-[5px] text-body-sm font-medium text-vermillion transition-colors duration-200 ease-out hover:border-vermillion disabled:cursor-not-allowed disabled:opacity-50";
+/** Compact action for rows and toolbars (Copy, Revoke, Retry). */
+export const smallButton = `inline-flex items-center justify-center gap-1.5 rounded-btn border border-hairline-strong bg-surface px-3 py-1.5 text-body-sm leading-[1.2] font-medium text-ink hover:border-ink disabled:text-stone ${focusable}`;
 
-export const textButton =
-  "inline-flex items-center gap-1 text-body-sm font-medium text-ink/95 underline decoration-black/20 underline-offset-2 transition-colors duration-200 ease-out hover:text-primary disabled:cursor-not-allowed disabled:opacity-50";
+export const dangerOutlinedButton = `inline-flex items-center justify-center gap-1.5 rounded-btn border border-refuse/50 bg-surface px-3 py-1.5 text-body-sm leading-[1.2] font-medium text-refuse-ink hover:border-refuse hover:bg-refuse-wash disabled:opacity-60 ${focusable}`;
 
-export const card = "rounded-card border border-black/[0.08] bg-surface p-6 md:p-8";
+export const dangerButton = `inline-flex items-center justify-center gap-1.5 rounded-btn bg-refuse-ink px-3 py-1.5 text-body-sm leading-[1.2] font-medium text-surface hover:opacity-90 disabled:opacity-60 ${focusable}`;
 
-export const inputBase =
-  "w-full rounded-btn border border-black/[0.14] bg-canvas px-3 py-2 text-body text-ink placeholder:text-stone/70 transition-colors duration-200 ease-out focus:border-primary focus:outline-none";
+export const ghostButton = `inline-flex items-center justify-center gap-1.5 rounded-btn px-3 py-1.5 text-body-sm leading-[1.2] font-medium text-graphite hover:bg-fog hover:text-ink disabled:opacity-60 ${focusable}`;
 
-export const label = "mb-1.5 block text-body-sm font-medium text-ink/90";
+export const textButton = `inline-flex items-center gap-1.5 text-body-sm font-medium text-ink underline decoration-hairline-strong underline-offset-4 hover:decoration-ink disabled:opacity-60 ${focusable}`;
 
-export const errorText = "text-body-sm text-vermillion";
+export const card = "rounded-card border border-hairline bg-surface";
 
-export const chip =
-  "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-body-sm font-medium transition-colors duration-200 ease-out";
+export const inputBase = `w-full rounded-btn border border-hairline-strong bg-surface px-3 py-2.5 text-body text-ink placeholder:text-graphite hover:border-graphite focus:border-ink ${focusable}`;
+
+export const label = "block text-body-sm font-medium text-ink";
+
+export const helpText = "mt-1.5 text-caption text-graphite";
+
+export const errorText = "text-body-sm text-refuse-ink";
 
 export function chipClass(selected: boolean): string {
-  return `${chip} ${selected ? "border-primary bg-sky-tint text-primary" : "border-black/[0.14] bg-surface text-ink/70 hover:border-black/30"}`;
+  return `inline-flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-body-sm leading-[1.2] ${focusable} ${
+    selected ? "border-ink bg-ink text-surface" : "border-hairline-strong bg-surface text-ink hover:border-ink"
+  }`;
 }
 
-/** P6 dashboard status pill — one tint per `LaneStatus` (lib/receiptView.ts).
- * DESIGN.md has no dedicated "success" hue, so `paid` reuses the same
- * primary/sky-tint pairing Stage.astro already uses for a passing verdict;
- * `blocked` gets the same tinted (not full-saturation) treatment out of
- * `craft-floor`'s "heavy color on inactive/dense states" caution — a small
- * pill in a dense list stays restrained even where a hero verdict banner
- * would go bold. */
-const badgeBase = "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-caption font-semibold";
+/** State pill tint per `LaneStatus` (lib/receiptView.ts): color only ever
+ * means a firewall state. */
+const badgeBase = "label inline-flex items-center gap-1.5 rounded-sm px-2 py-[3px]";
 
 export function laneBadgeClass(status: "paid" | "blocked" | "waiting" | "expired" | "paused"): string {
   switch (status) {
     case "paid":
-      return `${badgeBase} bg-sky-tint text-primary`;
+      return `${badgeBase} bg-verified-wash text-verified`;
     case "blocked":
-      return `${badgeBase} bg-vermillion/10 text-vermillion`;
+      return `${badgeBase} bg-refuse-wash text-refuse-ink`;
     case "waiting":
-      return `${badgeBase} bg-saffron/15 text-saffron`;
+      return `${badgeBase} bg-ask-wash text-ask-ink`;
     case "expired":
-      return `${badgeBase} bg-black/[0.06] text-stone`;
+      return `${badgeBase} bg-fog text-graphite`;
     case "paused":
-      return `${badgeBase} bg-black/[0.08] text-graphite`;
+      return `${badgeBase} border border-hairline-strong text-graphite`;
   }
 }
