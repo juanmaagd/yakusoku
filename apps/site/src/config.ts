@@ -3,7 +3,7 @@
 // from here, so a rename or a domain change touches exactly one file.
 
 export const SITE = {
-  name: "Omamorisan",
+  name: "Omamori",
   tagline: "Your agent pays only for what you promised.",
   description:
     "A pre-signature firewall for AI agent payments. The agent never holds a key: every payment is checked against the intent you signed, before anything is signed.",

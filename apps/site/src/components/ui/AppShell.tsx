@@ -95,7 +95,7 @@ export default function AppShell({ active, session, liveStatus, children }: AppS
       <header className="sticky top-0 z-40 border-b border-hairline bg-canvas">
         <div className="mx-auto flex h-16 max-w-[1200px] items-center gap-8 px-6 md:px-8">
           <a href="/" className="flex shrink-0 items-center" aria-label={`${SITE.name} home`}>
-            <img src="/brand/logo.svg" alt={SITE.name} width="188" height="24" className="h-6 w-auto" />
+            <img src="/brand/logo.svg" alt={SITE.name} width="144" height="24" className="h-6 w-auto" />
           </a>
           {signedIn && (
             <nav aria-label="App" className="hidden h-full md:flex">
