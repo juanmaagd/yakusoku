@@ -1,5 +1,21 @@
 ---
+import { SITE } from "../config";
+import CopyButton from "./ui/CopyButton";
 import SetupAgentCard from "./SetupAgentCard";
+
+const INSTALL = `npx skills add ${SITE.skillsUrl}`;
+
+// The two Agent Skills packages in the bundle (sources in `skills/`).
+const SKILLS = [
+  {
+    name: "omamori-setup",
+    body: "Connects your agent, checks the connection and asks you for its first intent.",
+  },
+  {
+    name: "omamori-purchase",
+    body: "Buys inside that intent: reuses or requests intents, reads the store's catalog and handles every verdict.",
+  },
+] as const;
 ---
 
 <section id="setup-agent" class="band" aria-labelledby="setup-heading">
@@ -7,12 +23,48 @@ import SetupAgentCard from "./SetupAgentCard";
     Set up your <strong>agent.</strong>
   </h2>
   <p class="mt-6 max-w-[54ch] text-body-lg text-graphite">
-    Paste one prompt into your agent. It connects to Omamori and asks you for its first intent.
+    Install two skills and ask your agent to set up Omamori. It connects, asks you for its first intent, and knows how
+    to buy inside it.
   </p>
 
-  <SetupAgentCard client:visible />
+  <div class="mt-10 overflow-hidden rounded-card border border-hairline">
+    <div class="flex flex-wrap items-center justify-between gap-4 bg-ink px-5 py-4">
+      <code class="install min-w-0 break-all text-white">{INSTALL}</code>
+      <CopyButton client:visible value={INSTALL} label="Copy" ariaLabel="Copy the skills install command" />
+    </div>
+    <ul class="grid grid-cols-1 sm:grid-cols-2">
+      {
+        SKILLS.map((skill, i) => (
+          <li class:list={["border-hairline px-5 py-4", i > 0 && "max-sm:border-t sm:border-l"]}>
+            <p class="font-mono text-caption text-ink">{skill.name}</p>
+            <p class="mt-1 text-body-sm text-graphite">{skill.body}</p>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+
+  <details class="manual mt-8">
+    <summary class="btn btn-outline">Or connect without skills</summary>
+    <SetupAgentCard client:visible />
+  </details>
 
   <p class="mt-6 text-caption text-stone">
     Testnet demo on Base Sepolia with test USDC. Approvals happen in the real World App.
   </p>
 </section>
+
+<style>
+  .install {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .manual > summary {
+    list-style: none;
+    cursor: pointer;
+  }
+  .manual > summary::-webkit-details-marker {
+    display: none;
+  }
+</style>
