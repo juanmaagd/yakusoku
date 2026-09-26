@@ -1,7 +1,8 @@
 ---
 // The owner's flow: the sequence itself carries meaning (ask, then
 // approve, then it buys), so unlike the rest of the page, numbering these
-// three steps is load-bearing rather than decorative.
+// three steps is load-bearing rather than decorative. This is the page's
+// one centered exhibit — a gallery triptych, not a bordered card grid.
 const STEPS = [
   {
     art: "/art/agent.webp",
@@ -20,49 +21,80 @@ const STEPS = [
     body: "It pays from your account inside that intent: no taps, no keys. Every payment leaves a receipt with its reason, and you can revoke the intent any time.",
   },
 ] as const;
+
+// Connectors sit at the boundary between columns of an equal 3-up grid.
+const CONNECTORS = [
+  { left: "33.333%", label: "intent" },
+  { left: "66.667%", label: "one tap" },
+] as const;
 ---
 
 <section id="how-it-works" class="band" aria-labelledby="how-heading">
-  <h2 id="how-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
+  <h2 id="how-heading" class="headline mx-auto max-w-[22ch] text-center text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
     One approval. <strong>Then it shops on its own.</strong>
   </h2>
 
-  <ol class="steps mt-14 grid grid-cols-1 overflow-hidden rounded-card border border-hairline sm:grid-cols-3" data-inview>
-    {
-      STEPS.map((step, i) => (
-        <li
-          class="step relative flex flex-col gap-4 border-hairline px-6 py-7 max-sm:[&:not(:first-child)]:border-t sm:[&:not(:first-child)]:border-l"
-          style={`--i: ${i}`}
-        >
-          <p class="font-mono text-caption text-stone">{String(i + 1).padStart(2, "0")}</p>
-          <img
-            src={step.art}
-            alt={"alt" in step ? step.alt : ""}
-            width="1024"
-            height="1024"
-            loading="lazy"
-            decoding="async"
-            class="h-20 w-20 select-none"
-          />
-          <div>
-            <p class="text-body-lg font-semibold text-ink">{step.title}</p>
-            <p class="mt-2 text-body-sm text-graphite">{step.body}</p>
-          </div>
-        </li>
-      ))
-    }
-  </ol>
+  <div class="triptych mt-16 md:mt-20" data-inview>
+    <div class="art-row relative md:border-b md:border-hairline">
+      <ol class="grid grid-cols-1 gap-14 md:grid-cols-3 md:items-end md:gap-6">
+        {
+          STEPS.map((step) => (
+            <li class="flex justify-center">
+              <img
+                src={step.art}
+                alt={"alt" in step ? step.alt : ""}
+                width="1024"
+                height="1024"
+                loading="lazy"
+                decoding="async"
+                class="h-[200px] w-[200px] object-contain object-bottom select-none md:h-[260px] md:w-[260px]"
+              />
+            </li>
+          ))
+        }
+      </ol>
+
+      <div class="connectors pointer-events-none absolute inset-x-0 bottom-0 hidden md:block" aria-hidden="true">
+        {
+          CONNECTORS.map((c) => (
+            <div class="connector absolute flex flex-col items-center gap-2 text-graphite" style={`left: ${c.left}`}>
+              <span class="label text-stone">{c.label}</span>
+              <svg viewBox="0 0 56 16" class="h-4 w-14" fill="none">
+                <line x1="2" y1="8" x2="42" y2="8" stroke="currentColor" stroke-width="1" />
+                <path d="M38 3.5L46 8L38 12.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+
+    <ol class="mt-8 grid grid-cols-1 gap-12 md:mt-10 md:grid-cols-3 md:gap-6">
+      {
+        STEPS.map((step, i) => (
+          <li class="flex flex-col items-center text-center">
+            <p class="font-mono text-caption text-stone">{String(i + 1).padStart(2, "0")}</p>
+            <p class="mt-2 text-heading-sm font-semibold text-ink">{step.title}</p>
+            <p class="mt-3 max-w-[32ch] text-body text-graphite">{step.body}</p>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
 </section>
 
 <style>
-  :global(.js) .steps .step {
-    transition:
-      opacity 420ms var(--ease-out-soft),
-      transform 420ms var(--ease-out-soft);
-    transition-delay: calc(var(--i) * 160ms);
+  .connector {
+    transform: translate(-50%, 50%);
   }
-  :global(.js) .steps:not(.is-in) .step {
+
+  :global(.js) .triptych {
+    transition:
+      opacity 500ms var(--ease-out-soft),
+      transform 500ms var(--ease-out-soft);
+  }
+  :global(.js) .triptych:not(.is-in) {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(12px);
   }
 </style>
