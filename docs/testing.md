@@ -20,6 +20,41 @@ Current team instance (Dokploy, deployed 2026-09-26):
 
 Claude Code: `claude mcp add --transport http omamorisan-team https://omamorisan-mcp-8e4dca-91-98-199-240.sslip.io/mcp`
 
+### Skip repeated World ID approvals (recommended)
+
+The hosted MCP server above keeps each session's credential in memory only, so by default every new session (new conversation, reconnect, redeploy) re-asks you to approve World ID. Mint a persistent key once instead:
+
+1. Sign in at `<SITE_URL>/app/settings`.
+2. Click **Create agent key** (an optional label helps tell keys apart later) and copy the `Authorization: Bearer <key>` value — it's shown once. Creating a new key doesn't revoke older ones.
+3. Add it to your client:
+
+   - **Claude Code:** `claude mcp add --transport http omamorisan-team https://omamorisan-mcp-8e4dca-91-98-199-240.sslip.io/mcp --header "Authorization: Bearer <key>"` ([docs](https://code.claude.com/docs/en/mcp#option-1-add-a-remote-http-server)).
+   - **Claude Desktop:** its `claude_desktop_config.json` only speaks stdio, so bridge with [`mcp-remote`](https://github.com/punkpeye/mcp-remote#custom-headers):
+     ```json
+     {
+       "mcpServers": {
+         "omamorisan": {
+           "command": "npx",
+           "args": ["-y", "mcp-remote", "https://omamorisan-mcp-8e4dca-91-98-199-240.sslip.io/mcp", "--header", "Authorization:${AUTH_HEADER}"],
+           "env": { "AUTH_HEADER": "Bearer <key>" }
+         }
+       }
+     }
+     ```
+   - **Cursor:** add to `~/.cursor/mcp.json` ([docs](https://cursor.com/docs/mcp#config-interpolation)):
+     ```json
+     {
+       "mcpServers": {
+         "omamorisan": {
+           "url": "https://omamorisan-mcp-8e4dca-91-98-199-240.sslip.io/mcp",
+           "headers": { "Authorization": "Bearer <key>" }
+         }
+       }
+     }
+     ```
+
+Without the header, every new session asks for World ID again.
+
 Payments are real transactions on **Base Sepolia** (testnet USDC, no real money). Gift card codes are fake.
 Codes from purchases made before owner-only delivery was added remain in the agent's earlier response; the dashboard cannot recover those historical codes.
 

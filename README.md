@@ -46,6 +46,14 @@ For a stdio MCP client, add this config without a key:
 
 See [`apps/mcp/README.md`](apps/mcp/README.md) for client-specific commands and Streamable HTTP.
 
+**Using the hosted MCP server instead of running it yourself?** It keeps each session's credential in memory only, so a brand-new session (new conversation, reconnect, redeploy) normally re-asks for World ID. Sign in at `/app/settings`, click **Create agent key**, and add the header it shows instead of repeating that approval:
+
+- Claude Code: `claude mcp add --transport http omamorisan <MCP_URL> --header "Authorization: Bearer <key>"` ([docs](https://code.claude.com/docs/en/mcp#option-1-add-a-remote-http-server)).
+- Claude Desktop: its `claude_desktop_config.json` only speaks stdio, so bridge with [`mcp-remote`](https://github.com/punkpeye/mcp-remote#custom-headers): `"command": "npx", "args": ["-y", "mcp-remote", "<MCP_URL>", "--header", "Authorization:${AUTH_HEADER}"], "env": { "AUTH_HEADER": "Bearer <key>" }`.
+- Cursor: in `~/.cursor/mcp.json` (or the project's `.cursor/mcp.json`): `{ "url": "<MCP_URL>", "headers": { "Authorization": "Bearer <key>" } }` ([docs](https://cursor.com/docs/mcp#config-interpolation)).
+
+Without the header, every new session asks for World ID again. Revoke a key anytime from `/app/settings`; creating a new one doesn't revoke older ones yet.
+
 **2. Authorize a task.** Ask the agent to call `request_promise` with a task, USDC budget, categories, expiry, and one merchant origin. With no existing account, one World ID approval creates the account and its first intent. `check_promise` resumes a pending request. The credential is stored by the MCP server and is never returned to the model.
 
 **3. Set up the payer account.** Follow the `setupUrl` returned on first use, or ask the agent to call `setup_account`. The human links a wallet as owner and funds the deployed `OmamorisanAccount` with Base Sepolia USDC. Account payments require this setup; the account's owner controls recipients and payment limits.
