@@ -235,7 +235,7 @@ export function getAccountDeployer(): AccountDeployer {
  * checksummed address it's about to sign with — this lets the site show the
  * message BEFORE the owner has picked/connected a wallet. */
 export function setupMessageTemplate(accountId: string, token: string): string {
-  return `Omamorisan: link wallet {owner} as the owner of account ${accountId}. Token: ${token}`;
+  return `Omamori: link wallet {owner} as the owner of account ${accountId}. Token: ${token}`;
 }
 
 export function fillSetupMessage(template: string, owner: `0x${string}`): string {

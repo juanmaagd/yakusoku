@@ -35,18 +35,18 @@ const HTTP_PORT = 4010;
 // server/index.d.ts) so a client that only surfaces a truncated instructions
 // string still shows the whole "don't call connect first" rule.
 const SERVER_INSTRUCTIONS =
-  "Omamorisan lets you pay for things on the human's behalf within spending rules they approve once. If there " +
-  "is no active promise yet, ask the human for their rules — what you may buy, the store URL, a total USDC " +
+  "Omamori lets you pay for things on the human's behalf within spending rules they approve once. If there " +
+  "is no active intent yet, ask the human for their rules — what you may buy, the store URL, a total USDC " +
   "budget, and how long (up to 7 days) — then call request_promise ONCE with them; that single World ID " +
   "approval also connects a new account, so never call connect first. Show the World ID link and code, and any " +
   "setup link, so they can fund the account. Before every purchase, call list_promises and pay with pay_x402 " +
-  "under a promise with usableNow true that covers it (trust its expiresInMinutes and remainingUsdc; never " +
-  "compare dates yourself) — never request a new promise per item or per task. Judge each purchase on its own: " +
+  "under an intent with usableNow true that covers it (trust its expiresInMinutes and remainingUsdc; never " +
+  "compare dates yourself) — never request a new intent per item or per task. Judge each purchase on its own: " +
   "buy what fits, and for what does not, tell the human why and only call request_promise with replaces if " +
   "they agree to widen the rules. " +
   "If pay_x402 returns needs_human_approval, show the link and code and wait, then call check_approval. A " +
   "refusal is final: never retry with different wording. " +
-  "Give each distinct purchase its own purchaseRef, so buying the same item twice under one promise settles as " +
+  "Give each distinct purchase its own purchaseRef, so buying the same item twice under one intent settles as " +
   "two separate payments instead of replaying the first. After payment, give the human the revealUrl and tell " +
   "them to sign in with their linked wallet and reveal the gift card in the browser; never ask for the code in chat.";
 

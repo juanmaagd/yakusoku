@@ -335,7 +335,7 @@ function jevIntentMismatchHint(promise: { id: string; task: string } | undefined
   return (
     `This purchase does not match the approved spending rules ("${promise.task}"). If the human wants to widen ` +
     `the rules to cover it, confirm with them first, then call request_promise with replaces="${promise.id}" ` +
-    "describing exactly what they now want. Do not retry this payment under the current promise."
+    "describing exactly what they now want. Do not retry this payment under the current intent."
   );
 }
 
@@ -429,7 +429,7 @@ async function completePayment(
       ? {
           revealUrl,
           message: revealUrl
-            ? `Payment complete. Ask the human to open ${revealUrl}, sign in with the wallet linked to their Omamorisan account, and select Reveal code. The agent must not ask them to paste the code into chat.`
+            ? `Payment complete. Ask the human to open ${revealUrl}, sign in with the wallet linked to their Omamori account, and select Reveal code. The agent must not ask them to paste the code into chat.`
             : "Payment complete, but the gift card could not be delivered to the owner dashboard yet. Do not retry the payment; use the receiptId to investigate delivery.",
         }
       : {}),
@@ -608,11 +608,11 @@ async function waitForPromiseOutcome(firewallUrl: string, accountKey: string, pr
       // (or a human reading the tool result) should never keep treating
       // `detail.replaces` as still live.
       ...(detail.replaces
-        ? { replaces: detail.replaces, message: `Approved — this replaces promise ${detail.replaces}, which is no longer active. pay_x402 can now spend against this promise.` }
-        : { message: "Approved — pay_x402 can now spend against this promise." }),
+        ? { replaces: detail.replaces, message: `Approved — this replaces intent ${detail.replaces}, which is no longer active. pay_x402 can now spend against this intent.` }
+        : { message: "Approved — pay_x402 can now spend against this intent." }),
     });
   }
-  return ok({ status: detail.status, promiseId, reason: detail.reason ?? `promise resolved as ${detail.status}` });
+  return ok({ status: detail.status, promiseId, reason: detail.reason ?? `intent resolved as ${detail.status}` });
 }
 
 // --- P9.6 no-credential request_promise (single-approval account+promise) ---
@@ -637,7 +637,7 @@ async function pollFirstPromiseOnce(firewallUrl: string, pending: PendingFirstPr
  * account. */
 async function waitForFirstPromiseOutcome(session: SessionState, firewallUrl: string, httpMode: boolean): Promise<CallToolResult> {
   const pending = session.pendingFirstPromise;
-  if (!pending) return fail("no pending first-time promise request — call request_promise again");
+  if (!pending) return fail("no pending first-time intent request — call request_promise again");
 
   const result = await pollWithTimeout(() => pollFirstPromiseOnce(firewallUrl, pending), (r) => r.status !== "pending");
 
@@ -658,7 +658,7 @@ async function waitForFirstPromiseOutcome(session: SessionState, firewallUrl: st
   if (result.status === "active") {
     if (!result.accountKey) {
       return fail(
-        "this first-time promise request already resolved as active and its account key was already delivered to " +
+        "this first-time intent request already resolved as active and its account key was already delivered to " +
           "another session — call request_promise again to start a fresh one",
       );
     }
@@ -674,11 +674,11 @@ async function waitForFirstPromiseOutcome(session: SessionState, firewallUrl: st
       summary: result.summary,
       remainingBudget: result.remainingBudget,
       setupUrl,
-      message: `Approved — pay_x402 can now spend against this promise.${nextStep ? ` ${nextStep}` : ""}`,
+      message: `Approved — pay_x402 can now spend against this intent.${nextStep ? ` ${nextStep}` : ""}`,
     });
   }
 
-  return ok({ status: result.status, promiseId: pending.promiseId, reason: result.reason ?? `promise resolved as ${result.status}` });
+  return ok({ status: result.status, promiseId: pending.promiseId, reason: result.reason ?? `intent resolved as ${result.status}` });
 }
 
 type ResolvedPromise = { ok: true; promiseId: string; task: string; autoSelected: boolean } | { ok: false; message: string };
@@ -691,7 +691,7 @@ async function resolvePromiseForPayment(firewallUrl: string, accountKey: string,
   if (promiseId) {
     const detail = await fetchPromise(firewallUrl, accountKey, promiseId);
     if (detail.status !== "active") {
-      return { ok: false, message: `promise ${promiseId} is not active (status: ${detail.status}${detail.reason ? `, ${detail.reason}` : ""})` };
+      return { ok: false, message: `intent ${promiseId} is not active (status: ${detail.status}${detail.reason ? `, ${detail.reason}` : ""})` };
     }
     return { ok: true, promiseId, task: detail.task, autoSelected: false };
   }
@@ -699,13 +699,13 @@ async function resolvePromiseForPayment(firewallUrl: string, accountKey: string,
   const promises = await fetchPromises(firewallUrl, accountKey);
   const active = promises.filter((p) => p.status === "active");
   if (active.length === 0) {
-    return { ok: false, message: "no active promises on this account — call request_promise first, or list_promises to see pending ones" };
+    return { ok: false, message: "no active intents on this account — call request_promise first, or list_promises to see pending ones" };
   }
   if (active.length > 1) {
-    return { ok: false, message: `multiple active promises (${active.map((p) => p.id).join(", ")}) — specify which one with promiseId` };
+    return { ok: false, message: `multiple active intents (${active.map((p) => p.id).join(", ")}) — specify which one with promiseId` };
   }
   const only = active[0];
-  if (!only) return { ok: false, message: "no active promises on this account — call request_promise first" };
+  if (!only) return { ok: false, message: "no active intents on this account — call request_promise first" };
   return { ok: true, promiseId: only.id, task: only.task, autoSelected: true };
 }
 
@@ -716,7 +716,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     "connect",
     {
       description:
-        "Link this agent to a human's EXISTING Omamorisan account via World ID — this does not set any spending " +
+        "Link this agent to a human's EXISTING Omamori account via World ID — this does not set any spending " +
         "rules. For a brand-new user, call request_promise instead: it sets their spending rules and creates the " +
         "account together under a single approval, so never call connect first for a new user. Call connect " +
         "only when the human already has an account to link this agent to. A friendly no-op if this session " +
@@ -743,7 +743,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         session.pendingConnect = body;
         sendUrlElicitationBestEffort(
           server,
-          `Approve connecting this AI agent to your Omamorisan account in World App. Code: ${body.userCode}.`,
+          `Approve connecting this AI agent to your Omamori account in World App. Code: ${body.userCode}.`,
           body.verificationUriComplete ?? body.verificationUri,
         );
         return await waitForConnectOutcome(session, config.firewallUrl, config.httpMode);
@@ -782,7 +782,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
       description:
         "Ask the human to set (or widen) their standing spending rules, via World ID — the World-ID-native " +
         "replacement for a wallet-signed mandate. Call this ONCE to cover many purchases, not once per item or " +
-        "per task: before calling it, check list_promises and reuse an active promise with pay_x402 whenever it " +
+        "per task: before calling it, check list_promises and reuse an active intent with pay_x402 whenever it " +
         "already covers what's needed. With NO credential at all yet, this creates the human's account AND " +
         "these spending rules together under a SINGLE World ID approval (no separate connect step needed — " +
         "never call connect first for a new user). With an already-connected account, asks for the same rules " +
@@ -796,8 +796,8 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         "fit the active rules (something outside what was approved, or the human wants a different " +
         "budget/store), explain why to the human and, only if they agree, call this again with replaces set to " +
         "the CURRENT promiseId BEFORE paying, describing exactly what they now want — the human approves that " +
-        "widened/changed rule set on their phone, and once approved the old promise stops working. Never keep " +
-        "trying to pay under the old promise once the rules have changed.",
+        "widened/changed rule set on their phone, and once approved the old intent stops working. Never keep " +
+        "trying to pay under the old intent once the rules have changed.",
       inputSchema: {
         task: z
           .string()
@@ -820,15 +820,15 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
           .min(1)
           .optional()
           .describe(
-            "the promiseId of an existing promise this one replaces — set this when the human agrees to widen or " +
-              "change their spending rules; requires an already-connected account (never on the very first promise)",
+            "the promiseId of an existing intent this one replaces — set this when the human agrees to widen or " +
+              "change their spending rules; requires an already-connected account (never on the very first intent)",
           ),
       },
     },
     async ({ task, budgetUsdc, categories, expiresInMinutes, merchant, replaces }) => {
       try {
         if (session.hasAgentKey() && credentialKind(session.getAgentKey()) === "wallet") {
-          return fail("request_promise needs a connected World ID account — the legacy wallet mandate path doesn't use promises.");
+          return fail("request_promise needs a connected World ID account — the legacy wallet mandate path doesn't use intents.");
         }
 
         const expiresInSeconds = Math.round(expiresInMinutes * 60);
@@ -876,7 +876,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
   server.registerTool(
     "check_promise",
     {
-      description: "Check on a pending request_promise() approval, or the current status of any promise on this account.",
+      description: "Check on a pending request_promise() approval, or the current status of any intent on this account.",
       inputSchema: { promiseId: z.string().min(1).describe("the promiseId returned by request_promise") },
     },
     async ({ promiseId }) => {
@@ -924,7 +924,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         }
         const accountKey = session.getAgentKey();
         const link = await fetchSetupLink(config.firewallUrl, accountKey);
-        sendUrlElicitationBestEffort(server, "Open this link to link your wallet and fund your Omamorisan account.", link.setupUrl);
+        sendUrlElicitationBestEffort(server, "Open this link to link your wallet and fund your Omamori account.", link.setupUrl);
         return ok({
           setupUrl: link.setupUrl,
           expiresAt: link.expiresAt,
@@ -940,10 +940,10 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     "list_promises",
     {
       description:
-        "List every promise (spending rule) on this account (pending, active, or resolved), with remaining " +
-        "budget, categories, and expiry. Each promise also carries precomputed remainingUsdc, expiresInMinutes " +
+        "List every intent (spending rule) on this account (pending, active, or resolved), with remaining " +
+        "budget, categories, and expiry. Each intent also carries precomputed remainingUsdc, expiresInMinutes " +
         "and usableNow — trust these instead of comparing dates yourself. Check this before every purchase to " +
-        "see whether a usable promise already covers it, so pay_x402 can reuse it instead of asking the human " +
+        "see whether a usable intent already covers it, so pay_x402 can reuse it instead of asking the human " +
         "for a new one. Judge each purchase on its own: buy what fits, then report what does not.",
       inputSchema: {},
     },
@@ -970,7 +970,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     {
       description:
         "Get what this agent is authorized to do. With a connected World ID account, returns the account and " +
-        "its promises (list_promises gives the same list on its own). With a legacy wallet mandate key, " +
+        "its intents (list_promises gives the same list on its own). With a legacy wallet mandate key, " +
         "returns that mandate: task, total/remaining USDC budget, categories, expiry, revoked. Call this first, " +
         "before browsing or buying anything — if it fails with no credential, ask the human for their spending " +
         "rules and call request_promise, which sets those rules and creates the account together in one approval.",
@@ -1024,19 +1024,19 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
       description:
         "Buy an x402-protected resource by URL, through the user's payment firewall — you never hold a " +
         "private key or a signature yourself. Reuse the human's existing spending rules: call list_promises " +
-        "first and pay under whichever active promise already covers this purchase, without asking the human " +
+        "first and pay under whichever active intent already covers this purchase, without asking the human " +
         "again. GETs the url; if it isn't a 402, returns the body as-is (no payment required). If it is a 402, " +
         "asks the firewall to sign, using everything fetch_url has seen this session as untrusted context. With " +
-        "a connected World ID account, pass promiseId to say which promise to spend from — omit it only when " +
-        "the account has exactly one active promise. The firewall may pay immediately, refuse outright " +
+        "a connected World ID account, pass promiseId to say which intent to spend from — omit it only when " +
+        "the account has exactly one active intent. The firewall may pay immediately, refuse outright " +
         "(fail-closed — never retry a refusal with different wording), or " +
         "require fresh human approval via World ID, in which case this returns immediately with a " +
         "verificationUri and you should call check_approval later. `justification` must state, in your own " +
         "words, why this specific purchase matches what the human actually asked for. Give each distinct " +
         "purchase its own purchaseRef (e.g. \"amazon-1-first\", \"amazon-1-second\") so buying the same item " +
-        "twice under one promise settles as two separate payments; reuse the SAME purchaseRef only to retry " +
+        "twice under one intent settles as two separate payments; reuse the SAME purchaseRef only to retry " +
         "that same purchase (after a timeout, or while waiting on check_approval) — a refusal is final for " +
-        "that item under that promise no matter the purchaseRef. After a gift-card " +
+        "that item under that intent no matter the purchaseRef. After a gift-card " +
         "payment, show the human the revealUrl and tell them to sign in with their linked wallet; the code " +
         "is revealed only in the owner dashboard.",
       inputSchema: {
@@ -1045,7 +1045,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         promiseId: z
           .string()
           .optional()
-          .describe("which promise to spend from (World ID account only) — required unless exactly one active promise exists"),
+          .describe("which intent to spend from (World ID account only) — required unless exactly one active intent exists"),
         purchaseRef: z
           .string()
           .regex(PURCHASE_REF_PATTERN)
