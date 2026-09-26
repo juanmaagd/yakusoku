@@ -44,6 +44,7 @@ function seedPendingPromise(accountId: string) {
     categories: ["gift_card:amazon"],
     expiry: BigInt(Math.floor(Date.now() / 1000) + 3600),
     nonce: randomNonce(),
+    merchant: "http://localhost:4000",
     spent: 0n,
     status: "pending_approval",
     summary: 'Approve "Buy a $1 Amazon gift card (rehearsal)" — up to $1.00 USDC across gift_card:amazon.',
@@ -80,6 +81,7 @@ describe("settlePromiseApproved — right subject activates + attests (P9.2)", (
     expect(attestation?.message.accountId).toBe(acct.id);
     expect(attestation?.message.task).toBe(promise?.task);
     expect(attestation?.message.budget).toBe(promise?.budget.toString());
+    expect(attestation?.message.merchant).toBe("http://localhost:4000");
     expect(attestation?.message.worldIdSubject).not.toBe(subject);
   });
 
@@ -112,6 +114,44 @@ describe("settlePromiseApproved — wrong subject refuses fail-closed (P9.2)", (
     const promise = getPromise(promiseId);
     expect(promise?.status).toBe("denied");
     expect(promise?.reason).toBe("world_id_wrong_human");
+    expect(promise?.attestation).toBeUndefined();
+  });
+});
+
+describe("settlePromiseApproved — H1 fix: no bound merchant refuses fail-closed", () => {
+  test("a promise created before merchant binding existed can never activate", async () => {
+    const subject = "world-id-subject-promises-no-merchant";
+    const acct = findOrCreateAccountBySubjectHash(hashWorldIdSubject(subject));
+    seq += 1;
+    const promiseId = `promise_test_${seq}`;
+    createPromise({
+      id: promiseId,
+      accountId: acct.id,
+      task: "Buy a $1 Amazon gift card (rehearsal)",
+      budget: 1_000_000n,
+      categories: ["gift_card:amazon"],
+      expiry: BigInt(Math.floor(Date.now() / 1000) + 3600),
+      nonce: randomNonce(),
+      // merchant intentionally omitted — simulates a row from before H1.
+      spent: 0n,
+      status: "pending_approval",
+      summary: "legacy promise, no merchant bound",
+      deviceCode: `device-${promiseId}`,
+      verificationUri: "https://sandbox.auth.world.org/device",
+      userCode: `USER-${promiseId}`,
+      intervalSeconds: 1,
+      requestedAt: new Date().toISOString(),
+      gateStartedAtMs: Date.now(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await settlePromiseApproved(promiseId, { sub: subject, acr: "dev", authTime: Math.floor(Date.now() / 1000) });
+
+    const promise = getPromise(promiseId);
+    expect(promise?.status).toBe("error");
+    expect(promise?.reason).toMatch(/no bound merchant/);
     expect(promise?.attestation).toBeUndefined();
   });
 });

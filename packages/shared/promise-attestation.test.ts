@@ -21,6 +21,7 @@ function makeMessage(overrides: Partial<PromiseAttestationMessage> = {}): Promis
     categories: ["gift_card:amazon"],
     expiry: "1700003600",
     nonce: `0x${"11".repeat(32)}`,
+    merchant: "http://localhost:4000",
     worldIdSubject: hashWorldIdSubject("world-id-subject-1"),
     acr: "https://world.org/oidc/acr/orb-v3",
     authTime: "1700000000",
@@ -65,6 +66,7 @@ describe("PromiseAttestation — signing + independent verification", () => {
     ["expiry", { expiry: "1800000000" }],
     ["promiseId", { promiseId: "promise_someone_elses" }],
     ["accountId", { accountId: "account_different" }],
+    ["merchant", { merchant: "http://attacker.example" }],
     ["worldIdSubject", { worldIdSubject: hashWorldIdSubject("a-different-human") }],
   ] as const)("tampering %s after signing fails verification", async (_field, patch) => {
     const attestation = await signMessage(makeMessage());
@@ -103,11 +105,12 @@ describe("promiseAttestationMessageSchema — rejects malformed attestations", (
     expect(promiseAttestationMessageSchema.safeParse(rawMessage({ categories: [] })).success).toBe(false);
   });
 
-  test("rejects an empty promiseId/accountId/task/acr", () => {
+  test("rejects an empty promiseId/accountId/task/acr/merchant", () => {
     expect(promiseAttestationMessageSchema.safeParse(rawMessage({ promiseId: "" })).success).toBe(false);
     expect(promiseAttestationMessageSchema.safeParse(rawMessage({ accountId: "" })).success).toBe(false);
     expect(promiseAttestationMessageSchema.safeParse(rawMessage({ task: "" })).success).toBe(false);
     expect(promiseAttestationMessageSchema.safeParse(rawMessage({ acr: "" })).success).toBe(false);
+    expect(promiseAttestationMessageSchema.safeParse(rawMessage({ merchant: "" })).success).toBe(false);
   });
 });
 

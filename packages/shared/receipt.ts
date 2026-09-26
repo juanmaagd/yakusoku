@@ -12,6 +12,13 @@ import { verdictSchema } from "./verdict";
 export const RECEIPT_STATES = [
   "idempotent_hit",
   "policy_rejected",
+  /** H1 fix — the firewall's own self-fetch of `resourceUrl` (merchant.ts)
+   * disagrees with what the agent forwarded (payee_mismatch/
+   * requirement_mismatch), the merchant was unreachable
+   * (merchant_unreachable), or a world_id promise's bound merchant origin
+   * doesn't match `resourceUrl` (merchant_mismatch) — the exact code always
+   * prefixes the receipt's `reason`. Runs before `provenance`. */
+  "merchant_blocked",
   "provenance_blocked",
   "intercepta_blocked",
   "intercepta_escalated",
@@ -54,6 +61,7 @@ const RECEIPT_TRANSITIONS: Record<TransitionSource, readonly ReceiptState[]> = {
   initial: [
     "idempotent_hit",
     "policy_rejected",
+    "merchant_blocked",
     "provenance_blocked",
     "intercepta_blocked",
     "intercepta_escalated",
@@ -74,6 +82,7 @@ const RECEIPT_TRANSITIONS: Record<TransitionSource, readonly ReceiptState[]> = {
   // transition of this one — keeps the table simple for the hackathon scope.
   idempotent_hit: [],
   policy_rejected: [],
+  merchant_blocked: [],
   provenance_blocked: [],
   intercepta_blocked: [],
   intercepta_escalated: [],

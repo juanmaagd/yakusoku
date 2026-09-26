@@ -34,6 +34,14 @@
 // Real World ID sandbox device-authorization calls still happen for every
 // `POST /connect`/`POST /promises` though (~9 more across S30-S35, plus
 // `OMAMORISAN_MAX_PENDING_PROMISES` more for S31's cap check).
+//
+// H1 fix (GitHub issue #1) adds S36-S38 (firewall self-fetch / merchant
+// binding): S36 tampers a wallet intent's forwarded `payTo` (refuse
+// payee_mismatch), S37 binds a promise to a different merchant than the
+// store it tries to pay (refuse merchant_mismatch, one more real World ID
+// sandbox call for its connect+promise), S38 points `resourceUrl` at an
+// unreachable port (refuse merchant_unreachable). None settle, same as
+// every other scenario in this file.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -361,7 +369,7 @@ interface CreatePromiseResponse {
 
 async function createPromiseRequest(
   accountKey: string,
-  body: { task: string; budgetUsdc: number; categories: string[]; expiresInSeconds: number },
+  body: { task: string; budgetUsdc: number; categories: string[]; expiresInSeconds: number; merchant: string },
 ): Promise<{ status: number; json: CreatePromiseResponse }> {
   const res = await fetch(`${FIREWALL_URL}/promises`, {
     method: "POST",
@@ -390,7 +398,7 @@ async function getPromiseRequest(promiseId: string, accountKey: string): Promise
 async function activePromiseViaDevSeam(
   accountKey: string,
   subject: string,
-  body: { task: string; budgetUsdc: number; categories: string[]; expiresInSeconds: number },
+  body: { task: string; budgetUsdc: number; categories: string[]; expiresInSeconds: number; merchant: string },
 ): Promise<string> {
   const created = await createPromiseRequest(accountKey, body);
   if (created.status !== 201 || !created.json.promiseId) {
@@ -1447,6 +1455,7 @@ async function runS31(): Promise<void> {
       budgetUsdc: maxUsdc + 1,
       categories: ["gift_card:amazon"],
       expiresInSeconds: 3600,
+      merchant: STORE_URL,
     });
 
     const maxPending = Number(process.env.OMAMORISAN_MAX_PENDING_PROMISES ?? 3);
@@ -1456,6 +1465,7 @@ async function runS31(): Promise<void> {
         budgetUsdc: 1,
         categories: ["gift_card:amazon"],
         expiresInSeconds: 3600,
+        merchant: STORE_URL,
       });
       if (r.status !== 201) throw new Error(`S31: expected pending promise #${i} to be created, got ${r.status}: ${JSON.stringify(r.json)}`);
     }
@@ -1464,6 +1474,7 @@ async function runS31(): Promise<void> {
       budgetUsdc: 1,
       categories: ["gift_card:amazon"],
       expiresInSeconds: 3600,
+      merchant: STORE_URL,
     });
 
     const pass = noKeyRes.status === 401 && overBudget.status === 400 && overPending.status === 429;
@@ -1493,6 +1504,7 @@ async function runS32(): Promise<void> {
       budgetUsdc: 1,
       categories: ["gift_card:amazon"],
       expiresInSeconds: 3600,
+      merchant: STORE_URL,
     });
     if (created.status !== 201 || !created.json.promiseId) throw new Error(`POST /promises failed: ${created.status}`);
 
@@ -1525,6 +1537,7 @@ async function runS33(): Promise<void> {
       budgetUsdc: 1,
       categories: ["gift_card:amazon"],
       expiresInSeconds: 3600,
+      merchant: STORE_URL,
     });
 
     const readRes = await getPromiseRequest(promiseIdB, keyA);
@@ -1544,10 +1557,14 @@ async function runS33(): Promise<void> {
 
 /** S34 — full dev-seam happy path (P9.1+P9.2): connect -> account key ->
  * promise approved by the SAME subject -> a legit `/sign` reaches the
- * expected verdict. Never sends the resulting signature back to the store —
- * no settlement, no on-chain payment, same discipline as every other
- * scenario in this file. Expected verdict adapts to INTERCEPTA_API_KEY same
- * as S1: unset -> ask_human (documented, not a failure); set -> pay. */
+ * expected verdict. The promise is bound to `merchant: STORE_URL` and pays a
+ * resource on that exact origin, so this also proves the H1 fix's
+ * legit-merchant-match path (merchant.ts): the `merchant` stage's self-fetch
+ * and origin check both pass silently, same as before H1 existed. Never
+ * sends the resulting signature back to the store — no settlement, no
+ * on-chain payment, same discipline as every other scenario in this file.
+ * Expected verdict adapts to INTERCEPTA_API_KEY same as S1: unset ->
+ * ask_human (documented, not a failure); set -> pay. */
 async function runS34(): Promise<void> {
   const id = "S34";
   const description = "dev seam: connect -> account key -> promise active -> legit /sign";
@@ -1560,6 +1577,7 @@ async function runS34(): Promise<void> {
       budgetUsdc: 1,
       categories: ["gift_card:amazon"],
       expiresInSeconds: 3600,
+      merchant: STORE_URL,
     });
 
     const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
@@ -1589,6 +1607,7 @@ async function runS35(): Promise<void> {
       budgetUsdc: 1,
       categories: ["gift_card:amazon"],
       expiresInSeconds: 3600,
+      merchant: STORE_URL,
     });
 
     const { header, resourceUrl } = await fetch402(STEAM_1_SKU);
@@ -1604,6 +1623,84 @@ async function runS35(): Promise<void> {
       accountKey,
     );
     record(id, description, expected, json.verdict, json.verdict === "refuse", json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S36 — H1 fix (GitHub issue #1): a compromised agent swaps `payTo` before
+ * forwarding an otherwise legit request (right item, in budget) to `/sign` —
+ * the `merchant` stage's self-fetch catches it before provenance/Intercepta/
+ * Jev ever see it, no settlement. */
+async function runS36(): Promise<void> {
+  const id = "S36";
+  const description = "H1: tampered payTo on a wallet intent (right item, in budget)";
+  const expected = "refuse (payee_mismatch)";
+  try {
+    const intent = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S36", 1, ["gift_card:amazon"]);
+    if (intent.status !== 201) throw new Error(`POST /intents failed for S36: ${intent.status}`);
+    const { decoded, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const swappedPayee = "0x000000000000000000000000000000000000dEaD";
+    const tampered = tamperedRequirement(decoded, { payTo: swappedPayee });
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S36", "Exact match for the signed intent.", []);
+    const { json } = await signRequest({ intentId: intent.id, paymentRequired: tampered, resourceUrl, context }, intent.agentKey);
+    const pass = json.verdict === "refuse" && /payee_mismatch/.test(json.reason ?? "");
+    record(id, description, expected, json.verdict, pass, json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S37 — H1 fix: a promise bound to one merchant origin can never pay a
+ * resource on a different origin, even the store's own clean/legit
+ * resource it would otherwise be entitled to pay — `merchant_mismatch`,
+ * decided before any self-fetch happens (see merchant.test.ts for the
+ * no-network-call assertion; this scenario only checks the verdict/reason,
+ * same as every other scenario here). */
+async function runS37(): Promise<void> {
+  const id = "S37";
+  const description = "H1: promise bound to a different merchant refuses to pay the store";
+  const expected = "refuse (merchant_mismatch)";
+  try {
+    const subject = `world-id-subject-s37-${crypto.randomUUID()}`;
+    const { accountKey } = await connectAccountViaDevSeam(subject);
+    const promiseId = await activePromiseViaDevSeam(accountKey, subject, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S37",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+      merchant: "http://localhost:1", // a DIFFERENT origin than STORE_URL — never the resource this pays
+    });
+
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S37", "Exact match for the promise.", []);
+    const { json } = await signRequest({ intentId: promiseId, paymentRequiredHeader: header, resourceUrl, context }, accountKey);
+    const pass = json.verdict === "refuse" && /merchant_mismatch/.test(json.reason ?? "");
+    record(id, description, expected, json.verdict, pass, json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S38 — H1 fix: nothing listens on the `resourceUrl`'s port -> the
+ * `merchant` stage's self-fetch fails -> refuse `merchant_unreachable`,
+ * never pay. */
+async function runS38(): Promise<void> {
+  const id = "S38";
+  const description = "H1: merchant unreachable at resourceUrl -> refuse";
+  const expected = "refuse (merchant_unreachable)";
+  try {
+    const intent = await createIntent("Buy a $1 Amazon gift card (rehearsal) — S38", 1, ["gift_card:amazon"]);
+    if (intent.status !== 201) throw new Error(`POST /intents failed for S38: ${intent.status}`);
+    const { header } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const unreachableUrl = "http://127.0.0.1:1/giftcard/amazon-1-rehearsal"; // nothing listens on port 1
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S38", "Exact match for the signed intent.", []);
+    const { json } = await signRequest(
+      { intentId: intent.id, paymentRequiredHeader: header, resourceUrl: unreachableUrl, context },
+      intent.agentKey,
+    );
+    const pass = json.verdict === "refuse" && /merchant_unreachable/.test(json.reason ?? "");
+    record(id, description, expected, json.verdict, pass, json.reason);
   } catch (err) {
     record(id, description, expected, "error", false, String(err));
   }
@@ -1716,6 +1813,9 @@ async function main(): Promise<void> {
     await runS33();
     await runS34();
     await runS35();
+    await runS36();
+    await runS37();
+    await runS38();
 
     printTable();
     exitCode = results.every((r) => r.pass) ? 0 : 1;

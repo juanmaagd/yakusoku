@@ -17,6 +17,7 @@
 import { toHex } from "viem";
 import { hashWorldIdSubject, USDC_DECIMALS } from "@yakusoku/shared";
 import { publish } from "./events-bus";
+import { normalizeMerchantOrigin } from "./merchant";
 import { signPromiseAttestation } from "./promise-attestation";
 import {
   countPendingPromisesForAccount,
@@ -96,6 +97,7 @@ export function promiseAsMandate(promise: StoredPromise): StoredIntent {
     source: "world_id",
     accountId: promise.accountId,
     promiseStatus: promise.status,
+    merchant: promise.merchant,
   };
 }
 
@@ -119,15 +121,30 @@ export interface CreatePromiseInput {
   budgetUsdc: number;
   categories: string[];
   expiresInSeconds: number;
+  /** H1 fix — the store's URL (e.g. `http://localhost:4000`, path ignored);
+   * normalized to its origin and stored as `StoredPromise.merchant`. The
+   * merchant pipeline stage (merchant.ts) refuses any `resourceUrl` whose
+   * origin isn't exactly this one. */
+  merchant: string;
 }
 
 export type CreatePromiseOutcome =
   | { ok: true; promise: StoredPromise }
   | { ok: false; status: 400 | 429 | 502; error: string };
 
-function buildPromiseSummary(task: string, budgetUsdc: number, categories: string[], expirySeconds: bigint): string {
+function buildPromiseSummary(
+  task: string,
+  budgetUsdc: number,
+  categories: string[],
+  expirySeconds: bigint,
+  merchantOrigin: string,
+): string {
   const expiryIso = new Date(Number(expirySeconds) * 1000).toISOString();
-  return `Approve "${task}" — up to $${budgetUsdc.toFixed(2)} USDC across ${categories.join(", ")}, expiring ${expiryIso}.`;
+  // `merchantOrigin` is already validated http(s) (see `createPromiseRequest`),
+  // so `new URL` here never throws; `.host` drops the scheme for a shorter,
+  // human-facing "…at localhost:4000" (task text per the H1 fix).
+  const merchantHost = new URL(merchantOrigin).host;
+  return `Approve "${task}" — up to $${budgetUsdc.toFixed(2)} USDC across ${categories.join(", ")}, expiring ${expiryIso}, at ${merchantHost}.`;
 }
 
 /** `POST /promises` (index.ts, account-key auth). Validates the caps
@@ -150,6 +167,13 @@ export async function createPromiseRequest(account: StoredAccount, input: Create
   if (!Number.isFinite(input.expiresInSeconds) || input.expiresInSeconds <= 0 || input.expiresInSeconds > MAX_PROMISE_EXPIRY_SECONDS) {
     return { ok: false, status: 400, error: `expiresInSeconds must be between 1 and ${MAX_PROMISE_EXPIRY_SECONDS} (7 days)` };
   }
+  // H1 fix — bind this promise to one merchant origin up front; the pipeline
+  // (merchant.ts) fail-closed refuses any resourceUrl outside it.
+  const merchantResult = normalizeMerchantOrigin(input.merchant);
+  if (!merchantResult.ok) {
+    return { ok: false, status: 400, error: `invalid merchant: ${merchantResult.reason}` };
+  }
+  const merchantOrigin = merchantResult.origin;
 
   const pendingCount = countPendingPromisesForAccount(account.id);
   const maxPending = maxPendingPromises();
@@ -179,9 +203,10 @@ export async function createPromiseRequest(account: StoredAccount, input: Create
     categories: input.categories,
     expiry: expirySeconds,
     nonce: randomNonce(),
+    merchant: merchantOrigin,
     spent: 0n,
     status: "pending_approval",
-    summary: buildPromiseSummary(input.task, input.budgetUsdc, input.categories, expirySeconds),
+    summary: buildPromiseSummary(input.task, input.budgetUsdc, input.categories, expirySeconds, merchantOrigin),
     deviceCode: device.deviceCode,
     verificationUri: device.verificationUri,
     verificationUriComplete: device.verificationUriComplete,
@@ -228,6 +253,14 @@ export async function settlePromiseApproved(promiseId: string, claims: FreshAppr
     return;
   }
 
+  // H1 fix — a promise created before merchant binding existed can never
+  // complete approval: there's no human-approved origin to attest to, and
+  // the pipeline's `merchant` stage would refuse it fail-closed anyway.
+  if (!fresh.merchant) {
+    await settlePromiseRefused(promiseId, "error", "promise has no bound merchant (created before merchant binding existed)");
+    return;
+  }
+
   try {
     const attestation = await signPromiseAttestation({
       promiseId: fresh.id,
@@ -237,6 +270,7 @@ export async function settlePromiseApproved(promiseId: string, claims: FreshAppr
       categories: fresh.categories,
       expiry: fresh.expiry.toString(),
       nonce: fresh.nonce,
+      merchant: fresh.merchant,
       worldIdSub: claims.sub,
       acr: claims.acr ?? ACR_ORB_V3,
       authTimeSeconds: claims.authTime,
@@ -351,6 +385,9 @@ export interface PromiseSummaryDto {
   categories: string[];
   expiry: string;
   createdAt: string;
+  /** H1 fix — the normalized origin this promise may pay; `undefined` only
+   * for a promise created before merchant binding existed. */
+  merchant?: string;
 }
 
 export function serializePromiseSummary(promise: StoredPromise): PromiseSummaryDto {
@@ -363,6 +400,7 @@ export function serializePromiseSummary(promise: StoredPromise): PromiseSummaryD
     remainingBudget: (remaining > 0n ? remaining : 0n).toString(),
     categories: promise.categories,
     expiry: promise.expiry.toString(),
+    merchant: promise.merchant,
     createdAt: promise.createdAt,
   };
 }

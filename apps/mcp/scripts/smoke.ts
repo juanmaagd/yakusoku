@@ -191,6 +191,7 @@ async function runAccountPathSmoke(credentialsDir: string): Promise<void> {
       budgetUsdc: 1,
       categories: ["gift_card:amazon"],
       expiresInMinutes: 30,
+      merchant: STORE_URL,
     });
     const promiseId = promiseStart.data.promiseId as string | undefined;
     if (promiseStart.data.status !== "pending" || !promiseId) {
@@ -227,6 +228,7 @@ async function runAccountPathSmoke(credentialsDir: string): Promise<void> {
       budgetUsdc: 1,
       categories: ["gift_card:amazon"],
       expiresInMinutes: 30,
+      merchant: STORE_URL,
     });
     const promise2Id = promise2Start.data.promiseId as string | undefined;
     if (!promise2Id) throw new Error(`expected a promiseId, got ${JSON.stringify(promise2Start.data)}`);

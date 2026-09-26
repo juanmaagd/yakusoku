@@ -11,8 +11,9 @@ Two credential paths, both usable from the same server:
   typed anywhere. Add the MCP server once with no key at all; on first use
   the agent calls `connect`, which shows a link + short code for the human to
   approve in World App. Per task, the agent calls `request_promise` (what,
-  budget, categories, expiry) for a fresh World ID approval; once active,
-  `pay_x402` spends against it with zero further human taps until it runs out
+  budget, categories, expiry, and the one merchant/store origin it may pay)
+  for a fresh World ID approval; once active, `pay_x402` spends against it —
+  only on that exact origin — with zero further human taps until it runs out
   or expires, or until a doubtful payment needs a fresh approval.
 - **Wallet mandate (`yk_...`, legacy)** — a human signs a `TaskIntent` via the
   site's `/app` wizard and hands the agent a mandate key up front
@@ -24,7 +25,7 @@ Two credential paths, both usable from the same server:
 |---|---|---|---|
 | `connect` | _(none)_ | none yet | Links this agent to a human's account via World ID. No-op ("already_connected") if this session already has a credential. Starts a World ID device flow, waits briefly (≤~30s) for approval, and returns `{status: "connected", accountId}` or `{status: "pending", connectId, verificationUri, userCode, expiresAt}` — call `check_connection` again if still pending. |
 | `check_connection` | _(none)_ | none yet | Resumes waiting on the pending `connect()` request. Same response shapes as `connect`. |
-| `request_promise` | `{ task, budgetUsdc, categories[1-5], expiresInMinutes }` | account | Asks the human to pre-authorize a task with a budget — the World-ID-native replacement for a signed mandate. Waits briefly for approval; returns `{status: "active", promiseId, summary, remainingBudget}` or `{status: "pending", promiseId, verificationUri, userCode, expiresAt, summary}` (call `check_promise`) or a terminal `{status: "denied"\|"expired", reason}`. |
+| `request_promise` | `{ task, budgetUsdc, categories[1-5], expiresInMinutes, merchant }` | account | Asks the human to pre-authorize a task with a budget, bound to one merchant (store) origin — the World-ID-native replacement for a signed mandate. `merchant` is the store's base URL (e.g. `http://localhost:4000`); the resulting promise can only ever pay a resource on that exact origin, never a different store. Waits briefly for approval; returns `{status: "active", promiseId, summary, remainingBudget}` or `{status: "pending", promiseId, verificationUri, userCode, expiresAt, summary}` (call `check_promise`) or a terminal `{status: "denied"\|"expired", reason}`. |
 | `check_promise` | `{ promiseId }` | account | Resumes waiting on a pending promise, or reports the current status of any promise on the account. |
 | `list_promises` | _(none)_ | account | Lists every promise on the account (pending, active, or resolved) with remaining budget, categories, and expiry. |
 | `get_mandate` | _(none)_ | either | With an account: `{accountId, createdAt, promises}`. With a wallet mandate: `{id, task, budget, remainingBudget, categories, expiry, revoked}`. |
@@ -120,11 +121,12 @@ credentials file, so the header is optional on reconnect too).
 **World ID account path:** the agent calls `connect` once; the human approves
 in World App on their phone and the resulting account key is stored — never
 shown to the LLM. Per task, the agent calls `request_promise` with what it
-wants to do, a USDC budget, categories, and how long the promise should
-stay valid; the human approves that specific task/budget in World App too.
-Once active, the agent calls `pay_x402` (with that promise's id, or letting
-it auto-select the account's one active promise) as many times as it needs,
-with zero further human taps, until the promise's budget or expiry is
+wants to do, a USDC budget, categories, how long the promise should stay
+valid, and the one merchant (store) origin it may pay; the human approves
+that specific task/budget/merchant in World App too. Once active, the agent
+calls `pay_x402` (with that promise's id, or letting it auto-select the
+account's one active promise) as many times as it needs, against that same
+origin, with zero further human taps, until the promise's budget or expiry is
 reached — at which point a fresh `request_promise` is needed. A doubtful
 payment (one the firewall's pipeline can't clear on its own) still triggers
 a fresh World ID approval via `pay_x402`'s `needs_human_approval` response,

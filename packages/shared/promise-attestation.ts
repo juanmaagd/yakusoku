@@ -32,7 +32,12 @@ export const PROMISE_ATTESTATION_DOMAIN = {
  * can't be replayed against a different one); `task`/`budget`/`categories`/
  * `expiry` mirror `TaskIntentMessage`'s fields so the pipeline (pipeline.ts's
  * `checkPolicy`, jev.ts, provenance.ts) can treat a promise exactly like a
- * wallet-signed intent; `worldIdSubject`/`acr`/`authTime` carry the World ID
+ * wallet-signed intent; `merchant` is the normalized origin
+ * (`scheme://host[:port]`) the human approved this promise to pay — H1 fix
+ * (GitHub issue #1): the merchant pipeline stage
+ * (apps/firewall/merchant.ts) refuses any `resourceUrl` whose origin isn't
+ * exactly this, so a promise approved for one store can never be spent
+ * against another; `worldIdSubject`/`acr`/`authTime` carry the World ID
  * proof's own claims; `approvedAt` is when the firewall itself signed this.
  */
 export const PROMISE_ATTESTATION_TYPES = {
@@ -44,6 +49,7 @@ export const PROMISE_ATTESTATION_TYPES = {
     { name: "categories", type: "string[]" },
     { name: "expiry", type: "uint256" },
     { name: "nonce", type: "bytes32" },
+    { name: "merchant", type: "string" },
     { name: "worldIdSubject", type: "bytes32" },
     { name: "acr", type: "string" },
     { name: "authTime", type: "uint256" },
@@ -72,6 +78,10 @@ export const promiseAttestationMessageSchema = z.object({
   categories: z.array(z.string().min(1)).min(1),
   expiry: decimalStringSchema,
   nonce: bytes32Schema,
+  /** Normalized origin (`scheme://host[:port]`) this promise may pay —
+   * `apps/firewall/merchant.ts`'s `normalizeMerchantOrigin`, same value
+   * `StoredPromise.merchant` (store.ts) holds. */
+  merchant: z.string().min(1),
   /** `keccak256` of the World ID ID token's `sub` claim — never the raw
    * subject (see `hashWorldIdSubject`, step-up.ts). */
   worldIdSubject: bytes32Schema,
@@ -102,6 +112,7 @@ export function toPromiseAttestationTypedDataMessage(message: PromiseAttestation
     categories: message.categories,
     expiry: BigInt(message.expiry),
     nonce: message.nonce as `0x${string}`,
+    merchant: message.merchant,
     worldIdSubject: message.worldIdSubject as `0x${string}`,
     acr: message.acr,
     authTime: BigInt(message.authTime),

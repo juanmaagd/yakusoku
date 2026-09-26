@@ -1,7 +1,16 @@
 // The core decision pipeline (plan-tecnico.md §2.3):
-//   idempotency -> policy -> provenance -> Intercepta -> Jev -> World ID -> sign
+//   idempotency -> policy -> merchant -> provenance -> Intercepta -> Jev -> World ID -> sign
 // Every branch is fail-closed (plan-tecnico.md §2.4): any doubt or error
 // produces `refuse`/`ask_human`, never `pay`.
+//
+// H1 fix (GitHub issue #1): `merchant` (merchant.ts) is a new stage, added
+// right after `policy` and before `provenance` — before this, `/sign`
+// trusted whatever `payTo`/`amount`/`asset`/`network`/`scheme` the agent
+// forwarded from its own decode of the store's 402, so a compromised agent
+// could swap `payTo` for a fresh attacker address and every other stage
+// would pass it. `merchant` independently re-fetches `resourceUrl` and signs
+// from ITS OWN copy of the requirement from that point on — see merchant.ts's
+// file-header comment for the full mismatch-reason taxonomy.
 //
 // WU11 change: `ask_human` from provenance/Intercepta/Jev — or a payment
 // above `HUMAN_APPROVAL_OVER_USDC` (the real `world_id` stage below) — no
@@ -60,6 +69,7 @@ import {
 import { pendingApprovalOutcome, startApprovalGate, worldIdThresholdStage } from "./approvals";
 import { interceptaStage } from "./intercepta";
 import { jevStage } from "./jev";
+import { merchantStage } from "./merchant";
 import { provenanceStage } from "./provenance";
 import { resolveMandate } from "./promises";
 import { finalize, type PipelineOutcome, type ReceiptContext } from "./receipts";
@@ -87,6 +97,12 @@ export interface SignRequest {
 
 export interface StageContext {
   intent: StoredIntent;
+  /** `requirement`/`paymentRequired` start as the agent-forwarded copy but
+   * are REPLACED in place by the `merchant` stage (merchant.ts) once it
+   * confirms they match the merchant's own self-fetched 402 — every stage
+   * after `merchant` (and the eventual `signPayment` call below) reads
+   * whichever copy is current, so signing always uses the firewall's own
+   * fetch, never the agent's. */
   requirement: PaymentRequirement;
   paymentRequired: PaymentRequired;
   resourceUrl: string;
@@ -107,13 +123,15 @@ export interface PipelineStage {
  * continues through the rest (see the HARDEN note above); once every stage
  * has run, an accumulated `ask_human` routes into the World ID gate
  * (approvals.ts). `refuse` from any stage still stops immediately and wins:
+ * - H1 merchant     -> firewall self-fetch vs. the agent's forwarded copy,
+ *   and (world_id promises only) bound-merchant-origin check (merchant.ts)
  * - WU6 provenance  -> deterministic recipient-traceability check (provenance.ts)
  * - WU7 Intercepta  -> address/token screening (intercepta.ts)
  * - WU8 Jev         -> semantic intent-match judgment (jev.ts)
  * - WU11 world_id    -> real amount-threshold check (approvals.ts); the actual
  *   human-approval wait happens after this loop, not as a stage itself.
  */
-export const PIPELINE_STAGES: PipelineStage[] = [provenanceStage, interceptaStage, jevStage, worldIdThresholdStage];
+export const PIPELINE_STAGES: PipelineStage[] = [merchantStage, provenanceStage, interceptaStage, jevStage, worldIdThresholdStage];
 
 // --- Idempotency -------------------------------------------------------------
 
@@ -288,10 +306,12 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
   };
 
   // Reserve the amount in the same tick as the policy check (no await in
-  // between) so concurrent /sign calls cannot overspend the intent. Released
-  // in `finally` unless the payment ends up signed OR a World ID approval is
-  // left pending (the gate keeps the reservation open and releases it itself
-  // once it resolves — approvals.ts).
+  // between) so concurrent /sign calls cannot overspend the intent. The H1
+  // `merchant` stage's own await (its self-fetch) only happens inside
+  // `runStagesAndSign` below, strictly AFTER this reservation, so it never
+  // reopens this window. Released in `finally` unless the payment ends up
+  // signed OR a World ID approval is left pending (the gate keeps the
+  // reservation open and releases it itself once it resolves — approvals.ts).
   const intentId = (intent as StoredIntent).id;
   const amount = BigInt(requirement.amount);
   recordSpend(intentId, amount);

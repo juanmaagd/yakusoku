@@ -74,11 +74,12 @@ Agent (no private key, talks over MCP or the CLI)
 FIREWALL PIPELINE (every stage runs, before signing, fail-closed):
   1. idempotency   — already processed this exact payment? replay the cached result
   2. policy        — within budget, promise not expired/revoked, correct network/asset
-  3. provenance    — is the recipient traceable to the signed promise, or only to untrusted page text?
-  4. Intercepta    — is the destination address / token flagged (sanctions, scams, drainers)?
-  5. Jev           — does the payment semantically match what you asked for?
-  6. World ID      — if anything above is undecided, or the amount is large: ask a live human
-  ──▶ sign the x402 payment, or refuse, with a reason
+  3. merchant      — the firewall fetches the 402 itself: does it match what the agent forwarded?
+  4. provenance    — is the recipient traceable to the signed promise, or only to untrusted page text?
+  5. Intercepta    — is the destination address / token flagged (sanctions, scams, drainers)?
+  6. Jev           — does the payment semantically match what you asked for?
+  7. World ID      — if anything above is undecided, or the amount is large: ask a live human
+  ──▶ sign from the firewall's OWN fetched requirement, or refuse, with a reason
 Agent retries with the signature ──▶ Store ──▶ facilitator (x402.org) ──▶ Base Sepolia
 Dashboard: every decision, live, with its reason (/app/dashboard, or the loopback operator view at :4001/dashboard)
 ```
@@ -90,6 +91,8 @@ Dashboard: every decision, live, with its reason (/app/dashboard, or the loopbac
 Every stage always runs; a `refuse` from *any* stage wins outright and stops the pipeline immediately, even if an earlier stage only asked for a human.
 
 This was a real bug found in review (see `docs/ai/README.md`): without it, the key attack case could be routed to a human instead of refused outright by Jev. See `apps/firewall/pipeline.ts` (`evaluateStages`, `PIPELINE_STAGES`).
+
+**Merchant self-fetch (H1 fix):** the firewall never trusts the agent's own decode of a store's `PAYMENT-REQUIRED` header. Before signing, the `merchant` stage GETs `resourceUrl` itself (http/https only, no redirects, ~4s timeout, headers only), decodes the 402 it gets back, and compares `scheme`/`network`/`asset`/`amount`/`payTo` against what the agent forwarded — any difference (`payee_mismatch`/`requirement_mismatch`), a non-402, an undecodable header, or an unreachable merchant (`merchant_unreachable`) refuses outright. Signing always uses the firewall's own fetched copy, never the agent's. A World-ID promise additionally binds one merchant origin at creation (`POST /promises`'s `merchant`); paying a different origin refuses `merchant_mismatch` before any network call. See `apps/firewall/merchant.ts`.
 
 **StepUp attestation:** when a human approves via World ID, the firewall signs a second EIP-712 struct (`StepUpAttestation`) binding that exact approval — subject, ACR, `auth_time` — to that exact payment (`receiptId`, `paymentIdentifier`, `payTo`, `amount`, `asset`), *before* signing the payment itself.
 
@@ -116,6 +119,7 @@ Bun workspaces monorepo, 7 packages.
 Key files:
 
 - pipeline orchestration `apps/firewall/pipeline.ts`
+- merchant self-fetch (H1 fix) `apps/firewall/merchant.ts`
 - Intercepta client `apps/firewall/intercepta.ts`
 - Jev client `apps/firewall/jev.ts`
 - World ID device flow `apps/firewall/world-id.ts` + approval gate `apps/firewall/approvals.ts`
@@ -238,15 +242,15 @@ bun run agent -- --intent <intentId> --key <agentKey> "Buy me a $1 Amazon gift c
 
 | Command | What it proves | Spends testnet USDC? |
 |---|---|---|
-| `bun test` | 135 unit tests across firewall/shared (idempotency, policy, provenance obfuscation cases, Intercepta/Jev/World ID logic with stubbed network calls, StepUp signature tampering, SIWE) | No |
+| `bun test` | 194 unit tests across firewall/shared (idempotency, policy, merchant self-fetch/origin-binding, provenance obfuscation cases, Intercepta/Jev/World ID logic with stubbed network calls, StepUp signature tampering, SIWE) | No |
 | `bun run typecheck` | All 7 workspaces compile with no type errors | No |
-| `bun run scenarios` | Self-contained 29-scenario end-to-end suite (own store `:4020` + firewall `:4021`, real Jev + real World ID sandbox) covering legit purchase, the key attack case, provenance traps, budget/expiry, tampered network/asset, idempotent replay, concurrency, World ID expiry, pause/revoke, SIWE sign-in/replay, and owner-scoped access control across `/intents`, `/receipts`, `/approvals`, `/events` | No — never sends a payment signature back to the store |
+| `bun run scenarios` | Self-contained 38-scenario end-to-end suite (own store `:4020` + firewall `:4021`, real Jev + real World ID sandbox) covering legit purchase, the key attack case, provenance traps, budget/expiry, tampered network/asset, tampered payee (H1), promise merchant binding (H1), idempotent replay, concurrency, World ID expiry, pause/revoke, SIWE sign-in/replay, and owner-scoped access control across `/intents`, `/receipts`, `/approvals`, `/events` | No — never sends a payment signature back to the store |
 | `bun run --filter @yakusoku/mcp smoke` | Drives the MCP server as a real client would over stdio: mints its own mandate, calls all four tools against the live store/firewall | No |
 | `bun run jev-cases` | Runs the calibration-critical cases live against the real Jev API (key case refuses, legit purchases pass/escalate as calibrated) | No |
 | `bun run intercepta-check` | Live Intercepta calls through the real pipeline stage: a clean address passes, a known-risk (OFAC-sanctioned) address blocks, an unreachable endpoint escalates | No |
 | `bun run world-id-check` | Starts a real sandbox device-authorization flow and polls it; `-- --wait` waits for a real phone approval/denial and validates the resulting ID token | No |
 | `bun run roundtrip` | Scripted (non-LLM) round trip against the real store settling on Base Sepolia | **Yes** — 1 USDC (run at most twice) |
-| `bun run attack` | Disclosed scripted compromised-agent request replaying the key attack case; pass `-- --settle` to actually attempt settlement (expected to refuse first) | Only with `--settle`, and only if the pipeline (incorrectly) approved it |
+| `bun run attack` | Disclosed scripted compromised-agent request replaying the key attack case; pass `-- --settle` to actually attempt settlement (expected to refuse first); pass `-- --swap-payee <address>` instead to replay the H1 attack (tampered `payTo`, caught by the merchant self-fetch) | Only with `--settle`, and only if the pipeline (incorrectly) approved it |
 | `bun run verify -- --from-block <n>` | Independent on-chain audit: cross-checks every outgoing USDC transfer from the firewall wallet against the receipt history | No — read-only |
 | `bun run reset-data` | Wipes the firewall's local sqlite data (refuses if the firewall is currently running) | No |
 
@@ -268,8 +272,9 @@ bun run agent -- --intent <intentId> --key <agentKey> "Buy me a $1 Amazon gift c
 1. A human signs a promise at `/app`: "Buy a 25 USDC Amazon gift card for my sister's birthday."
 2. An agent — connected over MCP or the CLI — buys `amazon-25`: every stage passes, the firewall signs, the store settles on Base Sepolia. Auto-pays.
 3. A scripted compromised agent (`bun run attack`) replays the key case: the same store page's hidden promo text asks it to buy a Steam card instead — clean address, in budget, wrong item. Provenance and Intercepta both pass it; **Jev refuses it** ("does not match the signed intent"), budget untouched.
-4. A borderline/ambiguous purchase escalates to World ID: `/app/dashboard` shows a user code and link, a human approves from their phone, the firewall validates the ID token and signs — the receipt carries a StepUp attestation. Repeating and denying instead refuses and releases the budget.
-5. The independent verifier (`bun run verify`) confirms the settled payment on-chain, independently of the firewall's own database.
+4. The same scripted agent (`bun run attack -- --swap-payee <address>`) instead tampers the store's own `payTo` before forwarding it to `/sign` — right item, in budget, but a fresh address the store never named. Policy, provenance, Intercepta, and Jev would all pass a clean, in-budget, correctly-described payment; **the `merchant` stage refuses it first** (`payee_mismatch`), because the firewall re-fetched the 402 itself and the addresses don't match.
+5. A borderline/ambiguous purchase escalates to World ID: `/app/dashboard` shows a user code and link, a human approves from their phone, the firewall validates the ID token and signs — the receipt carries a StepUp attestation. Repeating and denying instead refuses and releases the budget.
+6. The independent verifier (`bun run verify`) confirms the settled payment on-chain, independently of the firewall's own database.
 
 ## Honest limitations
 
@@ -281,6 +286,8 @@ bun run agent -- --intent <intentId> --key <agentKey> "Buy me a $1 Amazon gift c
 
   `bun run attack` replays exactly what a compromised agent would send; the firewall under test is the real one, unmodified.
 - **Control endpoints are localhost-guarded, not authenticated.** `POST /control/pause|resume` and the loopback branches of the owner-scoped routes require a loopback request plus an `x-yakusoku/admin` header — adequate for a single-operator hackathon demo, not a production authorization model.
+- **The wallet-signed `TaskIntent` path has no merchant binding.** Its EIP-712 schema is unchanged by the H1 fix, so a wallet mandate only gets the generic self-fetch protection (the merchant stage still refuses a `payTo`/`amount`/`asset`/`network` mismatch against the store's own 402) — it cannot, by itself, refuse "right item, right price, but a different store's origin" the way a World-ID promise's bound `merchant` can. Binding a merchant origin into the `TaskIntent` struct is future work.
+- **The merchant self-fetch is a blind GET with no redirects, not a full SSRF defense.** `apps/firewall/merchant.ts` only restricts the scheme to http/https and refuses to follow a redirect; it does not block a `resourceUrl` that resolves to a private/loopback/link-local address, so a malicious or compromised store could still point the firewall at internal infrastructure on its own network. Fine for this hackathon's single-operator, testnet-only demo; a production deployment would need an egress allowlist or an IP-range check before fetching.
 - **Testnet only.** Base Sepolia, testnet USDC; Intercepta's risk data is mainnet-only, so screening uses a Sepolia→mainnet token address mapping.
 - **Pending (human, after this WU):** a real Intercepta sandbox key + `bun run intercepta-check` live results; a real World App approve/deny pass inside a full demo run; the demo video.
 

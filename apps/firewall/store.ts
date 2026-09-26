@@ -66,6 +66,13 @@ export interface StoredIntent {
    * mandate — `checkPolicy` refuses any promise that isn't `"active"`
    * (fail-closed), independent of the (always-`false`) `revoked` flag above. */
   promiseStatus?: PromiseStatus;
+  /** H1 fix — the normalized origin (`scheme://host[:port]`) this
+   * `source: "world_id"` promise is bound to (`StoredPromise.merchant`
+   * below); `undefined` for a wallet-sourced `StoredIntent` (no merchant
+   * concept — see README's limitations) AND for a promise created before
+   * merchant binding existed. The `merchant` pipeline stage
+   * (apps/firewall/merchant.ts) refuses fail-closed in either case. */
+  merchant?: string;
 }
 
 /** WU13 kill switch — a single persisted row (store.ts's `control` table).
@@ -199,6 +206,13 @@ export interface StoredPromise {
   categories: string[];
   expiry: bigint;
   nonce: `0x${string}`;
+  /** H1 fix (GitHub issue #1) — the normalized origin
+   * (`scheme://host[:port]`, `merchant.ts`'s `normalizeMerchantOrigin`) this
+   * promise may pay; set once at creation (`POST /promises`) and never
+   * changed. `undefined` only for a promise row created before this column
+   * existed — the pipeline's `merchant` stage refuses those fail-closed
+   * rather than treating a missing bind as "any origin". */
+  merchant?: string;
   /** Atomic USDC units already committed/reserved — same semantics as
    * `StoredIntent.spent`, updated through the same `recordSpend`. */
   spent: bigint;
@@ -325,6 +339,7 @@ db.exec(`
     categories_json TEXT NOT NULL,
     expiry TEXT NOT NULL,
     nonce TEXT NOT NULL,
+    merchant TEXT,
     spent TEXT NOT NULL DEFAULT '0',
     status TEXT NOT NULL,
     reason TEXT,
@@ -363,6 +378,20 @@ db.exec(`
   // any intent created before agent keys existed.
   if (!existingColumns.has("agent_key_hash")) {
     db.exec(`ALTER TABLE intents ADD COLUMN agent_key_hash TEXT`);
+  }
+}
+
+// H1 fix migration: `promises` may already exist from before the `merchant`
+// column did (the live dev sqlite file under data/) — add it by hand,
+// nullable, when missing. A pre-existing promise row then reads back with
+// `merchant: undefined`, which the pipeline's `merchant` stage refuses
+// fail-closed rather than treating as "any origin".
+{
+  const existingPromiseColumns = new Set(
+    (db.prepare(`PRAGMA table_info(promises)`).all() as { name: string }[]).map((row) => row.name),
+  );
+  if (!existingPromiseColumns.has("merchant")) {
+    db.exec(`ALTER TABLE promises ADD COLUMN merchant TEXT`);
   }
 }
 
@@ -447,11 +476,11 @@ const listConnectRequestsByStatusStmt = db.prepare(`SELECT * FROM connect_reques
 // P9.2 promises.
 const insertPromiseStmt = db.prepare(
   `INSERT INTO promises (
-     id, account_id, task, budget, categories_json, expiry, nonce, spent, status, reason, summary,
+     id, account_id, task, budget, categories_json, expiry, nonce, merchant, spent, status, reason, summary,
      device_code, verification_uri, verification_uri_complete, user_code, interval_seconds, requested_at,
      gate_started_at_ms, expires_at, attestation_json, created_at, updated_at
    ) VALUES (
-     $id, $accountId, $task, $budget, $categoriesJson, $expiry, $nonce, $spent, $status, $reason, $summary,
+     $id, $accountId, $task, $budget, $categoriesJson, $expiry, $nonce, $merchant, $spent, $status, $reason, $summary,
      $deviceCode, $verificationUri, $verificationUriComplete, $userCode, $intervalSeconds, $requestedAt,
      $gateStartedAtMs, $expiresAt, $attestationJson, $createdAt, $updatedAt
    )`,
@@ -993,6 +1022,7 @@ interface PromiseRow {
   categories_json: string;
   expiry: string;
   nonce: string;
+  merchant: string | null;
   spent: string;
   status: string;
   reason: string | null;
@@ -1019,6 +1049,7 @@ function rowToPromise(row: PromiseRow): StoredPromise {
     categories: JSON.parse(row.categories_json) as string[],
     expiry: BigInt(row.expiry),
     nonce: row.nonce as `0x${string}`,
+    merchant: row.merchant ?? undefined,
     spent: BigInt(row.spent),
     status: row.status as PromiseStatus,
     reason: row.reason ?? undefined,
@@ -1046,6 +1077,7 @@ export function createPromise(promise: StoredPromise): void {
     $categoriesJson: JSON.stringify(promise.categories),
     $expiry: promise.expiry.toString(),
     $nonce: promise.nonce,
+    $merchant: promise.merchant ?? null,
     $spent: promise.spent.toString(),
     $status: promise.status,
     $reason: promise.reason ?? null,

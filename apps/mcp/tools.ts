@@ -106,6 +106,8 @@ interface PromiseSummary {
   categories: string[];
   expiry: string;
   createdAt: string;
+  /** H1 fix — the store origin this promise may pay. */
+  merchant?: string;
 }
 
 interface PromiseDetail extends PromiseSummary {
@@ -432,19 +434,26 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
     {
       description:
         "Ask the human to pre-authorize a task with a budget, via World ID — the World-ID-native replacement " +
-        "for a wallet-signed mandate. Requires a connected account (call connect first if this fails). Shows " +
-        "the human a summary (task, budget, categories, expiry) to approve in World App; once approved, " +
-        "pay_x402 can spend against it with zero further taps until it runs out or expires. Waits briefly for " +
-        "approval; if the human hasn't responded yet, returns 'pending' and the promiseId to pass to " +
-        "check_promise.",
+        "for a wallet-signed mandate. Requires a connected account (call connect first if this fails). Binds the " +
+        "promise to one merchant (store) origin — pay_x402 can only ever spend it on a resource at that exact " +
+        "origin, never a different store, even a clean/in-budget one. Shows the human a summary (task, budget, " +
+        "categories, expiry, merchant) to approve in World App; once approved, pay_x402 can spend against it " +
+        "with zero further taps until it runs out or expires. Waits briefly for approval; if the human hasn't " +
+        "responded yet, returns 'pending' and the promiseId to pass to check_promise.",
       inputSchema: {
         task: z.string().min(1).describe("what this promise authorizes, in plain language (e.g. 'buy a $1 Amazon gift card')"),
         budgetUsdc: z.number().positive().describe("maximum total USDC this promise may spend, across all purchases"),
         categories: z.array(z.string().min(1)).min(1).max(5).describe("1-5 purchase categories this promise may spend on"),
         expiresInMinutes: z.number().positive().describe("how many minutes from now this promise stays valid"),
+        merchant: z
+          .string()
+          .min(1)
+          .describe(
+            "the store's base URL (e.g. http://localhost:4000) — this promise can only ever pay a resource on this exact origin",
+          ),
       },
     },
-    async ({ task, budgetUsdc, categories, expiresInMinutes }) => {
+    async ({ task, budgetUsdc, categories, expiresInMinutes, merchant }) => {
       try {
         if (!session.hasAgentKey() || credentialKind(session.getAgentKey()) !== "account") {
           return fail("request_promise needs a connected World ID account — call connect first (the legacy wallet mandate path doesn't use promises).");
@@ -453,7 +462,7 @@ export function registerTools(server: McpServer, config: ToolsConfig, session: S
         const res = await fetch(`${config.firewallUrl}/promises`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${accountKey}` },
-          body: JSON.stringify({ task, budgetUsdc, categories, expiresInSeconds: Math.round(expiresInMinutes * 60) }),
+          body: JSON.stringify({ task, budgetUsdc, categories, expiresInSeconds: Math.round(expiresInMinutes * 60), merchant }),
         });
         const body = (await res.json().catch(() => undefined)) as (CreatePromiseResponse & { error?: string }) | undefined;
         if (!res.ok || !body?.promiseId) {

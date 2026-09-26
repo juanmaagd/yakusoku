@@ -50,6 +50,10 @@ export interface PromiseAttestationParams {
   /** Unix-seconds expiry, as a decimal string. */
   expiry: string;
   nonce: `0x${string}`;
+  /** Normalized origin (`scheme://host[:port]`) this promise may pay —
+   * `StoredPromise.merchant` (store.ts), set at `POST /promises` via
+   * `normalizeMerchantOrigin` (merchant.ts). */
+  merchant: string;
   /** ID token `sub` claim — hashed into `worldIdSubject`, never stored raw. */
   worldIdSub: string;
   acr: string;
@@ -75,6 +79,7 @@ export async function signPromiseAttestation(
     categories: params.categories,
     expiry: params.expiry,
     nonce: params.nonce,
+    merchant: params.merchant,
     worldIdSubject: hashWorldIdSubject(params.worldIdSub),
     acr: params.acr,
     authTime: String(params.authTimeSeconds),

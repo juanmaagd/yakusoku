@@ -357,6 +357,9 @@ const createPromiseSchema = z.object({
   budgetUsdc: z.union([z.string(), z.number()]).transform((v) => Number(v)),
   categories: z.array(z.string().min(1)).min(1).max(5),
   expiresInSeconds: z.number().int().positive(),
+  /** H1 fix — the store's URL; `createPromiseRequest` (promises.ts)
+   * normalizes it to an origin and binds this promise to it. */
+  merchant: z.string().min(1),
 });
 
 app.post("/promises", async (c) => {

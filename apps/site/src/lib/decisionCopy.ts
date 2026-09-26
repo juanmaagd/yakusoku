@@ -49,6 +49,8 @@ export function plainReason(r: Pick<DecisionReceipt, "state" | "reasons" | "worl
       return "Already handled. This was a replay.";
     case "policy_rejected":
       return policyReason(raw);
+    case "merchant_blocked":
+      return "The store's own answer didn't match what the agent asked to pay.";
     case "provenance_blocked":
       return "The destination came from untrusted page text.";
     case "intercepta_blocked":
@@ -93,6 +95,7 @@ export interface StageRow {
 const STAGES: { id: string; name: string }[] = [
   { id: "idempotency", name: "Not a replay" },
   { id: "policy", name: "Within your promise" },
+  { id: "merchant", name: "Verified with the store directly" },
   { id: "provenance", name: "Destination traceable" },
   { id: "intercepta", name: "Address screening" },
   { id: "jev", name: "Matches your promise" },
