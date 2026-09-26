@@ -48,7 +48,7 @@ export const taskIntentMessageSchema = z.object({
 });
 export type TaskIntentMessage = z.infer<typeof taskIntentMessageSchema>;
 
-/** A `TaskIntent` after the user signed it in `apps/web` (wagmi `signTypedDataAsync`). */
+/** A `TaskIntent` after the user signed a promise at the site's `/app` (viem `signTypedData`). */
 export const signedTaskIntentSchema = z.object({
   message: taskIntentMessageSchema,
   signature: signatureSchema,

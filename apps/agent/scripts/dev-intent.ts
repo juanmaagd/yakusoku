@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-// Dev helper — plays the "user" until apps/web (WU5) exists: signs a
-// TaskIntent with an ephemeral key and registers it with the firewall, so
-// apps/agent has a real intentId to buy against. Not for production use: the
-// ephemeral key only exists for this script's process lifetime and is never
-// persisted.
+// Dev helper — plays the "user" without going through the site's /app mandate
+// wizard: signs a TaskIntent with an ephemeral key and registers it with the
+// firewall, so apps/agent has a real intentId to buy against. Not for
+// production use: the ephemeral key only exists for this script's process
+// lifetime and is never persisted.
 
 import { toHex } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";

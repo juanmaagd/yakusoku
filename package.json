@@ -10,7 +10,6 @@
     "test": "bun test --pass-with-no-tests",
     "store": "bun run --filter @yakusoku/store dev",
     "firewall": "bun run --filter @yakusoku/firewall dev",
-    "web": "bun run --filter @yakusoku/web dev",
     "site": "bun run --filter @yakusoku/site dev",
     "roundtrip": "bun run --filter @yakusoku/firewall roundtrip",
     "jev-cases": "bun run --filter @yakusoku/firewall jev-cases",
