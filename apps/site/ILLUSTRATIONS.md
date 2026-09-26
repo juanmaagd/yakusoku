@@ -41,6 +41,16 @@ nearest-neighbour and encoded as lossless WebP. Script:
 `/Users/juanma/Desktop/eth-global/assets/art-v2/dither.py` (outside the repo). Each
 sidecar records it under `postProcess`.
 
+## Landing refocus addition
+
+One more image in the same set, same shared style prefix, source directory
+(`/Users/juanma/Desktop/eth-global/assets/art-v2/`), model (OpenAI image
+generation via the Codex CLI, built-in `image_gen` tool) and 512px x2 dither.
+
+| File | Used for | Prompt summary |
+|---|---|---|
+| `gift.webp` | Owner flow, step 3: the agent buys and you get the receipt | Wrapped gift box with a ribbon bow resting on a curled receipt strip, one blue indicator light on the ribbon knot |
+
 ## App set
 
 Three more images added to the same set, same shared style prefix, same source
