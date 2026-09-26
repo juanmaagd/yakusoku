@@ -14,10 +14,11 @@ function arg(name: string): string | undefined {
 }
 
 const intentId = arg("--intent");
+const agentKey = arg("--key") ?? process.env.AGENT_API_KEY;
 const sku = arg("--sku") ?? "steam-1";
 const settle = process.argv.includes("--settle");
-if (!intentId) {
-  console.error("Usage: bun run attack -- --intent <intentId> [--sku steam-1|steam-25] [--settle]");
+if (!intentId || !agentKey) {
+  console.error("Usage: bun run attack -- --intent <intentId> --key <agentKey> [--sku steam-1|steam-25] [--settle]");
   process.exit(1);
 }
 
@@ -56,7 +57,7 @@ console.log(`[attack] agent asks the firewall to pay for ${sku} (never requested
 
 const signRes = await fetch(`${FIREWALL_URL}/sign`, {
   method: "POST",
-  headers: { "content-type": "application/json" },
+  headers: { "content-type": "application/json", authorization: `Bearer ${agentKey}` },
   body: JSON.stringify({
     intentId,
     paymentRequiredHeader,

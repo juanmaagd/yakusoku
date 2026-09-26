@@ -16,10 +16,14 @@ function randomNonce(): `0x${string}` {
   return toHex(crypto.getRandomValues(new Uint8Array(32)));
 }
 
-async function postJson(url: string, body: unknown): Promise<{ status: number; json: unknown }> {
+async function postJson(
+  url: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; json: unknown }> {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: stringifyWithBigint(body),
   });
   const json = await res.json();
@@ -29,6 +33,8 @@ async function postJson(url: string, body: unknown): Promise<{ status: number; j
 interface IntentResponse {
   id: string;
   remainingBudget: string;
+  /** WU-P1 — shown once by `POST /intents`; only its hash is ever persisted. */
+  agentKey: string;
 }
 
 interface SignResponse {
@@ -76,6 +82,8 @@ async function main(): Promise<void> {
   if (intentStatus !== 201) throw new Error(`POST /intents failed: ${intentStatus} ${JSON.stringify(intentJson)}`);
   const intent = intentJson as IntentResponse;
   console.log(`intent ${intent.id}, remainingBudget=${intent.remainingBudget}`);
+  // WU-P1: /sign now requires this mandate credential — shown once above.
+  const SIGN_HEADERS = { Authorization: `Bearer ${intent.agentKey}` };
 
   // Same shape the WU4 agent sends; provenance (WU6) fails closed without it.
   const SIGN_CONTEXT = {
@@ -90,12 +98,16 @@ async function main(): Promise<void> {
   console.log("decoded PAYMENT-REQUIRED:", decodePaymentRequiredHeader(rehearsalHeader));
 
   console.log("\n=== 3. Ask the firewall to sign ===");
-  const { status: signStatus, json: signJson } = await postJson(`${FIREWALL_URL}/sign`, {
-    intentId: intent.id,
-    paymentRequiredHeader: rehearsalHeader,
-    resourceUrl: rehearsalUrl,
-    context: SIGN_CONTEXT,
-  });
+  const { status: signStatus, json: signJson } = await postJson(
+    `${FIREWALL_URL}/sign`,
+    {
+      intentId: intent.id,
+      paymentRequiredHeader: rehearsalHeader,
+      resourceUrl: rehearsalUrl,
+      context: SIGN_CONTEXT,
+    },
+    SIGN_HEADERS,
+  );
   console.log(signStatus, signJson);
   const sign = signJson as SignResponse;
   if (sign.verdict !== "pay" || !sign.paymentSignature) {
@@ -119,12 +131,16 @@ async function main(): Promise<void> {
   console.log("\n=== 5. Negative check: amazon-25 exceeds remaining budget ===");
   const amazon25Url = `${STORE_URL}/giftcard/amazon-25`;
   const amazon25Header = await fetch402(amazon25Url);
-  const { status: refuseStatus, json: refuseJson } = await postJson(`${FIREWALL_URL}/sign`, {
-    intentId: intent.id,
-    paymentRequiredHeader: amazon25Header,
-    resourceUrl: amazon25Url,
-    context: SIGN_CONTEXT,
-  });
+  const { status: refuseStatus, json: refuseJson } = await postJson(
+    `${FIREWALL_URL}/sign`,
+    {
+      intentId: intent.id,
+      paymentRequiredHeader: amazon25Header,
+      resourceUrl: amazon25Url,
+      context: SIGN_CONTEXT,
+    },
+    SIGN_HEADERS,
+  );
   console.log(refuseStatus, refuseJson);
   const refuse = refuseJson as SignResponse;
   if (refuse.verdict !== "refuse" || refuse.paymentSignature) {
@@ -132,12 +148,16 @@ async function main(): Promise<void> {
   }
 
   console.log("\n=== 6. Idempotency check: repeat step 3's exact /sign request ===");
-  const { status: repeatStatus, json: repeatJson } = await postJson(`${FIREWALL_URL}/sign`, {
-    intentId: intent.id,
-    paymentRequiredHeader: rehearsalHeader,
-    resourceUrl: rehearsalUrl,
-    context: SIGN_CONTEXT,
-  });
+  const { status: repeatStatus, json: repeatJson } = await postJson(
+    `${FIREWALL_URL}/sign`,
+    {
+      intentId: intent.id,
+      paymentRequiredHeader: rehearsalHeader,
+      resourceUrl: rehearsalUrl,
+      context: SIGN_CONTEXT,
+    },
+    SIGN_HEADERS,
+  );
   console.log(repeatStatus, repeatJson);
   const repeat = repeatJson as SignResponse;
   if (repeat.verdict !== "pay" || repeat.paymentSignature !== sign.paymentSignature) {

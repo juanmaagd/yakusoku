@@ -389,7 +389,10 @@ function selectReceipt(receiptId) {
 
 async function fetchApproval(receiptId) {
   try {
-    const res = await fetch(`/approvals/${receiptId}`);
+    // WU-P1: /approvals/:receiptId now requires either the agent's own
+    // mandate key or (as here) the local-admin identity the dashboard
+    // already uses for pause/resume/revoke.
+    const res = await fetch(`/approvals/${receiptId}`, { headers: ADMIN_HEADERS });
     if (!res.ok) return;
     const data = await res.json();
     state.approvals.set(receiptId, data);

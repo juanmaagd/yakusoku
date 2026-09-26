@@ -55,7 +55,7 @@ function makeTaskIntent(): TaskIntentMessage {
  * PendingApproval row — the exact state `startApprovalGate` leaves behind
  * right before the gate resolves (`settleApproved`/`settleRefused` below). */
 function seedPendingApproval() {
-  const intent = createIntent(makeTaskIntent(), `0x${"aa".repeat(65)}`, "0x1111111111111111111111111111111111111111");
+  const { intent } = createIntent(makeTaskIntent(), `0x${"aa".repeat(65)}`, "0x1111111111111111111111111111111111111111");
   const paymentIdentifier = `pay_test_${crypto.randomUUID()}`;
   const { receiptId } = finalize({
     paymentIdentifier,

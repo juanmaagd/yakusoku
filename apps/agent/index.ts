@@ -90,8 +90,13 @@ const APPROVAL_POLL_TIMEOUT_MS = 6 * 60_000;
 /** Polls `GET /approvals/:receiptId` until it leaves `pending`, printing a
  * human-readable prompt once so whoever is running the demo can approve from
  * their phone. Never assumes approval — a timeout here is reported as an
- * ordinary `ask_human` timeout, not a purchase. */
-async function waitForWorldIdApproval(receiptId: string, approval: ApprovalInfo): Promise<ApprovalStatusResponse> {
+ * ordinary `ask_human` timeout, not a purchase. WU-P1: this endpoint now
+ * requires the same mandate credential `buy` already sends to `/sign`. */
+async function waitForWorldIdApproval(
+  receiptId: string,
+  approval: ApprovalInfo,
+  agentKey: string,
+): Promise<ApprovalStatusResponse> {
   console.log("\n=== World ID approval required ===");
   console.log(`  Open: ${approval.verificationUri ?? "(no verification URL returned)"}`);
   if (approval.userCode) console.log(`  Code: ${approval.userCode}`);
@@ -102,7 +107,9 @@ async function waitForWorldIdApproval(receiptId: string, approval: ApprovalInfo)
   const deadline = Date.now() + APPROVAL_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, APPROVAL_POLL_INTERVAL_MS));
-    const res = await fetch(`${FIREWALL_URL}/approvals/${receiptId}`);
+    const res = await fetch(`${FIREWALL_URL}/approvals/${receiptId}`, {
+      headers: { authorization: `Bearer ${agentKey}` },
+    });
     if (!res.ok) {
       console.log(`[tool:buy] approval poll failed: HTTP ${res.status}`);
       continue;
@@ -128,13 +135,17 @@ interface BuyResult {
   explorerUrl?: string;
 }
 
-function parseArgs(argv: string[]): { intentId: string; userRequest: string; compromised: boolean } {
+function parseArgs(argv: string[]): { intentId: string; agentKey: string; userRequest: string; compromised: boolean } {
   let intentId: string | undefined;
+  let agentKey: string | undefined;
   let compromisedFlag = false;
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--intent") {
       intentId = argv[i + 1];
+      i++;
+    } else if (argv[i] === "--key") {
+      agentKey = argv[i + 1];
       i++;
     } else if (argv[i] === "--compromised") {
       compromisedFlag = true;
@@ -143,18 +154,31 @@ function parseArgs(argv: string[]): { intentId: string; userRequest: string; com
     }
   }
   const userRequest = rest.join(" ").trim();
+  // WU-P1: the mandate credential — `--key` or AGENT_API_KEY, in that order.
+  // Never falls back to anything else: no key means no way to authenticate
+  // to `/sign`/`/approvals`, so fail fast with a clear error instead of
+  // letting every purchase attempt 401 later.
+  agentKey ??= process.env.AGENT_API_KEY;
   if (!intentId || !userRequest) {
-    console.error('Usage: bun run agent -- --intent <intentId> [--compromised] "<user request>"');
+    console.error('Usage: bun run agent -- --intent <intentId> --key <agentKey> [--compromised] "<user request>"');
+    process.exit(1);
+  }
+  if (!agentKey) {
+    console.error(
+      "Missing agent key: pass --key <agentKey> or set AGENT_API_KEY. " +
+        "The mandate credential is printed once, when the intent is signed (dev-intent, or apps/web).",
+    );
     process.exit(1);
   }
   // AGENT_MODE=compromised is the env-only equivalent of --compromised, for
   // launching the compromised mode from a script without touching argv.
   const compromised = compromisedFlag || process.env.AGENT_MODE === "compromised";
-  return { intentId, userRequest, compromised };
+  return { intentId, agentKey, userRequest, compromised };
 }
 
-/** Builds the three shopping tools, closing over one run's intent id and untrusted-content log. */
-function buildTools(intentId: string, userRequest: string, compromised = false) {
+/** Builds the three shopping tools, closing over one run's intent id, mandate
+ * credential, and untrusted-content log. */
+function buildTools(intentId: string, agentKey: string, userRequest: string, compromised = false) {
   const seenContent: SeenContent[] = [];
 
   const browseCatalog = tool({
@@ -247,7 +271,7 @@ function buildTools(intentId: string, userRequest: string, compromised = false) 
       console.log(`[tool:buy] asking firewall to sign (intent=${intentId})`);
       const signResponse = await fetch(`${FIREWALL_URL}/sign`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: `Bearer ${agentKey}` },
         body: JSON.stringify({ intentId, paymentRequiredHeader, resourceUrl, context }),
       });
       const signResult = (await signResponse.json()) as SignResponse;
@@ -265,7 +289,7 @@ function buildTools(intentId: string, userRequest: string, compromised = false) 
       const receiptId = signResult.receiptId;
       let paymentSignature = signResult.paymentSignature;
       if (verdict === "ask_human" && signResult.approval?.status === "pending") {
-        const resolved = await waitForWorldIdApproval(receiptId, signResult.approval);
+        const resolved = await waitForWorldIdApproval(receiptId, signResult.approval, agentKey);
         verdict = resolved.verdict;
         reason = resolved.reason;
         paymentSignature = resolved.paymentSignature;
@@ -330,8 +354,8 @@ function buildTools(intentId: string, userRequest: string, compromised = false) 
 }
 
 async function main(): Promise<void> {
-  const { intentId, userRequest, compromised } = parseArgs(process.argv.slice(2));
-  const tools = buildTools(intentId, userRequest, compromised);
+  const { intentId, agentKey, userRequest, compromised } = parseArgs(process.argv.slice(2));
+  const tools = buildTools(intentId, agentKey, userRequest, compromised);
 
   if (compromised) {
     console.log("[agent] COMPROMISED MODE (simulated prompt injection for the demo)");

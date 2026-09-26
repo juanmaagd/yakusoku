@@ -16,6 +16,7 @@ import {
   type TaskIntentMessage,
   type Verdict,
 } from "@yakusoku/shared";
+import { generateAgentKey, hashAgentKey, hashesEqual } from "./auth";
 
 export interface StoredIntent {
   id: string;
@@ -31,6 +32,12 @@ export interface StoredIntent {
    * an approval already in flight can't slip a payment through afterward. */
   revoked: boolean;
   revokedAt?: string;
+  /** WU-P1 — SHA-256 hash of the mandate credential handed to the agent once
+   * (`POST /intents`' 201 response). `undefined` for an intent created
+   * before this column existed — such an intent can never authenticate an
+   * agent request again (see `findIntentByAgentKey`). Never serialized back
+   * to a client (index.ts's `serializeIntent` omits it). */
+  agentKeyHash?: string;
 }
 
 /** WU13 kill switch — a single persisted row (store.ts's `control` table).
@@ -104,7 +111,8 @@ db.exec(`
     spent TEXT NOT NULL,
     created_at TEXT NOT NULL,
     revoked INTEGER NOT NULL DEFAULT 0,
-    revoked_at TEXT
+    revoked_at TEXT,
+    agent_key_hash TEXT
   );
   CREATE TABLE IF NOT EXISTS receipts (
     receipt_id TEXT PRIMARY KEY,
@@ -146,6 +154,11 @@ db.exec(`
   if (!existingColumns.has("revoked_at")) {
     db.exec(`ALTER TABLE intents ADD COLUMN revoked_at TEXT`);
   }
+  // WU-P1 migration: same story for the mandate-credential hash — NULL for
+  // any intent created before agent keys existed.
+  if (!existingColumns.has("agent_key_hash")) {
+    db.exec(`ALTER TABLE intents ADD COLUMN agent_key_hash TEXT`);
+  }
 }
 
 // Exactly one control row, ever — `INSERT OR IGNORE` makes this idempotent
@@ -155,7 +168,7 @@ db.exec(`INSERT OR IGNORE INTO control (id, paused, paused_at, reason) VALUES (1
 // --- Statements ----------------------------------------------------------
 
 const insertIntentStmt = db.prepare(
-  `INSERT INTO intents (id, message_json, signature, signer, spent, created_at) VALUES ($id, $message, $signature, $signer, $spent, $createdAt)`,
+  `INSERT INTO intents (id, message_json, signature, signer, spent, created_at, agent_key_hash) VALUES ($id, $message, $signature, $signer, $spent, $createdAt, $agentKeyHash)`,
 );
 const getIntentStmt = db.prepare(`SELECT * FROM intents WHERE id = $id`);
 const listIntentsStmt = db.prepare(`SELECT * FROM intents ORDER BY created_at DESC`);
@@ -205,6 +218,7 @@ interface IntentRow {
   created_at: string;
   revoked: number;
   revoked_at: string | null;
+  agent_key_hash: string | null;
 }
 
 function rowToIntent(row: IntentRow): StoredIntent {
@@ -220,16 +234,24 @@ function rowToIntent(row: IntentRow): StoredIntent {
     createdAt: row.created_at,
     revoked: Boolean(row.revoked),
     revokedAt: row.revoked_at ?? undefined,
+    agentKeyHash: row.agent_key_hash ?? undefined,
   };
 }
 
 // --- Intents ---------------------------------------------------------------
 
+/** Mints the intent AND its mandate credential (WU-P1) in one step — the
+ * agent key is generated here, its hash is what's actually persisted, and
+ * the raw key is returned alongside the intent so the caller (`POST
+ * /intents`) can hand it to the human exactly once. Nothing after this
+ * function ever sees the raw key again. */
 export function createIntent(
   message: TaskIntentMessage,
   signature: `0x${string}`,
   signer: `0x${string}`,
-): StoredIntent {
+): { intent: StoredIntent; agentKey: string } {
+  const agentKey = generateAgentKey();
+  const agentKeyHash = hashAgentKey(agentKey);
   const intent: StoredIntent = {
     id: `intent_${crypto.randomUUID()}`,
     message,
@@ -238,6 +260,7 @@ export function createIntent(
     spent: 0n,
     createdAt: new Date().toISOString(),
     revoked: false,
+    agentKeyHash,
   };
   insertIntentStmt.run({
     $id: intent.id,
@@ -246,8 +269,9 @@ export function createIntent(
     $signer: signer,
     $spent: "0",
     $createdAt: intent.createdAt,
+    $agentKeyHash: agentKeyHash,
   });
-  return intent;
+  return { intent, agentKey };
 }
 
 export function getIntent(id: string): StoredIntent | undefined {
@@ -258,6 +282,21 @@ export function getIntent(id: string): StoredIntent | undefined {
 export function listIntents(): StoredIntent[] {
   const rows = listIntentsStmt.all() as IntentRow[];
   return rows.map(rowToIntent);
+}
+
+/** Looks up the intent whose mandate credential's hash matches `agentKey`'s
+ * hash (WU-P1 auth, index.ts). Compares against every intent that has a key
+ * (dataset stays small for this hackathon demo) using a constant-time
+ * comparison per candidate (`hashesEqual`), rather than an indexed SQL
+ * equality lookup, so no timing side-channel — however small — is tied to
+ * the secret key material. Returns `undefined` for an unknown key or a
+ * legacy intent with no `agentKeyHash` at all. */
+export function findIntentByAgentKey(agentKey: string): StoredIntent | undefined {
+  const providedHash = hashAgentKey(agentKey);
+  for (const intent of listIntents()) {
+    if (intent.agentKeyHash && hashesEqual(intent.agentKeyHash, providedHash)) return intent;
+  }
+  return undefined;
 }
 
 /** WU13 — `POST /intents/:id/revoke`. Idempotent: revoking an already-revoked

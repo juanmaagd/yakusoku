@@ -42,7 +42,7 @@ function randomNonce(): `0x${string}` {
   return toHex(crypto.getRandomValues(new Uint8Array(32)))
 }
 
-async function postIntent(body: string): Promise<{ id: string; remainingBudget: string }> {
+async function postIntent(body: string): Promise<{ id: string; remainingBudget: string; agentKey: string }> {
   let res: Response
   try {
     res = await fetch(`${FIREWALL_URL}/intents`, {
@@ -61,7 +61,9 @@ async function postIntent(body: string): Promise<{ id: string; remainingBudget: 
         : `HTTP ${res.status}`
     throw new Error(`Firewall rejected the intent: ${detail}`)
   }
-  return parsed as { id: string; remainingBudget: string }
+  // WU-P1: `agentKey` is the mandate credential, shown here exactly once —
+  // the firewall only ever persists its hash from this point on.
+  return parsed as { id: string; remainingBudget: string; agentKey: string }
 }
 
 async function fetchIntent(id: string): Promise<StoredIntent> {
@@ -118,6 +120,10 @@ export default function Page() {
   const [stage, setStage] = useState<Stage>('idle')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [storedIntent, setStoredIntent] = useState<StoredIntent | null>(null)
+  // WU-P1: the mandate credential, held only in memory for this page's
+  // session — shown once, never re-fetchable, never sent anywhere but into
+  // the copyable agent command below.
+  const [agentKey, setAgentKey] = useState<string | null>(null)
 
   const categories = useMemo(
     () =>
@@ -134,6 +140,7 @@ export default function Page() {
   async function handleSign() {
     setErrorMessage(null)
     setStoredIntent(null)
+    setAgentKey(null)
 
     if (connection.status !== 'connected') {
       setErrorMessage('Connect your wallet first.')
@@ -166,7 +173,7 @@ export default function Page() {
       })
 
       setStage('submitting')
-      const { id } = await postIntent(
+      const { id, agentKey: mintedAgentKey } = await postIntent(
         stringifyWithBigint({ message, signature, signer: connection.address }),
       )
 
@@ -174,6 +181,7 @@ export default function Page() {
       const intent = await fetchIntent(id)
 
       setStoredIntent(intent)
+      setAgentKey(mintedAgentKey)
       setStage('done')
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err))
@@ -295,9 +303,29 @@ export default function Page() {
             <dd>{formatUnits(BigInt(storedIntent.remainingBudget), USDC_DECIMALS)} USDC</dd>
             <dt>Expires</dt>
             <dd>{new Date(Number(storedIntent.message.expiry) * 1000).toLocaleString()}</dd>
+            {agentKey && (
+              <>
+                <dt>Agent key</dt>
+                <dd>
+                  <code>{agentKey}</code>
+                </dd>
+              </>
+            )}
           </dl>
+          {agentKey && (
+            <p className="hint error">
+              This agent key is shown once — store it in your agent&apos;s config. The firewall cannot show it to you
+              again.
+            </p>
+          )}
           <p className="hint">Run the agent against this intent:</p>
-          <CopyableCommand command={`bun run agent -- --intent ${storedIntent.id} "${storedIntent.message.task}"`} />
+          <CopyableCommand
+            command={
+              agentKey
+                ? `bun run agent -- --intent ${storedIntent.id} --key ${agentKey} "${storedIntent.message.task}"`
+                : `bun run agent -- --intent ${storedIntent.id} --key <agentKey> "${storedIntent.message.task}"`
+            }
+          />
         </section>
       )}
     </main>

@@ -14,6 +14,7 @@ import type { Hex } from "viem";
 import { signedTaskIntentSchema, transition, X402_NETWORK, type DecisionReceipt } from "@yakusoku/shared";
 import {
   createIntent,
+  findIntentByAgentKey,
   getControlState,
   getIntent,
   getPendingApprovalByReceiptId,
@@ -26,6 +27,7 @@ import {
   setControlState,
   type StoredIntent,
 } from "./store";
+import { extractBearerToken } from "./auth";
 import { verifyTaskIntentSignature } from "./signer";
 import { computePaymentIdentifier, runSignPipeline } from "./pipeline";
 import { approvalStatusResponse, resumePendingApprovalsOnBoot } from "./approvals";
@@ -89,13 +91,43 @@ function serializeIntent(intent: StoredIntent) {
 // Hono's Bun `getConnInfo`, not a spoofable header) AND carry a fixed
 // `x-yakusoku-admin: 1` header that only the dashboard's own fetch calls
 // send. Neither check is cryptographic.
-function requireLocalAdmin(c: Context, next: Next) {
+function isLocalAdminRequest(c: Context): boolean {
   const address = getConnInfo(c).remote.address ?? "";
   const isLoopback = address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1" || address.startsWith("127.");
-  if (!isLoopback || c.req.header("x-yakusoku-admin") !== "1") {
+  return isLoopback && c.req.header("x-yakusoku-admin") === "1";
+}
+
+function requireLocalAdmin(c: Context, next: Next) {
+  if (!isLocalAdminRequest(c)) {
     return c.json({ error: "forbidden" }, 403);
   }
   return next();
+}
+
+// --- WU-P1 mandate credential auth -------------------------------------------
+//
+// `POST /sign` and `GET /approvals/:receiptId` are the agent-facing
+// endpoints: an agent authenticates with `Authorization: Bearer <agentKey>`,
+// the credential `POST /intents` handed the human exactly once. The key ->
+// mandate lookup (`findIntentByAgentKey`, store.ts) is authoritative — a
+// caller-supplied `intentId` (still accepted on `/sign` for explicitness) is
+// only ever checked for a MATCH against the authenticated mandate, never
+// used to look anything up on its own. A revoked mandate can never
+// authenticate again, so its key refuses here (401) before any pipeline
+// stage ever runs.
+type AgentAuthResult =
+  | { ok: true; mandate: StoredIntent }
+  | { ok: false; status: 401 | 403; body: { error: "unauthorized" | "forbidden" } };
+
+function authenticateAgent(c: Context, requestedIntentId?: string): AgentAuthResult {
+  const token = extractBearerToken(c.req.header("authorization"));
+  if (!token) return { ok: false, status: 401, body: { error: "unauthorized" } };
+  const mandate = findIntentByAgentKey(token);
+  if (!mandate || mandate.revoked) return { ok: false, status: 401, body: { error: "unauthorized" } };
+  if (requestedIntentId !== undefined && requestedIntentId !== mandate.id) {
+    return { ok: false, status: 403, body: { error: "forbidden" } };
+  }
+  return { ok: true, mandate };
 }
 
 // --- POST /intents -----------------------------------------------------------
@@ -122,9 +154,14 @@ app.post("/intents", async (c) => {
     return c.json({ error: "invalid_signature" }, 400);
   }
 
-  const intent = createIntent(message, signature as Hex, signer as Hex);
+  // WU-P1: mints the mandate credential too — `agentKey` is the raw value,
+  // returned exactly once here and never again (only its hash is persisted,
+  // store.ts). `serializeIntent` never includes it, so the SSE broadcast
+  // below and every later `GET /intents`/`GET /intents/:id` response stay
+  // silent about it.
+  const { intent, agentKey } = createIntent(message, signature as Hex, signer as Hex);
   publish("intent.created", serializeIntent(intent));
-  return c.json({ id: intent.id, remainingBudget: remainingBudget(intent).toString() }, 201);
+  return c.json({ id: intent.id, remainingBudget: remainingBudget(intent).toString(), agentKey }, 201);
 });
 
 // --- GET /intents ----------------------------------------------------------
@@ -185,7 +222,11 @@ app.post("/control/resume", requireLocalAdmin, (c) => {
 
 const signRequestSchema = z
   .object({
-    intentId: z.string().min(1),
+    // WU-P1: optional now — the authenticated mandate (Authorization header)
+    // is authoritative. Still accepted so a caller can be explicit about
+    // which intent it means; a mismatch against the authenticated mandate is
+    // a 403, never a silent override.
+    intentId: z.string().min(1).optional(),
     /** Base64 `PAYMENT-REQUIRED` header value, as decoded by the agent from the store's 402. */
     paymentRequiredHeader: z.string().min(1).optional(),
     /** Already-decoded `PaymentRequired` object, as an alternative to the header. */
@@ -199,12 +240,21 @@ const signRequestSchema = z
   });
 
 app.post("/sign", async (c) => {
+  // WU-P1: authenticate first — an unknown, missing, or revoked-mandate key
+  // gets no validation details and never reaches the pipeline.
+  const preAuth = authenticateAgent(c);
+  if (!preAuth.ok) return c.json(preAuth.body, preAuth.status);
+
   const body = await c.req.json().catch(() => undefined);
   const parsed = signRequestSchema.safeParse(body);
   if (!parsed.success) {
     return c.json({ error: "invalid_sign_request", issues: parsed.error.issues }, 400);
   }
-  const { intentId, paymentRequiredHeader, resourceUrl, context } = parsed.data;
+  const { paymentRequiredHeader, resourceUrl, context } = parsed.data;
+
+  const auth = authenticateAgent(c, parsed.data.intentId);
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  const intentId = auth.mandate.id;
 
   let paymentRequired: PaymentRequired;
   try {
@@ -317,9 +367,23 @@ app.post("/receipts/:id/settlement", async (c) => {
   return c.json(updated);
 });
 
-// --- GET /approvals/:receiptId (WU11) -----------------------------------------
+// --- GET /approvals/:receiptId (WU11, WU-P1 auth) -----------------------------
 
 app.get("/approvals/:receiptId", (c) => {
+  // The dashboard (WU10/WU13) also polls this route to show live approval
+  // status for any receipt — as a local admin, not as the agent that owns
+  // the mandate — so it authenticates the same way it already does for
+  // pause/resume/revoke (`isLocalAdminRequest`) instead of a Bearer token.
+  // Every other caller (the agent itself) needs the mandate's own key.
+  if (!isLocalAdminRequest(c)) {
+    const auth = authenticateAgent(c);
+    if (!auth.ok) return c.json(auth.body, auth.status);
+    const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
+    if (!approval) return c.json({ error: "approval_not_found" }, 404);
+    if (approval.intentId !== auth.mandate.id) return c.json({ error: "forbidden" }, 403);
+    return c.json(approvalStatusResponse(approval));
+  }
+
   const approval = getPendingApprovalByReceiptId(c.req.param("receiptId"));
   if (!approval) return c.json({ error: "approval_not_found" }, 404);
   return c.json(approvalStatusResponse(approval));

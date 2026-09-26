@@ -73,13 +73,16 @@ async function main(): Promise<void> {
     headers: { "content-type": "application/json" },
     body: stringifyWithBigint({ message, signature, signer: account.address }),
   });
-  const body = (await res.json()) as { id?: string; remainingBudget?: string; error?: string };
-  if (res.status !== 201 || !body.id) {
+  const body = (await res.json()) as { id?: string; remainingBudget?: string; agentKey?: string; error?: string };
+  if (res.status !== 201 || !body.id || !body.agentKey) {
     console.error(`[dev-intent] POST /intents failed: ${res.status}`, body);
     process.exit(1);
   }
   console.log(`\n[dev-intent] intent id: ${body.id}`);
   console.log(`[dev-intent] remaining budget: ${body.remainingBudget}`);
+  console.log(`[dev-intent] agent key (shown once — store it in your agent's config): ${body.agentKey}`);
+  console.log("\n[dev-intent] run the agent against this intent:");
+  console.log(`  bun run agent -- --intent ${body.id} --key ${body.agentKey} "${task}"`);
 }
 
 main().catch((err) => {
