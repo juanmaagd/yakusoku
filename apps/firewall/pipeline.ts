@@ -254,7 +254,12 @@ async function runSignPipelineInner(req: SignRequest, paymentIdentifier: string)
   }
 
   const idempotencyStart = Date.now();
-  const cached = getCachedSignOutcome(paymentIdentifier);
+  const storedOutcome = getCachedSignOutcome(paymentIdentifier);
+  // Funding refusals are no longer cached (runStagesAndSign); ignore any
+  // cached before that change so the request is re-evaluated fresh.
+  const staleFundingRefusal =
+    storedOutcome?.verdict === "refuse" && storedOutcome.reason.startsWith(`${fundingStage.name}:`);
+  const cached = staleFundingRefusal ? undefined : storedOutcome;
   timeline.push({ stage: "idempotency", outcome: cached ? "hit" : "pass", ms: Date.now() - idempotencyStart });
   if (cached) {
     return finalize({
@@ -426,7 +431,11 @@ async function runStagesAndSign(
       state: transition("initial", evaluation.outcome.state),
       verdict: "refuse",
       reason: `${evaluation.outcome.stageName}: ${evaluation.outcome.reason}`,
-      cache: true,
+      // A funding refusal reflects mutable account state the owner can fix
+      // (setup, deposit, unpause, register a recipient) — same reasoning as
+      // the kill switch above: never freeze it as refused forever under this
+      // paymentIdentifier; re-evaluate the exact same request fresh next time.
+      cache: evaluation.outcome.stageName !== fundingStage.name,
     });
   }
 
