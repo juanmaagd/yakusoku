@@ -42,6 +42,17 @@
 // sandbox call for its connect+promise), S38 points `resourceUrl` at an
 // unreachable port (refuse merchant_unreachable). None settle, same as
 // every other scenario in this file.
+//
+// Track C adds S39-S43 (account setup + single-approval promise). The
+// isolated firewall now also runs with `OMAMORISAN_ACCOUNT_DEPLOYER=stub`
+// (never on the live :4001 firewall) so S39-S42 deploy real
+// `OmamorisanAccount`s WITHOUT spending gas — S39 (setup-link auth),
+// S40 (needs_owner -> deployed happy path), S41 (wrong signature -> 401,
+// nothing deployed), S42 (idempotent redeploy, garbage signature). S43
+// exercises P9.6's `POST /promises/first` (one dev-approved World ID gate
+// creates an account AND activates its first promise together) — no
+// additional real World ID sandbox calls beyond the one device-authorization
+// call every promise/connect gate already makes.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -409,6 +420,127 @@ async function activePromiseViaDevSeam(
   const detail = await getPromiseRequest(created.json.promiseId, accountKey);
   if (detail.json.status !== "active") throw new Error(`promise did not become active: ${JSON.stringify(detail.json)}`);
   return created.json.promiseId;
+}
+
+// --- P11.3a: account setup-link helpers ---------------------------------------
+
+interface SetupLinkResponse {
+  setupUrl?: string;
+  token?: string;
+  expiresAt?: string;
+  error?: string;
+}
+
+async function startSetupLinkRequest(accountKey?: string): Promise<{ status: number; json: SetupLinkResponse }> {
+  const headers: Record<string, string> = {};
+  if (accountKey) headers.authorization = `Bearer ${accountKey}`;
+  const res = await fetch(`${FIREWALL_URL}/accounts/setup-link`, { method: "POST", headers });
+  const json = (await res.json().catch(() => ({}))) as SetupLinkResponse;
+  return { status: res.status, json };
+}
+
+interface SetupStatusResponse {
+  status?: string;
+  accountId?: string;
+  message?: string;
+  smartAccount?: string;
+  owner?: string;
+  /** Decimal USDC strings (site contract), e.g. "25"/"0.5" — never atomic units. */
+  balanceUsdc?: string;
+  perPaymentLimitUsdc?: string;
+  recipients?: { address: string; label: string }[];
+  error?: string;
+}
+
+async function getSetupStatusRequest(token: string): Promise<{ status: number; json: SetupStatusResponse }> {
+  const res = await fetch(`${FIREWALL_URL}/setup/${token}`);
+  const json = (await res.json().catch(() => ({}))) as SetupStatusResponse;
+  return { status: res.status, json };
+}
+
+interface SetupOwnerResponse {
+  status?: string;
+  smartAccount?: string;
+  owner?: string;
+  txHash?: string;
+  error?: string;
+}
+
+async function postSetupOwnerRequest(token: string, owner: string, signature: string): Promise<{ status: number; json: SetupOwnerResponse }> {
+  const res = await fetch(`${FIREWALL_URL}/setup/${token}/owner`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ owner, signature }),
+  });
+  const json = (await res.json().catch(() => ({}))) as SetupOwnerResponse;
+  return { status: res.status, json };
+}
+
+/** Fills the `{owner}` placeholder in a `GET /setup/:token` message and signs
+ * it with `owner` — the exact client-side step the site (out of scope here)
+ * performs. */
+async function signSetupMessage(message: string, owner: ReturnType<typeof privateKeyToAccount>): Promise<`0x${string}`> {
+  return owner.signMessage({ message: message.replace("{owner}", owner.address) });
+}
+
+// --- P9.6: single-approval account+promise helpers ----------------------------
+
+interface FirstPromiseStartResponse {
+  promiseId?: string;
+  pollSecret?: string;
+  verificationUri?: string;
+  userCode?: string;
+  expiresAt?: string;
+  summary?: string;
+  error?: string;
+}
+
+async function startFirstPromiseRequest(body: {
+  task: string;
+  budgetUsdc: number;
+  categories: string[];
+  expiresInSeconds: number;
+  merchant: string;
+}): Promise<{ status: number; json: FirstPromiseStartResponse }> {
+  const res = await fetch(`${FIREWALL_URL}/promises/first`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => ({}))) as FirstPromiseStartResponse;
+  return { status: res.status, json };
+}
+
+interface FirstPromisePollResponse {
+  status?: string;
+  accountId?: string;
+  promiseId?: string;
+  summary?: string;
+  remainingBudget?: string;
+  accountKey?: string;
+  reason?: string;
+  error?: string;
+}
+
+async function pollFirstPromiseRequest(id: string, pollSecret: string): Promise<{ status: number; json: FirstPromisePollResponse }> {
+  const res = await fetch(`${FIREWALL_URL}/promises/first/${id}/poll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pollSecret }),
+  });
+  const json = (await res.json().catch(() => ({}))) as FirstPromisePollResponse;
+  return { status: res.status, json };
+}
+
+/** Dev-only fabricated approval for the combined gate — same bar as
+ * `devApprove` above, different (nested) path. */
+async function devApproveFirstPromiseRequest(id: string, subject: string): Promise<{ status: number }> {
+  const res = await fetch(`${FIREWALL_URL}/dev/promises/first/${id}/approve`, {
+    method: "POST",
+    headers: { ...ADMIN_HEADERS, "content-type": "application/json" },
+    body: JSON.stringify({ subject }),
+  });
+  return { status: res.status };
 }
 
 /** Collects `event:`/`data:` frames from an SSE endpoint for `windowMs`, then
@@ -1706,6 +1838,192 @@ async function runS38(): Promise<void> {
   }
 }
 
+/** S39 — P11.3a: `POST /accounts/setup-link` requires an account key (no
+ * Bearer -> 401); a real one mints a link whose URL embeds the same token
+ * the JSON body returns. */
+async function runS39(): Promise<void> {
+  const id = "S39";
+  const description = "P11.3a: POST /accounts/setup-link — no key 401, real key 201 with a matching setupUrl";
+  const expected = "401, 201";
+  try {
+    const noKey = await startSetupLinkRequest();
+
+    const { accountKey } = await connectAccountViaDevSeam(`world-id-subject-s39-${crypto.randomUUID()}`);
+    const withKey = await startSetupLinkRequest(accountKey);
+
+    const pass =
+      noKey.status === 401 &&
+      withKey.status === 201 &&
+      typeof withKey.json.setupUrl === "string" &&
+      typeof withKey.json.token === "string" &&
+      withKey.json.setupUrl.includes(withKey.json.token!);
+    record(id, description, expected, `no-key=${noKey.status} with-key=${withKey.status}`, pass, JSON.stringify(withKey.json));
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S40 — P11.3a: the full happy path against the STUB deployer (no gas): link
+ * -> `GET /setup/:token` reports `needs_owner` with the `{owner}` placeholder
+ * -> the owner signs the filled message with a throwaway EOA -> `POST
+ * /setup/:token/owner` deploys -> re-reading the same link now reports
+ * `deployed` with the SAME smartAccount. */
+async function runS40(): Promise<void> {
+  const id = "S40";
+  const description = "P11.3a: setup happy path (stub deployer) — needs_owner -> deployed, GET reflects it";
+  const expected = "needs_owner then deployed, same smartAccount both times";
+  try {
+    const { accountKey } = await connectAccountViaDevSeam(`world-id-subject-s40-${crypto.randomUUID()}`);
+    const link = await startSetupLinkRequest(accountKey);
+    if (link.status !== 201 || !link.json.token) throw new Error(`POST /accounts/setup-link failed: ${link.status}`);
+
+    const before = await getSetupStatusRequest(link.json.token);
+    if (before.status !== 200 || before.json.status !== "needs_owner" || !before.json.message?.includes("{owner}")) {
+      throw new Error(`S40: expected needs_owner with a {owner} placeholder, got ${before.status} ${JSON.stringify(before.json)}`);
+    }
+
+    const owner = privateKeyToAccount(generatePrivateKey());
+    const signature = await signSetupMessage(before.json.message, owner);
+    const deployRes = await postSetupOwnerRequest(link.json.token, owner.address, signature);
+
+    const after = await getSetupStatusRequest(link.json.token);
+
+    const pass =
+      deployRes.status === 200 &&
+      deployRes.json.status === "deployed" &&
+      typeof deployRes.json.smartAccount === "string" &&
+      deployRes.json.owner?.toLowerCase() === owner.address.toLowerCase() &&
+      after.status === 200 &&
+      after.json.status === "deployed" &&
+      after.json.smartAccount === deployRes.json.smartAccount;
+    record(
+      id,
+      description,
+      expected,
+      `deploy=${deployRes.status}/${deployRes.json.status} reread=${after.status}/${after.json.status}`,
+      pass,
+      JSON.stringify({ deployRes: deployRes.json, after: after.json }),
+    );
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S41 — P11.3a: a signature that doesn't recover to the claimed `owner`
+ * refuses fail-closed (401 `invalid_signature`) and deploys nothing. */
+async function runS41(): Promise<void> {
+  const id = "S41";
+  const description = "P11.3a: POST /setup/:token/owner with a wrong signature -> 401, nothing deployed";
+  const expected = "401 invalid_signature";
+  try {
+    const { accountKey } = await connectAccountViaDevSeam(`world-id-subject-s41-${crypto.randomUUID()}`);
+    const link = await startSetupLinkRequest(accountKey);
+    if (link.status !== 201 || !link.json.token) throw new Error(`POST /accounts/setup-link failed: ${link.status}`);
+    const status = await getSetupStatusRequest(link.json.token);
+    if (status.status !== 200 || !status.json.message) throw new Error(`GET /setup/:token failed: ${status.status}`);
+
+    const owner = privateKeyToAccount(generatePrivateKey());
+    const impostor = privateKeyToAccount(generatePrivateKey());
+    // Signed by a DIFFERENT wallet than the one claimed as `owner`.
+    const wrongSignature = await signSetupMessage(status.json.message, impostor);
+
+    const res = await postSetupOwnerRequest(link.json.token, owner.address, wrongSignature);
+    const stillNeedsOwner = await getSetupStatusRequest(link.json.token);
+
+    const pass = res.status === 401 && res.json.error === "invalid_signature" && stillNeedsOwner.json.status === "needs_owner";
+    record(id, description, expected, `${res.status}/${res.json.error}`, pass, JSON.stringify(res.json));
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S42 — P11.3a: redeploying an already-deployed account is idempotent — a
+ * second `POST /setup/:token/owner`, even with a garbage signature, returns
+ * the SAME record and never sends a second transaction (the stub deployer
+ * would still just re-predict the same deterministic address either way, but
+ * the point is the route never re-checks the signature once deployed). */
+async function runS42(): Promise<void> {
+  const id = "S42";
+  const description = "P11.3a: idempotent redeploy — second POST (garbage signature) returns the same record";
+  const expected = "200 deployed, same smartAccount both times";
+  try {
+    const { accountKey } = await connectAccountViaDevSeam(`world-id-subject-s42-${crypto.randomUUID()}`);
+    const link = await startSetupLinkRequest(accountKey);
+    if (link.status !== 201 || !link.json.token) throw new Error(`POST /accounts/setup-link failed: ${link.status}`);
+    const status = await getSetupStatusRequest(link.json.token);
+    if (status.status !== 200 || !status.json.message) throw new Error(`GET /setup/:token failed: ${status.status}`);
+
+    const owner = privateKeyToAccount(generatePrivateKey());
+    const signature = await signSetupMessage(status.json.message, owner);
+    const first = await postSetupOwnerRequest(link.json.token, owner.address, signature);
+    if (first.status !== 200 || first.json.status !== "deployed") {
+      throw new Error(`S42: first deploy failed: ${first.status} ${JSON.stringify(first.json)}`);
+    }
+
+    const second = await postSetupOwnerRequest(link.json.token, owner.address, "0xdeadbeef");
+
+    const pass = second.status === 200 && second.json.status === "deployed" && second.json.smartAccount === first.json.smartAccount;
+    record(id, description, expected, `first=${first.status}/${first.json.status} second=${second.status}/${second.json.status}`, pass);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S43 — P9.6: `POST /promises/first` collapses connect+request_promise into
+ * ONE World ID approval. Dev-approving it activates a real promise AND
+ * delivers a fresh account key in the same poll response; that key then
+ * authenticates `GET /account`/`GET /promises/:id` exactly like an ordinary
+ * connected account would. */
+async function runS43(): Promise<void> {
+  const id = "S43";
+  const description = "P9.6: POST /promises/first — single dev approval creates account + active promise";
+  const expected = "pending then active, account key delivered once";
+  try {
+    const start = await startFirstPromiseRequest({
+      task: "Buy a $1 Amazon gift card (rehearsal) — S43",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+      merchant: STORE_URL,
+    });
+    if (start.status !== 201 || !start.json.promiseId || !start.json.pollSecret) {
+      throw new Error(`POST /promises/first failed: ${start.status} ${JSON.stringify(start.json)}`);
+    }
+
+    const beforeApprove = await pollFirstPromiseRequest(start.json.promiseId, start.json.pollSecret);
+    const approve = await devApproveFirstPromiseRequest(start.json.promiseId, `world-id-subject-s43-${crypto.randomUUID()}`);
+    if (approve.status !== 200) throw new Error(`dev-approve first-promise failed: ${approve.status}`);
+
+    const afterApprove = await pollFirstPromiseRequest(start.json.promiseId, start.json.pollSecret);
+    const secondPoll = await pollFirstPromiseRequest(start.json.promiseId, start.json.pollSecret);
+
+    let accountCheckOk = false;
+    if (afterApprove.json.accountKey) {
+      const account = await fetch(`${FIREWALL_URL}/account`, { headers: { authorization: `Bearer ${afterApprove.json.accountKey}` } });
+      const accountJson = (await account.json()) as { promises?: { id: string }[] };
+      accountCheckOk = account.status === 200 && (accountJson.promises ?? []).some((p) => p.id === start.json.promiseId);
+    }
+
+    const pass =
+      beforeApprove.json.status === "pending" &&
+      afterApprove.json.status === "active" &&
+      typeof afterApprove.json.accountKey === "string" &&
+      secondPoll.json.status === "active" &&
+      secondPoll.json.accountKey === undefined && // delivered exactly once
+      accountCheckOk;
+    record(
+      id,
+      description,
+      expected,
+      `before=${beforeApprove.json.status} after=${afterApprove.json.status} second=${secondPoll.json.status} accountCheck=${accountCheckOk}`,
+      pass,
+      JSON.stringify({ afterApprove: afterApprove.json, secondPoll: secondPoll.json }),
+    );
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
 // --- Process orchestration ---------------------------------------------------
 
 async function waitForHttp(url: string, timeoutMs = 20_000): Promise<void> {
@@ -1766,10 +2084,14 @@ async function main(): Promise<void> {
     WORLD_ID_APPROVAL_TIMEOUT_S: "10",
     // P9.1/P9.2: this isolated, temp-data-dir firewall is the ONLY place the
     // dev approval seam is ever enabled — never on the live :4001 firewall
-    // (index.ts logs a loud boot warning either way). S30-S35 below use it
-    // to exercise the paid path behind a connected account/promise without a
-    // real phone.
+    // (index.ts logs a loud boot warning either way). S30-S35, S43 below use
+    // it to exercise the paid/account-setup path behind a connected
+    // account/promise without a real phone.
     OMAMORISAN_DEV_APPROVALS: "1",
+    // P11.3a: S39-S42 deploy real `OmamorisanAccount`s through the stub
+    // deployer — no gas, no real Base Sepolia transaction.
+    OMAMORISAN_ACCOUNT_DEPLOYER: "stub",
+    OMAMORISAN_DEFAULT_RECIPIENTS: JSON.stringify([{ address: "0x000000000000000000000000000000000000dEaD", label: "Scenario recipient" }]),
   });
 
   let exitCode = 0;
@@ -1816,6 +2138,11 @@ async function main(): Promise<void> {
     await runS36();
     await runS37();
     await runS38();
+    await runS39();
+    await runS40();
+    await runS41();
+    await runS42();
+    await runS43();
 
     printTable();
     exitCode = results.every((r) => r.pass) ? 0 : 1;
