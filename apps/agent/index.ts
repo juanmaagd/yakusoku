@@ -334,7 +334,7 @@ function buildTools(intentId: string, agentKey: string, userRequest: string, com
         try {
           const settlementRes = await fetch(`${FIREWALL_URL}/receipts/${receiptId}/settlement`, {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: { "content-type": "application/json", authorization: `Bearer ${agentKey}` },
             body: JSON.stringify({ txHash }),
           });
           if (!settlementRes.ok) {

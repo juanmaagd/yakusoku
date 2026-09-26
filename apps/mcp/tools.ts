@@ -94,7 +94,7 @@ async function completePayment(
     try {
       await fetch(`${firewallUrl}/receipts/${receiptId}/settlement`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: `Bearer ${agentKey}` },
         body: JSON.stringify({ txHash }),
       });
     } catch {
