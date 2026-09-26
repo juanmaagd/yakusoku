@@ -213,7 +213,7 @@ Already-defaulted network constants:
 - `STORE_URL`
 - `FIREWALL_URL`
 
-`apps/site` reads its own `PUBLIC_FIREWALL_URL` and defaults to `http://localhost:4001` when unset. Astro only exposes `PUBLIC_`-prefixed vars to the browser.
+`apps/site` reads its own `PUBLIC_FIREWALL_URL` and defaults to `http://localhost:4001` when unset. Astro only exposes `PUBLIC_`-prefixed vars to the browser. It also reads `PUBLIC_MCP_URL` (default `http://localhost:4010/mcp`) for the landing's "Set up with Claude" prompt and connection details.
 
 ```
 bun install

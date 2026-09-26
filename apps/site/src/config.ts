@@ -59,6 +59,15 @@ export function mcpStdioConfigSnippet(agentKey: string): string {
   );
 }
 
+/** The landing's "Set up with Claude" section (`SetupClaude.astro`, right
+ * after Developers): plain text with backtick-quoted tool/identifier names,
+ * copied verbatim and also parsed for inline `<code>` styling — one string,
+ * two uses. Interpolates `SITE.mcpUrl` so a deployed build always points at
+ * its own MCP server. */
+export function claudeSetupPrompt(): string {
+  return `Set up ${SITE.name} so you can buy things for me safely. Add the ${SITE.name} MCP server (name \`omamorisan\`, Streamable HTTP transport, URL \`${SITE.mcpUrl}\`), then let me know when you're ready to reload MCP servers. Once it's connected, call \`connect\` and show me the World ID link and code so I can approve on my phone. From then on, whenever I ask you to buy something: call \`request_promise\` first with exactly what I asked for, a budget, and an expiry, wait for my approval, then pay only through \`pay_x402\`. Never retry a refused payment with different wording.`;
+}
+
 export function basescanTx(hash: string): string {
   return `https://sepolia.basescan.org/tx/${hash}`;
 }

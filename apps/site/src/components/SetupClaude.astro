@@ -1,0 +1,51 @@
+---
+import SetupClaudeCard from "./SetupClaudeCard";
+
+// Order carries meaning: connect happens once, before any promise; a promise
+// is approved per task; a doubt approval is the exception, not the rule.
+const MOMENTS = [
+  {
+    dt: "Connect",
+    headline: "Once, up front",
+    body: "Approve the MCP connection in World App the first time Claude asks.",
+  },
+  {
+    dt: "Promise",
+    headline: "Every new task",
+    body: "A budget and an expiry, approved before Claude can spend against it.",
+  },
+  {
+    dt: "Doubt",
+    headline: "Only if something's off",
+    body: "The firewall pauses and asks you directly before it ever signs.",
+  },
+] as const;
+---
+
+<section id="setup-claude" class="band" aria-labelledby="setup-heading">
+  <h2 id="setup-heading" class="headline text-[36px] leading-[1.06] tracking-[-0.02em] text-ink md:text-heading-lg">
+    Set up with <strong>Claude.</strong>
+  </h2>
+  <p class="mt-6 max-w-[54ch] text-body-lg text-graphite">
+    One prompt wires up the connection. After that, Claude can only spend through a promise you approved yourself —
+    every human moment happens on your phone with World ID.
+  </p>
+
+  <dl class="mt-10 grid grid-cols-1 border-y border-hairline sm:grid-cols-3">
+    {
+      MOMENTS.map((moment) => (
+        <div class="border-hairline py-5 sm:px-6 sm:first:pl-0 sm:last:pr-0 max-sm:[&:not(:first-child)]:border-t sm:[&:not(:first-child)]:border-l">
+          <dt class="label text-graphite">{moment.dt}</dt>
+          <dd class="mt-2 text-heading-sm text-ink">{moment.headline}</dd>
+          <dd class="mt-1.5 text-body-sm text-graphite">{moment.body}</dd>
+        </div>
+      ))
+    }
+  </dl>
+
+  <SetupClaudeCard client:visible />
+
+  <p class="mt-6 text-caption text-stone">
+    Testnet demo on Base Sepolia with test USDC. Approvals happen in the real World App.
+  </p>
+</section>
