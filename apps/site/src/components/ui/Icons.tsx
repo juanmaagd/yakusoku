@@ -107,10 +107,12 @@ export const IconClock = (p: IconProps) => (
 );
 
 /** Round status mark used by checklists: pass / fail / pending / skipped. */
-export function StatusMark({ kind }: { kind: "pass" | "fail" | "wait" | "skip" | "todo" }) {
+export function StatusMark({ kind }: { kind: "pass" | "verified" | "fail" | "wait" | "skip" | "todo" }) {
   const ring =
     kind === "pass"
       ? "border-ink bg-ink text-surface"
+      : kind === "verified"
+        ? "border-verified bg-verified text-surface"
       : kind === "fail"
         ? "border-refuse bg-refuse text-surface"
         : kind === "wait"
@@ -118,7 +120,7 @@ export function StatusMark({ kind }: { kind: "pass" | "fail" | "wait" | "skip" |
           : "border-hairline-strong bg-surface text-stone";
   return (
     <span className={`inline-flex size-5 shrink-0 items-center justify-center rounded-full border ${ring}`}>
-      {kind === "pass" && <IconCheck size={12} strokeWidth={2} />}
+      {(kind === "pass" || kind === "verified") && <IconCheck size={12} strokeWidth={2} />}
       {kind === "fail" && <IconCross size={12} strokeWidth={2} />}
       {kind === "wait" && <IconClock size={12} />}
       {kind === "skip" && <IconMinus size={12} />}

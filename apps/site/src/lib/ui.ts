@@ -34,22 +34,3 @@ export function chipClass(selected: boolean): string {
     selected ? "border-ink bg-ink text-surface" : "border-hairline-strong bg-surface text-ink hover:border-ink"
   }`;
 }
-
-/** State pill tint per `LaneStatus` (lib/receiptView.ts): color only ever
- * means a firewall state. */
-const badgeBase = "label inline-flex items-center gap-1.5 rounded-sm px-2 py-[3px]";
-
-export function laneBadgeClass(status: "paid" | "blocked" | "waiting" | "expired" | "paused"): string {
-  switch (status) {
-    case "paid":
-      return `${badgeBase} bg-verified-wash text-verified`;
-    case "blocked":
-      return `${badgeBase} bg-refuse-wash text-refuse-ink`;
-    case "waiting":
-      return `${badgeBase} bg-ask-wash text-ask-ink`;
-    case "expired":
-      return `${badgeBase} bg-fog text-graphite`;
-    case "paused":
-      return `${badgeBase} border border-hairline-strong text-graphite`;
-  }
-}

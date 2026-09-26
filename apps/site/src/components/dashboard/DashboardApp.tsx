@@ -6,51 +6,54 @@ import {
   listMandates,
   listReceipts,
   ownerEventsUrl,
-  revokeMandate,
   UnauthorizedError,
   type ApprovalStatus,
-  type OwnerControlState,
   type SerializedMandate,
 } from "../../lib/api";
-import { connectSseWithRetry } from "../../lib/sse";
-import { primaryButton } from "../../lib/ui";
-import { useWalletSession, type WalletSessionStage } from "../../lib/useWalletSession";
-import ApprovalCard from "./ApprovalCard";
-import AppShell from "../ui/AppShell";
-import MandateFilterList from "./MandateFilterList";
-import ReceiptDetailPanel from "./ReceiptDetailPanel";
-import Timeline from "./Timeline";
+import { connectSseWithRetry, type SseConnectionStatus } from "../../lib/sse";
+import { inputBase, primaryButton } from "../../lib/ui";
+import { useWalletSession } from "../../lib/useWalletSession";
+import SignInGate from "../app/SignInGate";
+import AppShell, { useOwnerControl } from "../ui/AppShell";
+import CodePanel from "../ui/CodePanel";
+import EmptyState from "../ui/EmptyState";
+import { IconChevronDown, IconCross, IconPlay, IconPlus } from "../ui/Icons";
+import InlineError from "../ui/InlineError";
+import Skeleton from "../ui/Skeleton";
+import ApprovalBanner, { ApprovalResolved, type ApprovalOutcome } from "./ApprovalBanner";
+import DecisionDetail from "./DecisionDetail";
+import DecisionFeed from "./DecisionFeed";
 
-// --- Live state, kept current by GET /receipts + GET /intents (once) then
-// SSE (forever) -------------------------------------------------------------
+// --- Live state: GET /receipts + GET /intents once, then SSE forever -------
 
-interface DashboardState {
+interface LiveState {
   receipts: Map<string, DecisionReceipt>;
   mandates: Map<string, SerializedMandate>;
   approvals: Map<string, ApprovalStatus>;
-  control: OwnerControlState;
+  fresh: Set<string>;
 }
 
-type DashboardAction =
-  | { type: "receipts"; receipts: DecisionReceipt[] }
+type LiveAction =
+  | { type: "receipts"; receipts: DecisionReceipt[]; live?: boolean }
   | { type: "mandates"; mandates: SerializedMandate[] }
-  | { type: "control"; control: OwnerControlState }
   | { type: "approval"; receiptId: string; approval: ApprovalStatus };
 
-function reducer(state: DashboardState, action: DashboardAction): DashboardState {
+function reducer(state: LiveState, action: LiveAction): LiveState {
   switch (action.type) {
     case "receipts": {
       const receipts = new Map(state.receipts);
-      for (const r of action.receipts) receipts.set(r.receiptId, r);
-      return { ...state, receipts };
+      let fresh = state.fresh;
+      for (const r of action.receipts) {
+        if (action.live && !receipts.has(r.receiptId)) fresh = new Set(fresh).add(r.receiptId);
+        receipts.set(r.receiptId, r);
+      }
+      return { ...state, receipts, fresh };
     }
     case "mandates": {
       const mandates = new Map(state.mandates);
       for (const m of action.mandates) mandates.set(m.id, m);
       return { ...state, mandates };
     }
-    case "control":
-      return { ...state, control: action.control };
     case "approval": {
       const approvals = new Map(state.approvals);
       approvals.set(action.receiptId, action.approval);
@@ -59,73 +62,48 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
   }
 }
 
-const initialState: DashboardState = { receipts: new Map(), mandates: new Map(), approvals: new Map(), control: { paused: false } };
+const initialState: LiveState = { receipts: new Map(), mandates: new Map(), approvals: new Map(), fresh: new Set() };
 
-/** `/app/dashboard`'s React island (P6). Gates on the same wallet+SIWE
- * session `/app` uses (`useWalletSession`); once signed in, loads the
- * owner's mandates/receipts/control once and keeps them live over SSE. */
+/** `/app/dashboard`'s React island (S4 Live): gated on the same wallet+SIWE
+ * session as `/app`, then the owner's decisions kept live over SSE. */
 export default function DashboardApp() {
   const session = useWalletSession();
-
-  const [liveStatus, setLiveStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const [liveStatus, setLiveStatus] = useState<SseConnectionStatus>("connecting");
 
   return (
     <AppShell active="live" session={session} liveStatus={liveStatus}>
-      {session.stage.kind !== "signed-in" ? (
-        <AuthRequired stage={session.stage} />
+      {session.stage.kind === "signed-in" ? (
+        <LiveView key={session.stage.sessionToken} sessionToken={session.stage.sessionToken} onUnauthorized={session.handleUnauthorized} onLiveStatus={setLiveStatus} />
       ) : (
-        <DashboardContent
-          key={session.stage.sessionToken}
-          sessionToken={session.stage.sessionToken}
-          onUnauthorized={session.handleUnauthorized}
-          onLiveStatus={setLiveStatus}
-        />
+        <SignInGate session={session} />
       )}
     </AppShell>
   );
 }
 
-function AuthRequired({ stage }: { stage: WalletSessionStage }) {
-  const detail: Record<WalletSessionStage["kind"], string> = {
-    checking: "Checking your wallet…",
-    "no-wallet": `${SITE.name} needs a browser wallet to identify you as a mandate owner.`,
-    connect: "Connect your wallet to see your live dashboard.",
-    "wrong-network": `Switch to ${SITE.network} to see your live dashboard.`,
-    "sign-in": "Sign in with your wallet to see your live dashboard.",
-    "signed-in": "",
-  };
-  return (
-    <div className="mx-auto mt-12 w-full max-w-[560px] rounded-card border border-black/[0.08] bg-surface p-8 text-center md:mt-20 md:p-10">
-      <h1 className="text-heading-sm font-semibold text-ink">Sign in to see your dashboard</h1>
-      <p className="mt-3 text-body text-graphite">{detail[stage.kind]}</p>
-      <a href={SITE.appRoute} className={`${primaryButton} mt-5 inline-flex`}>
-        Go to {SITE.appRoute}
-      </a>
-      <p className="mt-3 text-caption text-stone">Come back to this page after you sign in — your session carries over.</p>
-    </div>
-  );
-}
-
-interface DashboardContentProps {
+interface LiveViewProps {
   sessionToken: string;
   onUnauthorized: () => void;
-  onLiveStatus: (status: "connecting" | "connected" | "disconnected") => void;
+  onLiveStatus: (status: SseConnectionStatus) => void;
 }
 
-function DashboardContent({ sessionToken, onUnauthorized, onLiveStatus }: DashboardContentProps) {
+function initialPromiseFilter(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  return new URLSearchParams(window.location.search).get("promise") ?? undefined;
+}
+
+function LiveView({ sessionToken, onUnauthorized, onLiveStatus }: LiveViewProps) {
   const [state, dispatch] = useReducer(reducer, initialState);
-  const [loadError, setLoadError] = useState<string | undefined>();
-  const [connStatus, setConnStatusState] = useState<"connecting" | "connected" | "disconnected">("connecting");
-  const setConnStatus = useCallback(
-    (status: "connecting" | "connected" | "disconnected") => {
-      setConnStatusState(status);
-      onLiveStatus(status);
-    },
-    [onLiveStatus],
-  );
-  const [selectedMandateId, setSelectedMandateId] = useState<string | undefined>();
+  const [load, setLoad] = useState<{ kind: "loading" } | { kind: "loaded" } | { kind: "error"; message: string }>({ kind: "loading" });
+  const [reloadKey, setReloadKey] = useState(0);
+  const [connStatus, setConnStatus] = useState<SseConnectionStatus>("connecting");
+  const [selectedMandateId, setSelectedMandateId] = useState<string | undefined>(initialPromiseFilter);
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | undefined>();
+  const [resolved, setResolved] = useState<ApprovalOutcome | undefined>();
   const fetchedApprovalsRef = useRef(new Set<string>());
+  const pendingRef = useRef(new Set<string>());
+  const ownerControl = useOwnerControl();
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
 
   const handleUnauthorized = useCallback(
     (err: unknown) => {
@@ -153,143 +131,318 @@ function DashboardContent({ sessionToken, onUnauthorized, onLiveStatus }: Dashbo
     [sessionToken, handleUnauthorized],
   );
 
-  // --- Initial load -----------------------------------------------------
+  // --- Initial load ---------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
+    setLoad({ kind: "loading" });
     void (async () => {
       try {
         const [receipts, mandates] = await Promise.all([listReceipts(sessionToken), listMandates(sessionToken)]);
         if (cancelled) return;
         dispatch({ type: "receipts", receipts });
         dispatch({ type: "mandates", mandates });
+        setLoad({ kind: "loaded" });
         for (const r of receipts) if (r.state === "awaiting_world_id") void fetchApproval(r.receiptId);
       } catch (err) {
         if (cancelled) return;
-        if (!handleUnauthorized(err)) setLoadError(err instanceof Error ? err.message : "Could not load the dashboard.");
+        if (!handleUnauthorized(err)) setLoad({ kind: "error", message: err instanceof Error ? err.message : "Could not load your decisions." });
       }
     })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchApproval is stable per sessionToken
-  }, [sessionToken]);
+  }, [sessionToken, reloadKey]);
 
-  // --- Live updates (SSE) -------------------------------------------------
-  // A fetch-based stream, not the browser's native `EventSource` — see
-  // lib/sse.ts's file header for why.
+  // --- Live updates (fetch-stream SSE, never EventSource: see lib/sse.ts) ----
   useEffect(() => {
-    const disconnect = connectSseWithRetry(ownerEventsUrl(sessionToken), setConnStatus, (frame) => {
-      switch (frame.event) {
-        case "intent.created":
-        case "intent.revoked":
-          dispatch({ type: "mandates", mandates: [JSON.parse(frame.data) as SerializedMandate] });
-          break;
-        case "decision": {
-          const receipt = JSON.parse(frame.data) as DecisionReceipt;
-          dispatch({ type: "receipts", receipts: [receipt] });
-          if (receipt.state === "awaiting_world_id") void fetchApproval(receipt.receiptId);
-          break;
+    const disconnect = connectSseWithRetry(
+      ownerEventsUrl(sessionToken),
+      (status) => {
+        setConnStatus(status);
+        onLiveStatus(status);
+      },
+      (frame) => {
+        switch (frame.event) {
+          case "intent.created":
+          case "intent.revoked":
+            dispatch({ type: "mandates", mandates: [JSON.parse(frame.data) as SerializedMandate] });
+            break;
+          case "decision": {
+            const receipt = JSON.parse(frame.data) as DecisionReceipt;
+            dispatch({ type: "receipts", receipts: [receipt], live: true });
+            if (receipt.state === "awaiting_world_id") void fetchApproval(receipt.receiptId);
+            break;
+          }
+          case "settlement.reported":
+            dispatch({ type: "receipts", receipts: [JSON.parse(frame.data) as DecisionReceipt] });
+            break;
+          case "approval.requested": {
+            const data = JSON.parse(frame.data) as { receiptId: string };
+            fetchedApprovalsRef.current.delete(data.receiptId); // force a fresh fetch — it just started
+            void fetchApproval(data.receiptId);
+            break;
+          }
+          default:
+            break; // heartbeat; approval.resolved (a "decision" frame always follows it); control.changed (never on an owner stream)
         }
-        case "settlement.reported":
-          dispatch({ type: "receipts", receipts: [JSON.parse(frame.data) as DecisionReceipt] });
-          break;
-        case "approval.requested": {
-          const data = JSON.parse(frame.data) as { receiptId: string };
-          fetchedApprovalsRef.current.delete(data.receiptId); // force a fresh fetch — it just started
-          void fetchApproval(data.receiptId);
-          break;
-        }
-        default:
-          break; // heartbeat; approval.resolved (a "decision" frame always follows it); control.changed (never delivered on an owner-scoped stream)
-      }
-    });
+      },
+    );
     return disconnect;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchApproval is stable per sessionToken
   }, [sessionToken]);
 
   const mandates = useMemo(() => [...state.mandates.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [state.mandates]);
 
-  const receiptsForOwner = useMemo(() => {
-    const ownedIntentIds = new Set(mandates.map((m) => m.id));
-    return [...state.receipts.values()]
-      .filter((r) => ownedIntentIds.has(r.intentId))
-      .filter((r) => !selectedMandateId || r.intentId === selectedMandateId)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [state.receipts, mandates, selectedMandateId]);
+  const ownedReceipts = useMemo(() => {
+    const owned = new Set(mandates.map((m) => m.id));
+    return [...state.receipts.values()].filter((r) => owned.has(r.intentId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [state.receipts, mandates]);
 
-  const pendingApprovals = useMemo(() => receiptsForOwner.filter((r) => r.state === "awaiting_world_id"), [receiptsForOwner]);
+  const visibleReceipts = useMemo(
+    () => (selectedMandateId ? ownedReceipts.filter((r) => r.intentId === selectedMandateId) : ownedReceipts),
+    [ownedReceipts, selectedMandateId],
+  );
+
+  // Approvals interrupt regardless of the promise filter.
+  const pendingApprovals = useMemo(() => ownedReceipts.filter((r) => r.state === "awaiting_world_id"), [ownedReceipts]);
+
+  // When a banner resolves, say how for a few seconds.
+  useEffect(() => {
+    const now = new Set(pendingApprovals.map((r) => r.receiptId));
+    for (const id of pendingRef.current) {
+      if (now.has(id)) continue;
+      const r = state.receipts.get(id);
+      if (!r) continue;
+      const outcome: ApprovalOutcome =
+        r.verdict === "pay" ? "approved" : r.state === "world_id_expired" ? "expired" : r.state === "world_id_denied" && !r.worldId?.status?.match(/paused|revoked|error/) ? "denied" : "stopped";
+      setResolved(outcome);
+    }
+    pendingRef.current = now;
+  }, [pendingApprovals, state.receipts]);
+
+  useEffect(() => {
+    if (!resolved) return;
+    const timer = window.setTimeout(() => setResolved(undefined), 4000);
+    return () => window.clearTimeout(timer);
+  }, [resolved]);
+
+  function selectPromise(id: string | undefined) {
+    setSelectedMandateId(id);
+    setSelectedReceiptId(undefined);
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set("promise", id);
+    else url.searchParams.delete("promise");
+    window.history.replaceState(null, "", url);
+  }
 
   const selectedReceipt = selectedReceiptId ? state.receipts.get(selectedReceiptId) : undefined;
   const selectedMandate = selectedMandateId ? state.mandates.get(selectedMandateId) : undefined;
 
-  async function handleRevoke(id: string) {
-    try {
-      await revokeMandate(sessionToken, id);
-    } catch (err) {
-      handleUnauthorized(err);
-      throw err;
-    }
-  }
+  return (
+    <section>
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+        <div>
+          <h1 className="headline text-heading-sm md:text-heading">
+            <strong>Live</strong> decisions
+          </h1>
+          <div className="mt-2">
+            <ConnectionChip status={connStatus} />
+          </div>
+        </div>
+        {mandates.length > 0 && <PromiseFilter mandates={mandates} selectedId={selectedMandateId} onSelect={selectPromise} />}
+      </div>
 
-  const emptyState =
-    mandates.length === 0 ? (
-      <>
-        <p className="text-body text-graphite">No mandates yet — create one to give your agent something to spend against.</p>
-        <a href={SITE.appRoute} className={`${primaryButton} mt-3 inline-flex`}>
-          Create a mandate
-        </a>
-      </>
-    ) : selectedMandate ? (
-      <>
-        <p className="text-body text-graphite">No activity yet for &ldquo;{selectedMandate.message.task}&rdquo;.</p>
-        <p className="mx-auto mt-2 max-w-[440px] text-body-sm text-graphite">
-          Hand your agent the key you saved when you created this mandate:
-        </p>
-        <pre className="mx-auto mt-2 max-w-[440px] overflow-x-auto rounded-btn border border-black/[0.1] bg-canvas p-3 text-left text-caption text-charcoal">
-          <code>{agentCliCommand(selectedMandate.id, "<your-agent-key>")}</code>
-        </pre>
-      </>
-    ) : (
-      <p className="text-body text-graphite">
-        No activity yet — once your agent asks the firewall to sign something, it shows up here live.
-      </p>
-    );
+      <div className="mt-6 space-y-4">
+        {ownerControl?.control.paused && <PausedBanner onResume={ownerControl.resume} />}
+        {resolved && <ApprovalResolved outcome={resolved} />}
+        {pendingApprovals.map((r) => (
+          <ApprovalBanner key={r.receiptId} receipt={r} approval={state.approvals.get(r.receiptId)} />
+        ))}
+      </div>
+
+      <div className="mt-6">
+        {load.kind === "error" && <InlineError title="Couldn't load your decisions." detail={load.message} onRetry={() => setReloadKey((k) => k + 1)} />}
+
+        {load.kind === "loading" && (
+          <div aria-busy="true" aria-label="Loading your decisions" className="divide-y divide-hairline rounded-card border border-hairline">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="grid grid-cols-1 gap-3 px-4 py-4 sm:grid-cols-2">
+                <div>
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="mt-2 h-3 w-40" />
+                </div>
+                <div>
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="mt-2 h-3 w-48" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {load.kind === "loaded" && mandates.length === 0 && (
+          <div className="rounded-card border border-hairline">
+            <EmptyState art="/art/app/agent.webp" title="No promises yet" body="Your agent can only pay against a promise you signed. Sign one first.">
+              <a href={SITE.appRoute} className={primaryButton}>
+                <IconPlus size={14} />
+                New promise
+              </a>
+            </EmptyState>
+          </div>
+        )}
+
+        {load.kind === "loaded" && mandates.length > 0 && visibleReceipts.length === 0 && (
+          <div className="rounded-card border border-hairline">
+            <EmptyState
+              art="/art/app/agent.webp"
+              title="No payments yet."
+              body="When your agent asks the firewall to pay, every decision shows up here in real time."
+            >
+              <div className="w-full text-left">
+                <CodePanel title="Run the demo agent" code={agentCliCommand(selectedMandate?.id ?? "<promise-id>", "<your-agent-key>")} />
+              </div>
+            </EmptyState>
+          </div>
+        )}
+
+        {load.kind === "loaded" && visibleReceipts.length > 0 && (
+          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
+            <DecisionFeed receipts={visibleReceipts} selectedReceiptId={selectedReceiptId} freshIds={state.fresh} onSelect={setSelectedReceiptId} />
+            {isDesktop && (
+              <aside className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-card border border-hairline bg-surface p-5">
+                {selectedReceipt ? (
+                  <DecisionDetail key={selectedReceipt.receiptId} receipt={selectedReceipt} />
+                ) : (
+                  <p className="text-body-sm text-graphite">Select a decision to see what happened, step by step.</p>
+                )}
+              </aside>
+            )}
+          </div>
+        )}
+      </div>
+
+      {!isDesktop && selectedReceipt && <DetailSheet receipt={selectedReceipt} onClose={() => setSelectedReceiptId(undefined)} />}
+    </section>
+  );
+}
+
+function ConnectionChip({ status }: { status: SseConnectionStatus }) {
+  const view = {
+    connected: { dot: "bg-verified", text: "Live", tone: "text-ink" },
+    connecting: { dot: "bg-ask", text: "Connecting…", tone: "text-ask-ink" },
+    disconnected: { dot: "bg-ask", text: "Reconnecting…", tone: "text-ask-ink" },
+  }[status];
+  return (
+    <span role="status" className={`label inline-flex items-center gap-2 ${view.tone}`}>
+      <span className={`size-1.5 rounded-full ${view.dot} ${status === "connected" ? "" : "animate-pulse"}`} aria-hidden="true" />
+      {view.text}
+    </span>
+  );
+}
+
+function PromiseFilter({
+  mandates,
+  selectedId,
+  onSelect,
+}: {
+  mandates: SerializedMandate[];
+  selectedId: string | undefined;
+  onSelect: (id: string | undefined) => void;
+}) {
+  return (
+    <label className="flex w-full flex-col gap-1.5 sm:w-auto">
+      <span className="text-caption text-graphite">Showing</span>
+      <span className="relative">
+        <select
+          value={selectedId ?? ""}
+          onChange={(e) => onSelect(e.target.value || undefined)}
+          className={`${inputBase} appearance-none py-2 pr-9 text-body-sm sm:w-[320px]`}
+        >
+          <option value="">All promises</option>
+          {mandates.map((m) => (
+            <option key={m.id} value={m.id}>
+              {truncate(m.message.task, 56)}
+              {m.revoked ? " (revoked)" : ""}
+            </option>
+          ))}
+        </select>
+        <IconChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-graphite" />
+      </span>
+    </label>
+  );
+}
+
+function PausedBanner({ onResume }: { onResume: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <section className="flex flex-col gap-4 rounded-card border border-ink p-5 md:flex-row md:items-center">
+      <img src="/art/app/pause.webp" alt="" width={1024} height={1024} decoding="async" className="hidden size-20 shrink-0 md:block" />
+      <div className="min-w-0 flex-1">
+        <h2 className="text-subheading font-medium text-ink">All your agents are paused.</h2>
+        <p className="mt-1 text-body-sm text-graphite">The firewall refuses to sign for any of your promises until you resume.</p>
+      </div>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await onResume();
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className={`${primaryButton} self-start md:self-auto`}
+      >
+        <IconPlay size={14} />
+        {busy ? "Resuming…" : "Resume"}
+      </button>
+    </section>
+  );
+}
+
+function DetailSheet({ receipt, onClose }: { receipt: DecisionReceipt; onClose: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = overflow;
+    };
+  }, [onClose]);
 
   return (
-    <div className="mx-auto w-full max-w-[1200px] space-y-5">
-
-      {connStatus !== "connected" && (
-        <p className="rounded-btn border border-saffron/40 bg-saffron/10 px-3 py-2 text-body-sm text-saffron">
-          {connStatus === "connecting" ? "Connecting to live updates…" : "Lost the live connection — reconnecting…"}
-        </p>
-      )}
-      {loadError && <p className="rounded-btn border border-vermillion/40 bg-vermillion/10 px-3 py-2 text-body-sm text-vermillion">{loadError}</p>}
-
-      <MandateFilterList mandates={mandates} selectedId={selectedMandateId} onSelect={setSelectedMandateId} onRevoke={handleRevoke} />
-
-      {pendingApprovals.map((r) => (
-        <ApprovalCard
-          key={r.receiptId}
-          data={{
-            receiptId: r.receiptId,
-            verificationUri: state.approvals.get(r.receiptId)?.verificationUri,
-            userCode: state.approvals.get(r.receiptId)?.userCode,
-            expiresAt: state.approvals.get(r.receiptId)?.expiresAt,
-            summary: r.task,
-          }}
-        />
-      ))}
-
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <Timeline receipts={receiptsForOwner} selectedReceiptId={selectedReceiptId} onSelect={setSelectedReceiptId} emptyState={emptyState} />
-        <aside className="rounded-card border border-black/[0.08] bg-surface p-5 lg:sticky lg:top-5">
-          {selectedReceipt ? (
-            <ReceiptDetailPanel receipt={selectedReceipt} approval={state.approvals.get(selectedReceipt.receiptId)} />
-          ) : (
-            <p className="text-body-sm text-stone">Select a row to see the decision detail.</p>
-          )}
-        </aside>
+    <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-modal="true" aria-label="Decision detail">
+      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-ink/40" />
+      <div className="sheet-in relative max-h-[85vh] overflow-y-auto rounded-t-[12px] border-t border-hairline bg-surface px-5 pb-8 pt-4">
+        <div className="mb-3 flex justify-end">
+          <button type="button" onClick={onClose} className="inline-flex size-8 items-center justify-center rounded-btn text-graphite hover:bg-fog hover:text-ink" aria-label="Close">
+            <IconCross size={16} />
+          </button>
+        </div>
+        <DecisionDetail receipt={receipt} />
       </div>
     </div>
   );
+}
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => (typeof window === "undefined" ? true : window.matchMedia(query).matches));
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const onChange = () => setMatches(mql.matches);
+    onChange();
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, [query]);
+  return matches;
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
