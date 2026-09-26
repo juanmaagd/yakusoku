@@ -67,9 +67,11 @@ import {
   type ReceiptTimelineEntry,
 } from "@yakusoku/shared";
 import { pendingApprovalOutcome, startApprovalGate, worldIdThresholdStage } from "./approvals";
+import { fundingStage } from "./funding";
 import { interceptaStage } from "./intercepta";
 import { jevStage } from "./jev";
 import { merchantStage } from "./merchant";
+import { resolvePayer } from "./payer";
 import { provenanceStage } from "./provenance";
 import { resolveMandate } from "./promises";
 import { finalize, type PipelineOutcome, type ReceiptContext } from "./receipts";
@@ -125,13 +127,23 @@ export interface PipelineStage {
  * (approvals.ts). `refuse` from any stage still stops immediately and wins:
  * - H1 merchant     -> firewall self-fetch vs. the agent's forwarded copy,
  *   and (world_id promises only) bound-merchant-origin check (merchant.ts)
+ * - P11.2 funding   -> resolves the payer (payer.ts) and, for a world_id
+ *   account's smart account, checks its own on-chain rules before Intercepta/
+ *   Jev/World ID are ever spent on a payment that can't settle (funding.ts)
  * - WU6 provenance  -> deterministic recipient-traceability check (provenance.ts)
  * - WU7 Intercepta  -> address/token screening (intercepta.ts)
  * - WU8 Jev         -> semantic intent-match judgment (jev.ts)
  * - WU11 world_id    -> real amount-threshold check (approvals.ts); the actual
  *   human-approval wait happens after this loop, not as a stage itself.
  */
-export const PIPELINE_STAGES: PipelineStage[] = [merchantStage, provenanceStage, interceptaStage, jevStage, worldIdThresholdStage];
+export const PIPELINE_STAGES: PipelineStage[] = [
+  merchantStage,
+  fundingStage,
+  provenanceStage,
+  interceptaStage,
+  jevStage,
+  worldIdThresholdStage,
+];
 
 // --- Idempotency -------------------------------------------------------------
 
@@ -431,13 +443,28 @@ async function runStagesAndSign(
   }
 
   // Every check passed automatically — sign immediately (no human wait).
+  // The funding stage already validated this exact payer (funding.ts, right
+  // after `merchant` in `PIPELINE_STAGES`) — `resolvePayer` is recomputed
+  // here (cheap, pure, deterministic from the mandate alone) rather than
+  // threaded through `StageContext`, since `settleApproved` (approvals.ts)
+  // needs the identical recomputation anyway once a World ID approval
+  // resolves in the background, long after this `StageContext` is gone.
   const preSignState = transition("initial", "awaiting_world_id");
   const signStart = Date.now();
   try {
+    const payerResolution = resolvePayer(stageCtx.intent);
+    if (!payerResolution.ok) {
+      // Unreachable in practice — the funding stage above already refused
+      // `account_not_set_up` before evaluation could ever report `clear`.
+      // Fail closed anyway, matching every other stage's discipline.
+      throw new Error(`account_not_set_up: ${payerResolution.detail}`);
+    }
+    const { payer } = payerResolution;
     const { paymentSignatureHeader } = await signPayment({
       paymentRequired: stageCtx.paymentRequired,
       maxBudgetAtomic: stageCtx.intent.message.budget,
       paymentIdentifier: receiptContext.paymentIdentifier,
+      payer,
     });
     callbacks.markSigned();
     timeline.push({ stage: "sign", outcome: "pass", ms: Date.now() - signStart });
@@ -450,6 +477,8 @@ async function runStagesAndSign(
       verdict: "pay",
       reason: "all pipeline checks passed",
       paymentSignature: paymentSignatureHeader,
+      payer: payer.address,
+      payerKind: payer.kind,
       cache: true,
     });
   } catch (err) {

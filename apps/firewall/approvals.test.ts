@@ -33,9 +33,8 @@ process.env.FIREWALL_PRIVATE_KEY ??= `0x${"22".repeat(32)}`;
 const FIREWALL_KEY = process.env.FIREWALL_PRIVATE_KEY as `0x${string}`;
 const EXPECTED_SIGNER = privateKeyToAccount(FIREWALL_KEY).address;
 
-const { createIntent, createPromise, findOrCreateAccountBySubjectHash, getPromise, getReceipt, savePendingApproval } = await import(
-  "./store"
-);
+const { createIntent, createPromise, findOrCreateAccountBySubjectHash, getPromise, getReceipt, savePendingApproval, setAccountDeployment } =
+  await import("./store");
 const { finalize } = await import("./receipts");
 const { settleApproved, settleRefused } = await import("./approvals");
 
@@ -206,6 +205,20 @@ function randomNonce(): `0x${string}` {
  * for a wallet intent — but with `intentId` naming the promise. */
 function seedPendingApprovalOnPromise(ownerSubject: string) {
   const account = findOrCreateAccountBySubjectHash(hashWorldIdSubject(ownerSubject));
+  // P11.2 — `settleApproved` now pays from the account's own smart account
+  // (payer.ts's `resolvePayer`), so this fixture must have one deployed;
+  // never really deployed on-chain (a fake but well-formed address) — fine
+  // here since `settleApproved` never re-runs the funding health check
+  // (paused/recipient/limit/balance), only `resolvePayer`'s "does this
+  // account have a smart account at all" check. `signer.ts`'s account-signer
+  // reads USDC's own (always-real) EIP-3009 domain, not anything from this
+  // address, so signing still works for real.
+  setAccountDeployment(account.id, {
+    smartAccount: "0x2222222222222222222222222222222222222222",
+    owner: "0x0000000000000000000000000000000000dEaD",
+    perPaymentLimitAtomic: 25_000_000n,
+    recipients: [{ address: PAY_TO, label: "test recipient" }],
+  });
   const promiseId = `promise_approvals_test_${crypto.randomUUID()}`;
   createPromise({
     id: promiseId,

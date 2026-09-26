@@ -53,6 +53,18 @@
 // creates an account AND activates its first promise together) — no
 // additional real World ID sandbox calls beyond the one device-authorization
 // call every promise/connect gate already makes.
+//
+// P11.2 adds S44-S49 (the firewall pays from each user's smart account): the
+// isolated firewall now also runs with `OMAMORISAN_ACCOUNT_READER=stub` so
+// the new `funding` pipeline stage (funding.ts, right after `merchant`) reads
+// a scenario-controlled fake account-health state instead of real chain
+// state (`POST /dev/accounts/:id/health`) — S44 (no smart account deployed
+// yet -> account_not_set_up), S45 (paused), S46 (store not in the recipient
+// allow-list -> recipient_not_registered, no override needed at all — the
+// default deployed allow-list is a dead address), S47 (over the account's
+// `perPaymentLimit`), S48 (short on USDC balance), S49 (healthy -> signs,
+// payer = the account's own smart account, never the firewall EOA; expected
+// verdict adapts to INTERCEPTA_API_KEY same as S1).
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -541,6 +553,66 @@ async function devApproveFirstPromiseRequest(id: string, subject: string): Promi
     body: JSON.stringify({ subject }),
   });
   return { status: res.status };
+}
+
+// --- P11.2: firewall-pays-from-smart-account helpers --------------------------
+// The isolated firewall this suite spawns also runs with
+// `OMAMORISAN_ACCOUNT_READER=stub` (see `main` below) — never on the live
+// :4001 firewall — so these scenarios drive every funding refusal
+// deterministically via `POST /dev/accounts/:id/health` instead of real chain
+// state, exactly like `OMAMORISAN_ACCOUNT_DEPLOYER=stub` already lets S39-S43
+// deploy without gas.
+
+async function setAccountHealthRequest(
+  accountId: string,
+  body: { paused?: boolean; recipientAllowed?: boolean; perPaymentLimitUsdc?: string; balanceUsdc?: string },
+): Promise<{ status: number }> {
+  const res = await fetch(`${FIREWALL_URL}/dev/accounts/${accountId}/health`, {
+    method: "POST",
+    headers: { ...ADMIN_HEADERS, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status };
+}
+
+interface ReceiptApiResponse {
+  receiptId?: string;
+  verdict?: string;
+  payer?: string;
+  payerKind?: string;
+  reasons?: string[];
+}
+
+async function getReceiptRequest(receiptId: string): Promise<{ status: number; json: ReceiptApiResponse }> {
+  const res = await fetch(`${FIREWALL_URL}/receipts/${receiptId}`, { headers: ADMIN_HEADERS });
+  const json = (await res.json().catch(() => ({}))) as ReceiptApiResponse;
+  return { status: res.status, json };
+}
+
+/** Full setup for a funding scenario: connect an account, deploy its smart
+ * account via the stub deployer (no gas — same steps as S40), and activate
+ * ONE promise bound to `promiseBody.merchant` via the dev seam. The account's
+ * DEFAULT deployed recipient allow-list is `OMAMORISAN_DEFAULT_RECIPIENTS`
+ * (a dead address, `main` below) — never the real store's `payTo` — so a
+ * scenario that wants a healthy account must explicitly override
+ * `recipientAllowed` via `setAccountHealthRequest`. */
+async function setupAccountWithSmartAccountAndPromise(
+  subject: string,
+  promiseBody: { task: string; budgetUsdc: number; categories: string[]; expiresInSeconds: number; merchant: string },
+): Promise<{ accountId: string; accountKey: string; smartAccount: string; promiseId: string }> {
+  const { accountId, accountKey } = await connectAccountViaDevSeam(subject);
+  const link = await startSetupLinkRequest(accountKey);
+  if (link.status !== 201 || !link.json.token) throw new Error(`POST /accounts/setup-link failed: ${link.status}`);
+  const status = await getSetupStatusRequest(link.json.token);
+  if (status.status !== 200 || !status.json.message) throw new Error(`GET /setup/:token failed: ${status.status}`);
+  const owner = privateKeyToAccount(generatePrivateKey());
+  const signature = await signSetupMessage(status.json.message, owner);
+  const deployed = await postSetupOwnerRequest(link.json.token, owner.address, signature);
+  if (deployed.status !== 200 || !deployed.json.smartAccount) {
+    throw new Error(`POST /setup/:token/owner failed: ${deployed.status} ${JSON.stringify(deployed.json)}`);
+  }
+  const promiseId = await activePromiseViaDevSeam(accountKey, subject, promiseBody);
+  return { accountId, accountKey, smartAccount: deployed.json.smartAccount, promiseId };
 }
 
 /** Collects `event:`/`data:` frames from an SSE endpoint for `windowMs`, then
@@ -1699,18 +1771,23 @@ async function runS33(): Promise<void> {
  * ask_human (documented, not a failure); set -> pay. */
 async function runS34(): Promise<void> {
   const id = "S34";
-  const description = "dev seam: connect -> account key -> promise active -> legit /sign";
+  const description = "dev seam: connect -> account key -> smart account deployed+funded -> promise active -> legit /sign";
   const expected = HAS_INTERCEPTA_KEY ? "pay" : "ask_human";
   try {
     const subject = `world-id-subject-s34-${crypto.randomUUID()}`;
-    const { accountKey } = await connectAccountViaDevSeam(subject);
-    const promiseId = await activePromiseViaDevSeam(accountKey, subject, {
+    // P11.2: a world_id promise now pays from its account's own smart
+    // account (payer.ts) — deploy one (stub deployer, no gas) and mark it
+    // healthy (stub reader) so this "legit purchase" still reaches the same
+    // Intercepta/Jev/World-ID decision it always has, unaffected by funding.
+    const { accountId, promiseId, accountKey } = await setupAccountWithSmartAccountAndPromise(subject, {
       task: "Buy a $1 Amazon gift card (rehearsal) — S34",
       budgetUsdc: 1,
       categories: ["gift_card:amazon"],
       expiresInSeconds: 3600,
       merchant: STORE_URL,
     });
+    const health = await setAccountHealthRequest(accountId, { recipientAllowed: true });
+    if (health.status !== 200) throw new Error(`POST /dev/accounts/:id/health failed: ${health.status}`);
 
     const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
     const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S34", "Exact match for the promise.", []);
@@ -2024,6 +2101,186 @@ async function runS43(): Promise<void> {
   }
 }
 
+/** S44 — P11.2: a world_id promise on an account with no smart account
+ * deployed yet refuses fail-closed, before any on-chain read — the firewall
+ * EOA must never sign for an account promise, even when nothing has been
+ * set up. */
+async function runS44(): Promise<void> {
+  const id = "S44";
+  const description = "P11.2: world_id promise, no smart account deployed yet -> refuse account_not_set_up";
+  const expected = "refuse (account_not_set_up)";
+  try {
+    const subject = `world-id-subject-s44-${crypto.randomUUID()}`;
+    const { accountKey } = await connectAccountViaDevSeam(subject);
+    const promiseId = await activePromiseViaDevSeam(accountKey, subject, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S44",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+      merchant: STORE_URL,
+    });
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S44", "Exact match for the promise.", []);
+    const { json } = await signRequest({ intentId: promiseId, paymentRequiredHeader: header, resourceUrl, context }, accountKey);
+    const pass = json.verdict === "refuse" && /account_not_set_up/.test(json.reason ?? "");
+    record(id, description, expected, json.verdict, pass, json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S45 — P11.2: a deployed-but-paused smart account refuses, even before the
+ * recipient/limit/balance checks (checked first in `fundingStage`). */
+async function runS45(): Promise<void> {
+  const id = "S45";
+  const description = "P11.2: deployed smart account, paused -> refuse paused";
+  const expected = "refuse (paused)";
+  try {
+    const subject = `world-id-subject-s45-${crypto.randomUUID()}`;
+    const { accountId, promiseId, accountKey } = await setupAccountWithSmartAccountAndPromise(subject, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S45",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+      merchant: STORE_URL,
+    });
+    const health = await setAccountHealthRequest(accountId, { paused: true });
+    if (health.status !== 200) throw new Error(`POST /dev/accounts/:id/health failed: ${health.status}`);
+
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S45", "Exact match for the promise.", []);
+    const { json } = await signRequest({ intentId: promiseId, paymentRequiredHeader: header, resourceUrl, context }, accountKey);
+    const pass = json.verdict === "refuse" && /^funding: paused:/.test(json.reason ?? "");
+    record(id, description, expected, json.verdict, pass, json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S46 — P11.2: a deployed smart account's DEFAULT recipient allow-list
+ * (`OMAMORISAN_DEFAULT_RECIPIENTS` below — a dead address, not the store's
+ * `payTo`) never includes the store it's about to pay -> refuse, with no
+ * override needed at all. */
+async function runS46(): Promise<void> {
+  const id = "S46";
+  const description = "P11.2: deployed smart account, store not in the recipient allow-list -> refuse recipient_not_registered";
+  const expected = "refuse (recipient_not_registered)";
+  try {
+    const subject = `world-id-subject-s46-${crypto.randomUUID()}`;
+    const { promiseId, accountKey } = await setupAccountWithSmartAccountAndPromise(subject, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S46",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+      merchant: STORE_URL,
+    });
+
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S46", "Exact match for the promise.", []);
+    const { json } = await signRequest({ intentId: promiseId, paymentRequiredHeader: header, resourceUrl, context }, accountKey);
+    const pass = json.verdict === "refuse" && /^funding: recipient_not_registered:/.test(json.reason ?? "");
+    record(id, description, expected, json.verdict, pass, json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S47 — P11.2: the payment exceeds the account's own `perPaymentLimit`. */
+async function runS47(): Promise<void> {
+  const id = "S47";
+  const description = "P11.2: payment exceeds the account's perPaymentLimit -> refuse over_account_limit";
+  const expected = "refuse (over_account_limit)";
+  try {
+    const subject = `world-id-subject-s47-${crypto.randomUUID()}`;
+    const { accountId, promiseId, accountKey } = await setupAccountWithSmartAccountAndPromise(subject, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S47",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+      merchant: STORE_URL,
+    });
+    // recipientAllowed:true so this fails at the limit check, not the
+    // (already-covered, S46) recipient check.
+    const health = await setAccountHealthRequest(accountId, { recipientAllowed: true, perPaymentLimitUsdc: "0.5" });
+    if (health.status !== 200) throw new Error(`POST /dev/accounts/:id/health failed: ${health.status}`);
+
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S47", "Exact match for the promise.", []);
+    const { json } = await signRequest({ intentId: promiseId, paymentRequiredHeader: header, resourceUrl, context }, accountKey);
+    const pass = json.verdict === "refuse" && /^funding: over_account_limit:/.test(json.reason ?? "");
+    record(id, description, expected, json.verdict, pass, json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S48 — P11.2: the account's USDC balance is short of the payment. */
+async function runS48(): Promise<void> {
+  const id = "S48";
+  const description = "P11.2: account balance short of the payment -> refuse insufficient_funds";
+  const expected = "refuse (insufficient_funds)";
+  try {
+    const subject = `world-id-subject-s48-${crypto.randomUUID()}`;
+    const { accountId, promiseId, accountKey } = await setupAccountWithSmartAccountAndPromise(subject, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S48",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+      merchant: STORE_URL,
+    });
+    const health = await setAccountHealthRequest(accountId, { recipientAllowed: true, balanceUsdc: "0.1" });
+    if (health.status !== 200) throw new Error(`POST /dev/accounts/:id/health failed: ${health.status}`);
+
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S48", "Exact match for the promise.", []);
+    const { json } = await signRequest({ intentId: promiseId, paymentRequiredHeader: header, resourceUrl, context }, accountKey);
+    const pass = json.verdict === "refuse" && /^funding: insufficient_funds:/.test(json.reason ?? "");
+    record(id, description, expected, json.verdict, pass, json.reason);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
+/** S49 — P11.2: a healthy, funded smart account passes the funding stage and
+ * signs — payer is the account's own smart account, never the firewall EOA.
+ * Expected verdict adapts to INTERCEPTA_API_KEY same as S1/S28/S29: unset ->
+ * ask_human (documented, not a failure — nothing about that is a funding
+ * problem); set -> pay, and only then can the receipt's `payer`/`payerKind`
+ * be checked (nothing signs while ask_human is pending). */
+async function runS49(): Promise<void> {
+  const id = "S49";
+  const description = "P11.2: healthy funded smart account -> signs, payer = smart account";
+  const expected = HAS_INTERCEPTA_KEY ? "pay" : "ask_human";
+  try {
+    const subject = `world-id-subject-s49-${crypto.randomUUID()}`;
+    const { accountId, smartAccount, promiseId, accountKey } = await setupAccountWithSmartAccountAndPromise(subject, {
+      task: "Buy a $1 Amazon gift card (rehearsal) — S49",
+      budgetUsdc: 1,
+      categories: ["gift_card:amazon"],
+      expiresInSeconds: 3600,
+      merchant: STORE_URL,
+    });
+    const health = await setAccountHealthRequest(accountId, { recipientAllowed: true });
+    if (health.status !== 200) throw new Error(`POST /dev/accounts/:id/health failed: ${health.status}`);
+
+    const { header, resourceUrl } = await fetch402(AMAZON_REHEARSAL_SKU);
+    const context = cleanContext("Buy a $1 Amazon gift card (rehearsal) — S49", "Exact match for the promise.", []);
+    const { json } = await signRequest({ intentId: promiseId, paymentRequiredHeader: header, resourceUrl, context }, accountKey);
+
+    let pass = json.verdict === expected;
+    let detail = json.reason;
+    if (json.verdict === "pay" && json.receiptId) {
+      const receipt = await getReceiptRequest(json.receiptId);
+      const payerOk = receipt.json.payer?.toLowerCase() === smartAccount.toLowerCase() && receipt.json.payerKind === "smart_account";
+      pass = pass && payerOk;
+      detail = `payer=${receipt.json.payer} payerKind=${receipt.json.payerKind} (expected ${smartAccount}/smart_account)`;
+    }
+    record(id, description, expected, json.verdict ?? json.error ?? "unknown", pass, detail);
+  } catch (err) {
+    record(id, description, expected, "error", false, String(err));
+  }
+}
+
 // --- Process orchestration ---------------------------------------------------
 
 async function waitForHttp(url: string, timeoutMs = 20_000): Promise<void> {
@@ -2092,6 +2349,11 @@ async function main(): Promise<void> {
     // deployer — no gas, no real Base Sepolia transaction.
     OMAMORISAN_ACCOUNT_DEPLOYER: "stub",
     OMAMORISAN_DEFAULT_RECIPIENTS: JSON.stringify([{ address: "0x000000000000000000000000000000000000dEaD", label: "Scenario recipient" }]),
+    // P11.2: S44-S49 drive every funding-stage outcome (account_not_set_up,
+    // paused, recipient_not_registered, over_account_limit,
+    // insufficient_funds, healthy) via the stub account-health reader and
+    // `POST /dev/accounts/:id/health` — no real chain state needed.
+    OMAMORISAN_ACCOUNT_READER: "stub",
   });
 
   let exitCode = 0;
@@ -2143,6 +2405,12 @@ async function main(): Promise<void> {
     await runS41();
     await runS42();
     await runS43();
+    await runS44();
+    await runS45();
+    await runS46();
+    await runS47();
+    await runS48();
+    await runS49();
 
     printTable();
     exitCode = results.every((r) => r.pass) ? 0 : 1;

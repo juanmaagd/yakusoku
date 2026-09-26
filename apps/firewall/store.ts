@@ -180,6 +180,23 @@ export interface StoredAccount {
   deployTxHash?: `0x${string}`;
 }
 
+/**
+ * P11.2 — test/scenario-only overrides for the funding stage's STUB
+ * account-health reader (`funding.ts`, `OMAMORISAN_ACCOUNT_READER=stub`).
+ * Never read by the `real` reader (which always reads live on-chain state)
+ * and never set outside a test or the dev-only `POST /dev/accounts/:id/health`
+ * route (index.ts, itself gated on the same env var) — lets a scenario force
+ * paused/recipient/limit/balance states deterministically without a real
+ * deployed contract or any chain state. `undefined` fields fall back to the
+ * stub reader's own defaults (see funding.ts).
+ */
+export interface AccountHealthOverride {
+  paused?: boolean;
+  recipientAllowed?: boolean;
+  perPaymentLimitAtomic?: bigint;
+  balanceAtomic?: bigint;
+}
+
 export type ConnectStatus = "pending" | "approved" | "denied" | "expired" | "error";
 
 /**
@@ -425,6 +442,14 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS first_promise_requests_status ON first_promise_requests (status);
+  CREATE TABLE IF NOT EXISTS account_health_overrides (
+    account_id TEXT PRIMARY KEY,
+    paused INTEGER,
+    recipient_allowed INTEGER,
+    per_payment_limit_atomic TEXT,
+    balance_atomic TEXT,
+    updated_at TEXT NOT NULL
+  );
 `);
 
 // WU13 migration: `intents` may already exist from before the `revoked`
@@ -536,6 +561,20 @@ const setAccountDeploymentStmt = db.prepare(
      recipients_json = $recipientsJson, deploy_tx_hash = $deployTxHash
    WHERE id = $id`,
 );
+// P11.2 — stub account-health overrides (funding.ts). `upsert...` merges by
+// reading-then-writing at the call site (`setAccountHealthOverride` below),
+// not via SQL `ON CONFLICT`, since a partial override (e.g. only `paused`)
+// must never clobber a previously-set field (e.g. `balanceAtomic`).
+const upsertAccountHealthOverrideStmt = db.prepare(
+  `INSERT INTO account_health_overrides (account_id, paused, recipient_allowed, per_payment_limit_atomic, balance_atomic, updated_at)
+   VALUES ($accountId, $paused, $recipientAllowed, $perPaymentLimitAtomic, $balanceAtomic, $updatedAt)
+   ON CONFLICT(account_id) DO UPDATE SET
+     paused = excluded.paused, recipient_allowed = excluded.recipient_allowed,
+     per_payment_limit_atomic = excluded.per_payment_limit_atomic, balance_atomic = excluded.balance_atomic,
+     updated_at = excluded.updated_at`,
+);
+const getAccountHealthOverrideStmt = db.prepare(`SELECT * FROM account_health_overrides WHERE account_id = $accountId`);
+
 const insertAccountKeyStmt = db.prepare(
   `INSERT INTO account_keys (key_hash, account_id, created_at, revoked) VALUES ($keyHash, $accountId, $createdAt, 0)`,
 );
@@ -1014,6 +1053,43 @@ export function setAccountDeployment(
     $perPaymentLimitAtomic: deployment.perPaymentLimitAtomic.toString(),
     $recipientsJson: JSON.stringify(deployment.recipients),
     $deployTxHash: deployment.deployTxHash ?? null,
+  });
+}
+
+interface AccountHealthOverrideRow {
+  account_id: string;
+  paused: number | null;
+  recipient_allowed: number | null;
+  per_payment_limit_atomic: string | null;
+  balance_atomic: string | null;
+  updated_at: string;
+}
+
+/** P11.2 — reads this account's stub-reader override, if any (funding.ts). */
+export function getAccountHealthOverride(accountId: string): AccountHealthOverride | undefined {
+  const row = getAccountHealthOverrideStmt.get({ $accountId: accountId }) as AccountHealthOverrideRow | null;
+  if (!row) return undefined;
+  return {
+    paused: row.paused === null ? undefined : row.paused === 1,
+    recipientAllowed: row.recipient_allowed === null ? undefined : row.recipient_allowed === 1,
+    perPaymentLimitAtomic: row.per_payment_limit_atomic ? BigInt(row.per_payment_limit_atomic) : undefined,
+    balanceAtomic: row.balance_atomic ? BigInt(row.balance_atomic) : undefined,
+  };
+}
+
+/** P11.2 — merges `override` onto whatever's already set for `accountId`
+ * (never clobbers a field the caller left `undefined`), for the stub
+ * account-health reader only. Test-only / dev-seam-only writer — see
+ * `AccountHealthOverride`'s doc comment. */
+export function setAccountHealthOverride(accountId: string, override: AccountHealthOverride): void {
+  const merged: AccountHealthOverride = { ...getAccountHealthOverride(accountId), ...override };
+  upsertAccountHealthOverrideStmt.run({
+    $accountId: accountId,
+    $paused: merged.paused === undefined ? null : merged.paused ? 1 : 0,
+    $recipientAllowed: merged.recipientAllowed === undefined ? null : merged.recipientAllowed ? 1 : 0,
+    $perPaymentLimitAtomic: merged.perPaymentLimitAtomic?.toString() ?? null,
+    $balanceAtomic: merged.balanceAtomic?.toString() ?? null,
+    $updatedAt: new Date().toISOString(),
   });
 }
 

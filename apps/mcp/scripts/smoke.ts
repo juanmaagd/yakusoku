@@ -32,6 +32,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 const MCP_DIR = fileURLToPath(new URL("..", import.meta.url));
 const AGENT_DIR = join(MCP_DIR, "..", "agent");
@@ -164,6 +165,53 @@ async function devApprove(kind: "connect" | "promises", id: string, subject: str
   if (res.status !== 200) throw new Error(`dev-approve ${kind}/${id} failed: HTTP ${res.status}`);
 }
 
+/**
+ * P11.2 — a world_id promise now pays from its account's own smart account
+ * (payer.ts's `resolvePayer`), so this smoke test must deploy one before
+ * `pay_x402` can reach the same Intercepta/Jev/World-ID verdict it always
+ * has. Direct HTTP calls, never an MCP tool: `setup_account` only mints the
+ * link (P11.3a) — posting the owner's signature is the SITE's job in
+ * reality, out of scope for the agent-facing MCP surface this file smoke-
+ * tests. Reuses `setupUrl`'s own token rather than minting a second link.
+ * Stub deployer + stub reader only (`main`'s spawned env below) — never on
+ * the live firewall, no gas, no real chain state.
+ */
+async function deploySmartAccountFromSetupUrl(setupUrl: string, accountId: string): Promise<string> {
+  const token = new URL(setupUrl).searchParams.get("token");
+  if (!token) throw new Error(`setupUrl has no token query param: ${setupUrl}`);
+
+  const statusRes = await fetch(`${FIREWALL_URL}/setup/${token}`);
+  const status = (await statusRes.json().catch(() => ({}))) as { message?: string };
+  if (statusRes.status !== 200 || !status.message) throw new Error(`GET /setup/${token} failed: HTTP ${statusRes.status}`);
+
+  const owner = privateKeyToAccount(generatePrivateKey());
+  const signature = await owner.signMessage({ message: status.message.replace("{owner}", owner.address) });
+
+  const deployRes = await fetch(`${FIREWALL_URL}/setup/${token}/owner`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ owner: owner.address, signature }),
+  });
+  const deployed = (await deployRes.json().catch(() => ({}))) as { smartAccount?: string; error?: string };
+  if (deployRes.status !== 200 || !deployed.smartAccount) {
+    throw new Error(`POST /setup/${token}/owner failed: HTTP ${deployRes.status} ${JSON.stringify(deployed)}`);
+  }
+
+  // Mark it healthy for the stub reader — the DEFAULT deployed recipient
+  // allow-list is empty in this smoke test (no MERCHANT_ADDRESS/_KEY or
+  // OMAMORISAN_DEFAULT_RECIPIENTS override for its spawned firewall), so
+  // without this override every pay_x402 call below would refuse
+  // `recipient_not_registered` instead of reaching Intercepta/Jev/World ID.
+  const healthRes = await fetch(`${FIREWALL_URL}/dev/accounts/${accountId}/health`, {
+    method: "POST",
+    headers: ADMIN_HEADERS,
+    body: JSON.stringify({ recipientAllowed: true }),
+  });
+  if (healthRes.status !== 200) throw new Error(`POST /dev/accounts/${accountId}/health failed: HTTP ${healthRes.status}`);
+
+  return deployed.smartAccount;
+}
+
 /** P9.6's combined connect+promise gate — a nested path, so its own helper
  * rather than widening `devApprove`'s `kind` union. */
 async function devApproveFirstPromise(id: string, subject: string): Promise<void> {
@@ -206,11 +254,14 @@ async function runAccountPathSmoke(credentialsDir: string): Promise<void> {
 
     printStep("[account] setup_account (P11.3a — expect a setupUrl, no smart account deployed yet)");
     const setup = await callTool(client, "setup_account", {});
-    console.log(
-      typeof setup.data.setupUrl === "string" && (setup.data.setupUrl as string).includes("/setup?token=")
-        ? "PASS: got a setup link"
-        : `FAIL: expected a setupUrl, got ${JSON.stringify(setup.data)}`,
-    );
+    const setupUrl = typeof setup.data.setupUrl === "string" ? (setup.data.setupUrl as string) : undefined;
+    console.log(setupUrl?.includes("/setup?token=") ? "PASS: got a setup link" : `FAIL: expected a setupUrl, got ${JSON.stringify(setup.data)}`);
+
+    printStep("[account] deploying + funding-marking-healthy the smart account (P11.2, out-of-band — the site's job in reality)");
+    if (!setupUrl) throw new Error("no setupUrl to deploy from");
+    const accountId = connected.data.accountId as string;
+    const smartAccount = await deploySmartAccountFromSetupUrl(setupUrl, accountId);
+    console.log(`PASS: deployed ${smartAccount} (stub — never really on-chain) and marked healthy`);
 
     printStep("[account] request_promise (expect pending — nobody has dev-approved yet)");
     const promiseStart = await callTool(client, "request_promise", {
@@ -358,11 +409,23 @@ async function main(): Promise<void> {
     PORT: String(FIREWALL_PORT),
     FIREWALL_DATA_DIR: firewallDataDir,
     WORLD_ID_APPROVAL_TIMEOUT_S: "60",
+    // Every `pay_x402` call below expects `needs_human_approval` (this
+    // suite's stub-deployed smart account has no real on-chain code, so a
+    // `pay` verdict would try to actually settle a signature nothing can
+    // verify) — deterministic regardless of whether the shell this script
+    // itself was launched from (`bun run smoke`'s `--env-file`) happens to
+    // export a real INTERCEPTA_API_KEY.
+    INTERCEPTA_API_KEY: "",
     // Only ever enabled on THIS isolated, temp-data-dir firewall — never on
     // the live :4001 firewall (index.ts logs a loud boot warning either
     // way). Lets this smoke test dev-approve connect/promise requests
     // without a real phone.
     OMAMORISAN_DEV_APPROVALS: "1",
+    // P11.2: the account path deploys a smart account (no gas) and drives
+    // its funding-stage health via the stub reader instead of real chain
+    // state — same discipline as apps/firewall/scripts/scenarios.ts.
+    OMAMORISAN_ACCOUNT_DEPLOYER: "stub",
+    OMAMORISAN_ACCOUNT_READER: "stub",
   });
 
   let exitCode = 0;

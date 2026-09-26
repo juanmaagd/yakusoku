@@ -11,7 +11,7 @@ import { z } from "zod";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 import type { PaymentRequired } from "@x402/core/types";
 import type { Hex } from "viem";
-import { signedTaskIntentSchema, transition, X402_NETWORK, type DecisionReceipt } from "@yakusoku/shared";
+import { signedTaskIntentSchema, transition, USDC_DECIMALS, X402_NETWORK, type DecisionReceipt } from "@yakusoku/shared";
 import {
   createIntent,
   createNonce,
@@ -33,6 +33,7 @@ import {
   revokeIntent,
   revokeSession,
   saveReceipt,
+  setAccountHealthOverride,
   setControlState,
   setOwnerControl,
   type StoredAccount,
@@ -1010,6 +1011,50 @@ app.get("/events", (c) => {
     }
   });
 });
+
+// --- Dev account-health seam (OMAMORISAN_ACCOUNT_READER=stub) ----------------
+//
+// Off unless the funding stage's reader is itself stubbed (funding.ts) —
+// gated on that same env var rather than `OMAMORISAN_DEV_APPROVALS`, since
+// this is a different concern (fake on-chain account state, not a fake World
+// ID approval): it exists ONLY so scenarios.ts can deterministically drive
+// every funding refusal (paused/recipient/limit/balance) without a real
+// deployed contract. Never set `OMAMORISAN_ACCOUNT_READER=stub` on the live
+// :4001 firewall. Same operator-only bar as every other dev/admin route
+// (`requireLocalAdmin` — loopback + the fixed `x-yakusoku-admin` header).
+if (process.env.OMAMORISAN_ACCOUNT_READER === "stub") {
+  console.warn(
+    "[SECURITY] OMAMORISAN_ACCOUNT_READER=stub — the fake account-health dev seam is ENABLED on this process. " +
+      "Never set this on the live demo firewall (:4001).",
+  );
+
+  const accountHealthSchema = z.object({
+    paused: z.boolean().optional(),
+    recipientAllowed: z.boolean().optional(),
+    /** Decimal USDC strings (site contract convention), e.g. "0.5" — never atomic units. */
+    perPaymentLimitUsdc: z.string().optional(),
+    balanceUsdc: z.string().optional(),
+  });
+
+  app.post("/dev/accounts/:id/health", async (c) => {
+    if (!isLocalAdminRequest(c)) return c.json({ error: "forbidden" }, 403);
+    const account = getAccount(c.req.param("id"));
+    if (!account) return c.json({ error: "account_not_found" }, 404);
+    const body = await c.req.json().catch(() => undefined);
+    const parsed = accountHealthSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: "invalid_account_health_request", issues: parsed.error.issues }, 400);
+
+    const toAtomic = (usdc: string | undefined) =>
+      usdc === undefined ? undefined : BigInt(Math.round(Number(usdc) * 10 ** USDC_DECIMALS));
+    setAccountHealthOverride(account.id, {
+      paused: parsed.data.paused,
+      recipientAllowed: parsed.data.recipientAllowed,
+      perPaymentLimitAtomic: toAtomic(parsed.data.perPaymentLimitUsdc),
+      balanceAtomic: toAtomic(parsed.data.balanceUsdc),
+    });
+    return c.json({ ok: true });
+  });
+}
 
 // --- Dev approval seam (OMAMORISAN_DEV_APPROVALS=1) --------------------------
 //

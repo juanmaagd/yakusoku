@@ -28,6 +28,7 @@ import {
   type Verdict,
 } from "@yakusoku/shared";
 import { publish } from "./events-bus";
+import { resolvePayer } from "./payer";
 import { resolveMandate } from "./promises";
 import { finalize, type ApprovalInfo, type PipelineOutcome, type ReceiptContext } from "./receipts";
 import { signPayment } from "./signer";
@@ -253,7 +254,7 @@ function finalizeResolution(
   toState: ReceiptState,
   verdict: Verdict,
   reason: string,
-  opts: { paymentSignature?: string; worldId?: DecisionReceipt["worldId"] } = {},
+  opts: { paymentSignature?: string; worldId?: DecisionReceipt["worldId"]; payer?: string; payerKind?: DecisionReceipt["payerKind"] } = {},
 ): void {
   finalize({
     receiptId: approval.receiptId,
@@ -273,6 +274,8 @@ function finalizeResolution(
     verdict,
     reason,
     paymentSignature: opts.paymentSignature,
+    payer: opts.payer,
+    payerKind: opts.payerKind,
     cache: true,
   });
   publish("approval.resolved", { receiptId: approval.receiptId, status: approval.status, reason });
@@ -386,6 +389,19 @@ export async function settleApproved(approval: PendingApproval, claims: FreshApp
     return;
   }
 
+  // P11.2 — resolved fresh here (cheap, pure, deterministic from `intent`
+  // alone) rather than carried from the original `/sign` request's
+  // `StageContext` (long gone by the time a World ID approval resolves in
+  // the background) — see pipeline.ts's identical recomputation for the
+  // immediate-sign path. `checkPolicy`'s promise/account checks above already
+  // guarantee this succeeds for anything that reached `awaiting_world_id`.
+  const payerResolution = resolvePayer(intent);
+  if (!payerResolution.ok) {
+    await settleRefused(approval, "error", `account_not_set_up: ${payerResolution.detail}`, "error");
+    return;
+  }
+  const { payer } = payerResolution;
+
   const worldMs = Date.now() - approval.gateStartedAtMs;
   const signStart = Date.now();
   // Set once the StepUp attestation itself is signed — kept in this outer
@@ -425,6 +441,7 @@ export async function settleApproved(approval: PendingApproval, claims: FreshApp
       paymentRequired,
       maxBudgetAtomic: intent.message.budget,
       paymentIdentifier: approval.paymentIdentifier,
+      payer,
     });
     const timeline: ReceiptTimelineEntry[] = [
       { stage: "world_id", outcome: "pass", reason: "human approved via World ID", ms: worldMs },
@@ -437,7 +454,7 @@ export async function settleApproved(approval: PendingApproval, claims: FreshApp
       "signed",
       "pay",
       "human approved via World ID; all pipeline checks passed",
-      { paymentSignature: paymentSignatureHeader, worldId: worldIdDetail },
+      { paymentSignature: paymentSignatureHeader, worldId: worldIdDetail, payer: payer.address, payerKind: payer.kind },
     );
     approval.status = "approved";
     approval.paymentSignature = paymentSignatureHeader;

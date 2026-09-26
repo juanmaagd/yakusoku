@@ -11,6 +11,17 @@ import { verdictSchema } from "./verdict";
  */
 export const RECEIPT_STATES = [
   "idempotent_hit",
+  /** Every hard, mandate-level rejection shares this one state, distinguished
+   * only by `reason` text (same pattern `checkPolicy`'s own budget/expiry/
+   * network/asset/revoked/paused-by-owner checks already use, apps/firewall/
+   * pipeline.ts) — including P11.2's funding stage (funding.ts), whose
+   * refusals (`account_not_set_up`/`not_deployed`/`paused`/
+   * `recipient_not_registered`/`over_account_limit`/`insufficient_funds`)
+   * always prefix the reason with `"funding: <code>: ..."`. Deliberately NOT
+   * a dedicated `funding_blocked` state, unlike `merchant_blocked`/
+   * `provenance_blocked`/`intercepta_blocked`: a new top-level state would
+   * break the site's exhaustive `plainReason` switch
+   * (apps/site/src/lib/decisionCopy.ts), which this change does not touch. */
   "policy_rejected",
   /** H1 fix — the firewall's own self-fetch of `resourceUrl` (merchant.ts)
    * disagrees with what the agent forwarded (payee_mismatch/
@@ -210,5 +221,15 @@ export const decisionReceiptSchema = z.object({
   txHash: z.string().optional(),
   explorerUrl: z.string().optional(),
   settlement: settlementSchema.optional(),
+  /**
+   * P11.2 — who actually paid: the account's own `OmamorisanAccount` smart
+   * contract for a world_id promise, or the firewall's operator EOA for a
+   * legacy wallet-signed intent. Set once, at signing time, only on a `pay`
+   * receipt; `undefined` for any refusal/ask_human receipt (nothing was ever
+   * signed, so there's no payer to report) or one persisted before this
+   * field existed.
+   */
+  payer: z.string().optional(),
+  payerKind: z.enum(["smart_account", "firewall"]).optional(),
 });
 export type DecisionReceipt = z.infer<typeof decisionReceiptSchema>;

@@ -57,6 +57,10 @@ export interface FinalizeInput {
   verdict: Verdict;
   reason: string;
   paymentSignature?: string;
+  /** P11.2 — who actually paid, set once at signing time (pipeline.ts,
+   * approvals.ts); `undefined` for a receipt that never resolved a payer. */
+  payer?: string;
+  payerKind?: DecisionReceipt["payerKind"];
   cache: boolean;
   /** Reuse an existing receiptId/createdAt instead of minting a new one — set
    * by the World ID gate when it resolves a receipt it already returned to
@@ -83,6 +87,8 @@ export function buildReceipt(input: FinalizeInput): DecisionReceipt {
     jev: input.jev,
     intercepta: input.intercepta,
     worldId: input.worldId,
+    payer: input.payer,
+    payerKind: input.payerKind,
   };
 }
 

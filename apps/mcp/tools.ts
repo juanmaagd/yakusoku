@@ -195,6 +195,20 @@ async function fetchSetupLink(firewallUrl: string, accountKey: string): Promise<
   return body as SetupLinkResponse;
 }
 
+/** Best-effort setup link for an account key — regardless of whether the
+ * smart account is deployed yet: pre-deploy it's where the human finishes
+ * setup, post-deploy (P11.2's funding refusals) it's still where the human
+ * can see the account's live address/balance to fund, unpause, or register a
+ * recipient. Never throws — a transient failure just means no `setupUrl` is
+ * attached to whatever response called this. */
+async function fetchSetupUrlBestEffort(firewallUrl: string, accountKey: string): Promise<string | undefined> {
+  try {
+    return (await fetchSetupLink(firewallUrl, accountKey)).setupUrl;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Shared by `connect`/`check_connection` (on `connected`) and the P9.6
  * no-credential `request_promise` path (on `active`): if the account still
  * has no smart account deployed, mints a setup link and a one-line "next
@@ -206,10 +220,47 @@ async function maybeSetupHint(firewallUrl: string, accountKey: string): Promise<
   try {
     const account = await fetchAccount(firewallUrl, accountKey);
     if (account.smartAccount) return {};
-    const link = await fetchSetupLink(firewallUrl, accountKey);
-    return { setupUrl: link.setupUrl, nextStep: `Next: open ${link.setupUrl} to link your wallet and fund your account.` };
+    const setupUrl = await fetchSetupUrlBestEffort(firewallUrl, accountKey);
+    return setupUrl ? { setupUrl, nextStep: `Next: open ${setupUrl} to link your wallet and fund your account.` } : {};
   } catch {
     return {};
+  }
+}
+
+// --- P11.2 funding refusals: actionable hints --------------------------------
+//
+// Every funding-stage refusal (funding.ts) prefixes the firewall's `reason`
+// with `"funding: <code>: ..."` (pipeline.ts's `evaluateStages` wraps every
+// stage's own reason with its stage name) — parsed back out here so a
+// refused `pay_x402`/`check_approval` call tells the agent (and, through it,
+// the human) exactly what to do next instead of just relaying the raw
+// machine reason string.
+
+const FUNDING_STAGE_PREFIX = "funding: ";
+
+function fundingRefusalCode(reason: string): string | undefined {
+  if (!reason.startsWith(FUNDING_STAGE_PREFIX)) return undefined;
+  const rest = reason.slice(FUNDING_STAGE_PREFIX.length);
+  const colon = rest.indexOf(":");
+  return colon === -1 ? rest : rest.slice(0, colon);
+}
+
+function fundingRefusalHint(code: string, setupUrl: string | undefined): string {
+  const where = setupUrl ? ` at ${setupUrl}` : "";
+  switch (code) {
+    case "account_not_set_up":
+    case "not_deployed":
+      return `Call setup_account to deploy this account's smart account before it can pay${where}.`;
+    case "insufficient_funds":
+      return `Ask the human to deposit more USDC into the account's smart account${where}.`;
+    case "recipient_not_registered":
+      return `Ask the account owner to register this merchant as an allowed recipient${where} before retrying.`;
+    case "over_account_limit":
+      return `This payment exceeds the account's per-payment limit — ask the owner to raise it${where}, or try a smaller amount.`;
+    case "paused":
+      return `This account is paused — ask the owner to unpause it${where} before retrying.`;
+    default:
+      return `This payment could not proceed because of the account's on-chain funding rules${where}.`;
   }
 }
 
@@ -289,6 +340,17 @@ async function handleSignVerdict(
       receiptId: sign.receiptId,
       instructions:
         "Ask the human to open verificationUri (World App) and approve, then call check_approval with this receiptId.",
+    };
+  }
+  const fundingCode = fundingRefusalCode(sign.reason);
+  if (fundingCode) {
+    const setupUrl = await fetchSetupUrlBestEffort(firewallUrl, agentKey);
+    return {
+      status: "refused",
+      reason: sign.reason,
+      receiptId: sign.receiptId,
+      actionableHint: fundingRefusalHint(fundingCode, setupUrl),
+      ...(setupUrl ? { setupUrl } : {}),
     };
   }
   return { status: "refused", reason: sign.reason, receiptId: sign.receiptId };
